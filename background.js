@@ -125,11 +125,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     console.log(`Processing ${images.length} images from ${sourceInfo.url}`);
     
-    // Check if we have valid settings before proceeding
-    if (!isConfigValid()) {
+    // Check if we have valid settings for cloud storage or local download is enabled
+    if (!isConfigValid() && (!CONFIG.local || !CONFIG.local.enabled)) {
       sendResponse({
         success: false, 
-        error: 'Storage settings not configured. Please go to extension settings.'
+        error: 'Storage settings not configured and local download is disabled. Please go to extension settings.'
       });
       
       // Open settings page
@@ -207,16 +207,58 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }
     
-    // Upload the screenshot
-    uploadToStorage(blob, filename, { type: 'screenshot' }, metadata, domain)
-      .then(result => {
-        sendResponse({
-          success: true,
-          url: result.url
-        });
+    console.log('Processing screenshot with current config:', CONFIG);
+    
+    const promises = [];
+    
+    // Save locally if enabled
+    if (CONFIG.local && CONFIG.local.enabled) {
+      console.log('Local saving is enabled, attempting to save screenshot to disk');
+      promises.push(saveToLocalDisk(blob, filename, { type: 'screenshot' }, metadata, domain));
+    } else {
+      console.log('Local saving is disabled or not configured:', CONFIG.local);
+    }
+    
+    // Upload to cloud storage if configured
+    if (isConfigValid()) {
+      console.log('Cloud storage is configured, attempting screenshot upload');
+      promises.push(uploadToStorage(blob, filename, { type: 'screenshot' }, metadata, domain));
+    } else {
+      console.log('Cloud storage not configured or invalid settings');
+    }
+    
+    if (promises.length === 0) {
+      console.error('No storage methods enabled. Enable local download or configure cloud storage.');
+      sendResponse({
+        success: false,
+        error: 'No storage methods enabled. Please configure at least one storage method in settings.'
+      });
+      return true;
+    }
+    
+    // Wait for all operations to complete
+    Promise.all(promises)
+      .then(results => {
+        console.log('Screenshot save operations completed:', results);
+        
+        // Filter successful results
+        const successfulResults = results.filter(r => r && r.success);
+        console.log('Successful operations:', successfulResults.length);
+        
+        if (successfulResults.length > 0) {
+          sendResponse({
+            success: true,
+            url: successfulResults[0].url || 'File saved'
+          });
+        } else {
+          sendResponse({
+            success: false,
+            error: 'Failed to save screenshot'
+          });
+        }
       })
       .catch(error => {
-        console.error('Error uploading screenshot:', error);
+        console.error('Error processing screenshot:', error);
         sendResponse({
           success: false,
           error: error.message
@@ -329,15 +371,51 @@ async function processImage(image, sourceInfo) {
       }
     }
     
-    // Upload to storage
-    const uploadResult = await uploadToStorage(imageBlob, filename, image, sourceInfo, domain);
+    console.log('Processing image with current config:', CONFIG);
     
-    console.log(`Successfully uploaded ${filename}`);
+    const promises = [];
     
-    return { 
-      success: true, 
-      image, 
-      result: uploadResult 
+    // Save locally if enabled
+    if (CONFIG.local && CONFIG.local.enabled) {
+      console.log('Local saving is enabled, attempting to save to disk');
+      promises.push(saveToLocalDisk(imageBlob, filename, image, sourceInfo, domain));
+    } else {
+      console.log('Local saving is disabled or not configured:', CONFIG.local);
+    }
+    
+    // Upload to cloud storage if configured
+    if (isConfigValid()) {
+      console.log('Cloud storage is configured, attempting upload');
+      promises.push(uploadToStorage(imageBlob, filename, image, sourceInfo, domain));
+    } else {
+      console.log('Cloud storage not configured or invalid settings');
+    }
+    
+    if (promises.length === 0) {
+      console.error('No storage methods enabled. Enable local download or configure cloud storage.');
+      throw new Error('No storage methods enabled');
+    }
+    
+    // Wait for all operations to complete
+    console.log(`Starting ${promises.length} save operations`);
+    const results = await Promise.all(promises);
+    console.log('Save operations completed:', results);
+    
+    // Filter successful results
+    const successfulResults = results.filter(r => r && r.success);
+    console.log('Successful operations:', successfulResults.length);
+    
+    // If at least one operation succeeded, consider the overall process a success
+    if (successfulResults.length > 0) {
+      console.log(`Successfully saved ${filename}`);
+      
+      return { 
+        success: true, 
+        image, 
+        results: successfulResults 
+      };
+    } else {
+      throw new Error('All save operations failed');
     };
   } catch (error) {
     console.error(`Error processing ${image.url}:`, error);
@@ -763,6 +841,9 @@ async function uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settin
 // Save file to local disk using the Chrome Downloads API
 async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '') {
   try {
+    console.log('Starting local download for:', filename);
+    console.log('Local download settings:', CONFIG.local);
+    
     // Prepare path with optional domain subfolder
     let path = '';
     
@@ -770,10 +851,12 @@ async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '
     if (CONFIG.local.subfolderPerDomain && domain) {
       const sanitizedDomain = sanitizeDomain(domain);
       path = sanitizedDomain + '/';
+      console.log('Using domain folder:', path);
     }
     
     // Create a URL for the blob
     const blobUrl = URL.createObjectURL(blob);
+    console.log('Created blob URL:', blobUrl);
     
     // Prepare download options
     const downloadOptions = {
@@ -783,8 +866,12 @@ async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '
       conflictAction: 'uniquify' // Automatically rename if file exists
     };
     
+    console.log('Download options:', downloadOptions);
+    
     // Start the download
+    console.log('Initiating chrome.downloads.download...');
     const downloadId = await chrome.downloads.download(downloadOptions);
+    console.log('Download started with ID:', downloadId);
     
     // Revoke the blob URL after download starts
     URL.revokeObjectURL(blobUrl);
@@ -792,8 +879,10 @@ async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '
     // Listen for download completion
     return new Promise((resolve, reject) => {
       const downloadListener = (delta) => {
+        console.log('Download status change:', delta);
         if (delta.id === downloadId && delta.state) {
           if (delta.state.current === 'complete') {
+            console.log('Download completed successfully');
             chrome.downloads.onChanged.removeListener(downloadListener);
             resolve({
               success: true,
@@ -801,6 +890,7 @@ async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '
               path: path + filename
             });
           } else if (delta.state.current === 'interrupted') {
+            console.error('Download interrupted:', delta.error);
             chrome.downloads.onChanged.removeListener(downloadListener);
             reject(new Error(`Download failed: ${delta.error?.current || 'unknown error'}`));
           }
@@ -811,6 +901,7 @@ async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '
     });
   } catch (error) {
     console.error('Local download error:', error);
+    console.error(error.stack);
     return {
       success: false,
       error: `Local download failed: ${error.message}`
