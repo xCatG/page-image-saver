@@ -279,7 +279,11 @@ function createImageSelectionUI(images) {
       height: 185px;
       display: flex;
       flex-direction: column;
+      cursor: pointer;
     `;
+    
+    // Add data attribute for tracking
+    imgContainer.dataset.index = index;
     
     // Create checkbox for selection
     const checkbox = document.createElement('input');
@@ -334,6 +338,7 @@ function createImageSelectionUI(images) {
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       margin-bottom: 2px;
+      pointer-events: none;
     `;
     
     // Set description text
@@ -345,6 +350,7 @@ function createImageSelectionUI(images) {
       font-size: 11px;
       color: #666;
       margin-top: 2px;
+      pointer-events: none;
     `;
     
     // Add size information
@@ -359,6 +365,19 @@ function createImageSelectionUI(images) {
     imgContainer.appendChild(info);
     imgContainer.appendChild(dimensionsInfo);
     imageList.appendChild(imgContainer);
+    
+    // Add click event to the container - toggle checkbox when clicking anywhere on the item
+    imgContainer.addEventListener('click', (event) => {
+      // Don't toggle if clicking directly on the checkbox (let the checkbox handle itself)
+      if (event.target !== checkbox) {
+        // Prevent event bubbling
+        event.preventDefault();
+        event.stopPropagation();
+        
+        // Toggle the checkbox
+        checkbox.checked = !checkbox.checked;
+      }
+    });
   });
   
   container.appendChild(imageList);
@@ -519,7 +538,11 @@ function updateImageList(filteredImages) {
       height: 185px;
       display: flex;
       flex-direction: column;
+      cursor: pointer;
     `;
+    
+    // Add data attribute for tracking
+    imgContainer.dataset.index = index;
     
     // Create checkbox for selection
     const checkbox = document.createElement('input');
@@ -574,6 +597,7 @@ function updateImageList(filteredImages) {
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       margin-bottom: 2px;
+      pointer-events: none;
     `;
     
     // Set description text
@@ -585,6 +609,7 @@ function updateImageList(filteredImages) {
       font-size: 11px;
       color: #666;
       margin-top: 2px;
+      pointer-events: none;
     `;
     
     // Add size information
@@ -599,6 +624,19 @@ function updateImageList(filteredImages) {
     imgContainer.appendChild(info);
     imgContainer.appendChild(dimensionsInfo);
     imageList.appendChild(imgContainer);
+    
+    // Add click event to the container - toggle checkbox when clicking anywhere on the item
+    imgContainer.addEventListener('click', (event) => {
+      // Don't toggle if clicking directly on the checkbox (let the checkbox handle itself)
+      if (event.target !== checkbox) {
+        // Prevent event bubbling
+        event.preventDefault();
+        event.stopPropagation();
+        
+        // Toggle the checkbox
+        checkbox.checked = !checkbox.checked;
+      }
+    });
   });
 }
 

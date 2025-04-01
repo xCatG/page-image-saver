@@ -1,0 +1,8 @@
+Make entire image card clickable for selection
+
+- Made the entire image area clickable to toggle selection
+- Added cursor pointer to indicate clickable areas
+- Prevented event propagation to avoid conflicts
+- Ensured checkbox still functions normally when clicked directly
+- Applied the same behavior to both initial image list and filtered results
+- Added pointer-events:none to text elements to prevent click handling issues

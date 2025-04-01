@@ -1,9 +1,0 @@
-Add local file saving functionality
-
-- Added ability to save images to local Downloads folder in addition to cloud storage
-- Implemented option to save images in domain-specific subfolders locally
-- Updated settings UI to control local download behavior
-- Modified image processing workflow to support parallel saving to local disk
-- Added downloads permission to manifest.json
-- Updated configuration storage and loading to handle new local settings
-- Maintains backward compatibility with existing settings
