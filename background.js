@@ -757,55 +757,64 @@ async function uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settin
       success: false,
       error: `R2 upload failed: ${error.message}`
     };
-  }.accountId}/r2/buckets/${r2Config.bucketName}/objects/${encodeURIComponent(fullPath)}`;
+  }
+}
+
+// Save file to local disk using the Chrome Downloads API
+async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '') {
+  try {
+    // Prepare path with optional domain subfolder
+    let path = '';
     
-    // Prepare headers
-    const headers = {
-      'Authorization': `Bearer ${r2Config.apiToken}`,
-      'Content-Type': blob.type
-    };
-    
-    // Add metadata headers if needed
-    if (addMetadata && sourceInfo) {
-      headers['X-Amz-Meta-Source-Url'] = sourceInfo.url || '';
-      headers['X-Amz-Meta-Source-Title'] = sourceInfo.title || '';
-      headers['X-Amz-Meta-Upload-Date'] = sourceInfo.timestamp || new Date().toISOString();
+    // Add domain subfolder if enabled
+    if (CONFIG.local.subfolderPerDomain && domain) {
+      const sanitizedDomain = sanitizeDomain(domain);
+      path = sanitizedDomain + '/';
     }
     
-    // Execute the upload directly using fetch
-    const response = await fetch(endpoint, {
-      method: 'PUT',
-      headers: headers,
-      body: blob
+    // Create a URL for the blob
+    const blobUrl = URL.createObjectURL(blob);
+    
+    // Prepare download options
+    const downloadOptions = {
+      url: blobUrl,
+      filename: path + filename,
+      saveAs: false, // Don't show save dialog
+      conflictAction: 'uniquify' // Automatically rename if file exists
+    };
+    
+    // Start the download
+    const downloadId = await chrome.downloads.download(downloadOptions);
+    
+    // Revoke the blob URL after download starts
+    URL.revokeObjectURL(blobUrl);
+    
+    // Listen for download completion
+    return new Promise((resolve, reject) => {
+      const downloadListener = (delta) => {
+        if (delta.id === downloadId && delta.state) {
+          if (delta.state.current === 'complete') {
+            chrome.downloads.onChanged.removeListener(downloadListener);
+            resolve({
+              success: true,
+              type: 'local',
+              path: path + filename
+            });
+          } else if (delta.state.current === 'interrupted') {
+            chrome.downloads.onChanged.removeListener(downloadListener);
+            reject(new Error(`Download failed: ${delta.error?.current || 'unknown error'}`));
+          }
+        }
+      };
+      
+      chrome.downloads.onChanged.addListener(downloadListener);
     });
-    
-    // Handle the response
-    if (!response.ok) {
-      const errorData = await response.text();
-      throw new Error(`Failed to upload to R2: ${response.status} ${response.statusText} - ${errorData}`);
-    }
-    
-    // Construct the URL to the uploaded file
-    let fileUrl;
-    if (r2Config.makePublic) {
-      // Public URL format - requires a Cloudflare Worker or R2 public access enabled
-      fileUrl = `https://${r2Config.bucketName}.${r2Config.accountId}.r2.dev/${fullPath}`;
-    } else {
-      // For private objects, we just return a placeholder
-      fileUrl = `r2://${r2Config.bucketName}/${fullPath}`;
-    }
-    
-    return {
-      url: fileUrl,
-      size: blob.size,
-      type: blob.type,
-      path: fullPath,
-      bucket: r2Config.bucketName,
-      sourceInfo: addMetadata ? sourceInfo : null
-    };
   } catch (error) {
-    console.error('R2 upload error with API token:', error);
-    throw new Error(`R2 upload failed: ${error.message}`);
+    console.error('Local download error:', error);
+    return {
+      success: false,
+      error: `Local download failed: ${error.message}`
+    };
   }
 }
 
