@@ -1,0 +1,21 @@
+{
+  "name": "page-image-saver",
+  "version": "1.0.0",
+  "description": "Chrome extension to save web page images to S3 or R2",
+  "author": "Your Name",
+  "license": "MIT",
+  "scripts": {
+    "package": "mkdir -p dist && zip -r dist/page-image-saver.zip manifest.json *.js *.md icons/*.svg"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/page-image-saver"
+  },
+  "keywords": [
+    "chrome-extension",
+    "image-downloader",
+    "s3",
+    "r2",
+    "cloudflare"
+  ]
+}

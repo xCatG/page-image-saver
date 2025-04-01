@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Page Image Saver - Settings</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      color: #333;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #4285F4;
+      margin-top: 0;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eee;
+    }
+    .info {
+      background-color: #f8f9fa;
+      border-left: 4px solid #4285F4;
+      padding: 10px 15px;
+      margin-bottom: 20px;
+    }
+    .form-section {
+      margin-bottom: 30px;
+      padding: 15px;
+      border-radius: 8px;
+      background-color: #f8f9fa;
+    }
+    .form-section h2 {
+      margin-top: 0;
+      font-size: 18px;
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input[type="text"], 
+    input[type="password"],
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    .checkbox-group label {
+      margin-bottom: 0;
+      margin-left: 8px;
+      font-weight: normal;
+    }
+    .hidden {
+      display: none;
+    }
+    .buttons {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .primary-button {
+      background-color: #4285F4;
+      color: white;
+    }
+    .danger-button {
+      background-color: #EA4335;
+      color: white;
+    }
+    .help-text {
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+    }
+    .alert {
+      padding: 10px 15px;
+      margin-bottom: 15px;
+      border-radius: 4px;
+    }
+    .alert-success {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    .alert-error {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    .alert-info {
+      background-color: #d1ecf1;
+      color: #0c5460;
+    }
+    .auth-option {
+      margin-bottom: 15px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background-color: white;
+    }
+    .auth-option-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .auth-option-title {
+      font-weight: bold;
+      margin-left: 8px;
+    }
+    .domain-filters {
+      width: 100%;
+      margin-top: 15px;
+      border-collapse: collapse;
+    }
+    .domain-filters th, .domain-filters td {
+      padding: 8px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    .domain-filters th {
+      background-color: #f2f2f2;
+    }
+    .domain-filters tr:hover {
+      background-color: #f5f5f5;
+    }
+    .domain-filters .filter-actions {
+      display: flex;
+      gap: 5px;
+    }
+    .filter-actions button {
+      padding: 3px 8px;
+      font-size: 12px;
+    }
+    .flex-input-group {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .flex-input-group .input-item {
+      flex: 1;
+    }
+    .flex-input-group .input-item input {
+      width: 100%;
+    }
+    .flex-input-group button {
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>Page Image Saver - Settings</h1>
+  
+  <div class="info">
+    Configure your storage settings to enable saving images and screenshots. Your credentials will be stored locally and are only used to upload images to your own storage.
+  </div>
+
+  <div id="status-message"></div>
+  
+  <form id="settings-form">
+    <div class="form-section">
+      <h2>Storage Provider</h2>
+      <div class="input-group">
+        <label for="storage-type">Select your storage provider:</label>
+        <select id="storage-type" name="storageType">
+          <option value="s3">AWS S3</option>
+          <option value="r2">Cloudflare R2</option>
+        </select>
+      </div>
+    </div>
+    
+    <!-- AWS S3 Configuration -->
+    <div id="s3-config" class="form-section">
+      <h2>AWS S3 Configuration</h2>
+      
+      <div class="input-group">
+        <label for="s3-region">AWS Region:</label>
+        <input type="text" id="s3-region" name="s3Region" placeholder="e.g., us-east-1">
+        <div class="help-text">The AWS region where your S3 bucket is located</div>
+      </div>
+      
+      <div class="input-group">
+        <label for="s3-bucket">S3 Bucket Name:</label>
+        <input type="text" id="s3-bucket" name="s3Bucket" placeholder="e.g., my-image-bucket">
+        <div class="help-text">The name of your S3 bucket</div>
+      </div>
+      
+      <div class="input-group">
+        <label for="s3-folder">Folder Path (optional):</label>
+        <input type="text" id="s3-folder" name="s3Folder" placeholder="e.g., web-images/">
+        <div class="help-text">Optional subfolder within your bucket (add trailing slash)</div>
+      </div>
+      
+      <div class="input-group">
+        <label for="s3-access-key">Access Key ID:</label>
+        <input type="text" id="s3-access-key" name="s3AccessKey" placeholder="Your AWS access key ID">
+        <div class="help-text">Your AWS IAM user access key with S3 permissions</div>
+      </div>
+      
+      <div class="input-group">
+        <label for="s3-secret-key">Secret Access Key:</label>
+        <input type="password" id="s3-secret-key" name="s3SecretKey" placeholder="Your AWS secret access key">
+        <div class="help-text">Your AWS IAM user secret key with S3 permissions</div>
+      </div>
+      
+      <div class="checkbox-group">
+        <input type="checkbox" id="s3-public" name="s3Public">
+        <label for="s3-public">Make uploaded files publicly accessible</label>
+      </div>
+    </div>
+    
+    <!-- Cloudflare R2 Configuration -->
+    <div id="r2-config" class="form-section hidden">
+      <h2>Cloudflare R2 Configuration</h2>
+      
+      <div class="input-group">
+        <label for="r2-account-id">Cloudflare Account ID:</label>
+        <input type="text" id="r2-account-id" name="r2AccountId" placeholder="Your Cloudflare account ID">
+        <div class="help-text">Your Cloudflare account identifier (found in the URL when you're logged in to Cloudflare dashboard)</div>
+      </div>
+      
+      <div class="input-group">
+        <label for="r2-bucket">R2 Bucket Name:</label>
+        <input type="text" id="r2-bucket" name="r2Bucket" placeholder="e.g., my-images">
+        <div class="help-text">The name of your R2 bucket</div>
+      </div>
+      
+      <div class="input-group">
+        <label for="r2-folder">Folder Path (optional):</label>
+        <input type="text" id="r2-folder" name="r2Folder" placeholder="e.g., web-images/">
+        <div class="help-text">Optional subfolder within your bucket (add trailing slash)</div>
+      </div>
+      
+      <div class="input-group">
+        <h3>Authentication Method</h3>
+        
+        <div class="auth-option">
+          <div class="auth-option-header">
+            <input type="radio" id="r2-auth-api-keys" name="r2AuthMethod" value="api-keys" checked>
+            <label class="auth-option-title" for="r2-auth-api-keys">API Keys (S3-compatible)</label>
+          </div>
+          <div class="help-text">Use R2 API Keys (Access Key ID and Secret Access Key)</div>
+        </div>
+        
+        <div class="auth-option">
+          <div class="auth-option-header">
+            <input type="radio" id="r2-auth-token" name="r2AuthMethod" value="token">
+            <label class="auth-option-title" for="r2-auth-token">API Token</label>
+          </div>
+          <div class="help-text">Use a Cloudflare API Token with R2 permissions</div>
+        </div>
+      </div>
+      
+      <!-- API Keys Auth Fields -->
+      <div id="r2-api-keys-fields">
+        <div class="input-group">
+          <label for="r2-access-key">Access Key ID:</label>
+          <input type="text" id="r2-access-key" name="r2AccessKey" placeholder="Your R2 access key ID">
+          <div class="help-text">Your R2 API access key</div>
+        </div>
+        
+        <div class="input-group">
+          <label for="r2-secret-key">Secret Access Key:</label>
+          <input type="password" id="r2-secret-key" name="r2SecretKey" placeholder="Your R2 secret access key">
+          <div class="help-text">Your R2 API secret key</div>
+        </div>
+      </div>
+      
+      <!-- API Token Auth Field -->
+      <div id="r2-token-field" class="hidden">
+        <div class="input-group">
+          <label for="r2-api-token">Cloudflare API Token:</label>
+          <input type="password" id="r2-api-token" name="r2ApiToken" placeholder="Your Cloudflare API token">
+          <div class="help-text">API token with R2 bucket access (created in Cloudflare dashboard)</div>
+        </div>
+      </div>
+      
+      <div class="checkbox-group">
+        <input type="checkbox" id="r2-public" name="r2Public">
+        <label for="r2-public">Make uploaded files publicly accessible</label>
+      </div>
+    </div>
+    
+    <!-- Domain-specific Image Size Filters -->
+    <div class="form-section">
+      <h2>Domain-specific Image Size Filters</h2>
+      <p>Set minimum image dimensions for specific domains. Images smaller than these dimensions will be filtered out.</p>
+      
+      <div class="flex-input-group">
+        <div class="input-item">
+          <label for="new-domain">Domain:</label>
+          <input type="text" id="new-domain" name="newDomain" placeholder="e.g., example.com">
+        </div>
+        <div class="input-item">
+          <label for="new-min-width">Min Width (px):</label>
+          <input type="number" id="new-min-width" name="newMinWidth" value="50" min="0">
+        </div>
+        <div class="input-item">
+          <label for="new-min-height">Min Height (px):</label>
+          <input type="number" id="new-min-height" name="newMinHeight" value="50" min="0">
+        </div>
+        <button type="button" id="add-domain-filter" class="primary-button">Add Filter</button>
+      </div>
+      
+      <div style="margin-top: 15px;">
+        <table class="domain-filters" id="domain-filters-table">
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Min Width (px)</th>
+              <th>Min Height (px)</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="domain-filters-body">
+            <!-- Filters will be loaded here -->
+          </tbody>
+        </table>
+      </div>
+      
+      <div style="margin-top: 10px;">
+        <button type="button" id="clear-domain-filters" class="danger-button">Clear All Filters</button>
+      </div>
+    </div>
+    
+    <!-- General Settings -->
+    <div class="form-section">
+      <h2>General Settings</h2>
+      
+      <div class="checkbox-group">
+        <input type="checkbox" id="preserve-filenames" name="preserveFilenames" checked>
+        <label for="preserve-filenames">Preserve original filenames when possible</label>
+      </div>
+      
+      <div class="checkbox-group">
+        <input type="checkbox" id="add-metadata" name="addMetadata" checked>
+        <label for="add-metadata">Add page metadata to uploads (URL, title, timestamp)</label>
+      </div>
+      
+      <div class="checkbox-group">
+        <input type="checkbox" id="use-domain-folders" name="useDomainFolders" checked>
+        <label for="use-domain-folders">Organize images by domain in subfolders</label>
+        <div class="help-text">Creates separate folders for each website domain</div>
+      </div>
+      
+      <div class="input-group">
+        <label for="min-file-size">Minimum File Size (KB):</label>
+        <input type="number" id="min-file-size" name="minFileSize" value="5" min="0" max="1000">
+        <div class="help-text">Skip files smaller than this size (helps avoid small icons/spacers)</div>
+      </div>
+      
+      <div class="input-group">
+        <label for="concurrent-uploads">Maximum Concurrent Uploads:</label>
+        <select id="concurrent-uploads" name="maxConcurrentUploads">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="5">5</option>
+          <option value="10">10</option>
+        </select>
+        <div class="help-text">Limit simultaneous uploads to avoid rate limiting</div>
+      </div>
+    </div>
+    
+    <div class="buttons">
+      <button type="button" id="test-connection" class="primary-button">Test Connection</button>
+      <button type="submit" class="primary-button">Save Settings</button>
+    </div>
+  </form>
+
+  <script src="settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Page Image Saver",
+  "version": "1.0",
+  "description": "Save images from web pages to your S3/R2 storage and capture full-page screenshots",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Find Images on Page",
+    "default_icon": {
+      "16": "icons/16.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["screenshot.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "commands": {
+    "find_images": {
+      "suggested_key": {
+        "default": "Alt+Shift+I"
+      },
+      "description": "Find images on the current page"
+    },
+    "take_screenshot": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Take a screenshot of the current page"
+    }
+  },
+  "options_page": "settings.html"
+}
