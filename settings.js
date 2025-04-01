@@ -101,6 +101,12 @@ document.addEventListener('DOMContentLoaded', () => {
       
       document.getElementById('r2-public').checked = settings.r2.makePublic || false;
       
+      // Set local download settings
+      if (settings.local) {
+        document.getElementById('local-enabled').checked = settings.local.enabled !== false; // Default to true
+        document.getElementById('local-subfolder-domain').checked = settings.local.subfolderPerDomain !== false; // Default to true
+      }
+      
       // Set general settings
       document.getElementById('preserve-filenames').checked = settings.preserveFilenames;
       document.getElementById('add-metadata').checked = settings.addMetadata;
@@ -147,6 +153,10 @@ document.addEventListener('DOMContentLoaded', () => {
         secretAccessKey: useR2ApiToken ? '' : document.getElementById('r2-secret-key').value,
         apiToken: useR2ApiToken ? document.getElementById('r2-api-token').value : '',
         makePublic: document.getElementById('r2-public').checked
+      },
+      local: {
+        enabled: document.getElementById('local-enabled').checked,
+        subfolderPerDomain: document.getElementById('local-subfolder-domain').checked
       },
       preserveFilenames: document.getElementById('preserve-filenames').checked,
       addMetadata: document.getElementById('add-metadata').checked,
@@ -382,6 +392,10 @@ document.addEventListener('DOMContentLoaded', () => {
         secretAccessKey: '',
         apiToken: '',
         makePublic: false
+      },
+      local: {
+        enabled: true,
+        subfolderPerDomain: true
       },
       preserveFilenames: true,
       addMetadata: true,

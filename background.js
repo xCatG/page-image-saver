@@ -743,6 +743,59 @@ async function uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settin
     }
     
     return {
+      success: true,
+      url: fileUrl,
+      size: blob.size,
+      type: blob.type,
+      path: fullPath,
+      bucket: r2Config.bucketName,
+      sourceInfo: addMetadata ? sourceInfo : null
+    };
+  } catch (error) {
+    console.error('R2 upload error with API token:', error);
+    return {
+      success: false,
+      error: `R2 upload failed: ${error.message}`
+    };
+  }.accountId}/r2/buckets/${r2Config.bucketName}/objects/${encodeURIComponent(fullPath)}`;
+    
+    // Prepare headers
+    const headers = {
+      'Authorization': `Bearer ${r2Config.apiToken}`,
+      'Content-Type': blob.type
+    };
+    
+    // Add metadata headers if needed
+    if (addMetadata && sourceInfo) {
+      headers['X-Amz-Meta-Source-Url'] = sourceInfo.url || '';
+      headers['X-Amz-Meta-Source-Title'] = sourceInfo.title || '';
+      headers['X-Amz-Meta-Upload-Date'] = sourceInfo.timestamp || new Date().toISOString();
+    }
+    
+    // Execute the upload directly using fetch
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: headers,
+      body: blob
+    });
+    
+    // Handle the response
+    if (!response.ok) {
+      const errorData = await response.text();
+      throw new Error(`Failed to upload to R2: ${response.status} ${response.statusText} - ${errorData}`);
+    }
+    
+    // Construct the URL to the uploaded file
+    let fileUrl;
+    if (r2Config.makePublic) {
+      // Public URL format - requires a Cloudflare Worker or R2 public access enabled
+      fileUrl = `https://${r2Config.bucketName}.${r2Config.accountId}.r2.dev/${fullPath}`;
+    } else {
+      // For private objects, we just return a placeholder
+      fileUrl = `r2://${r2Config.bucketName}/${fullPath}`;
+    }
+    
+    return {
       url: fileUrl,
       size: blob.size,
       type: blob.type,
@@ -756,7 +809,7 @@ async function uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settin
   }
 }
 
-// Check if the configuration is valid for storage operations
+// Check if the configuration is valid for cloud storage operations
 function isConfigValid() {
   if (CONFIG.useS3) {
     return !!(CONFIG.s3.accessKeyId && CONFIG.s3.secretAccessKey && CONFIG.s3.bucketName);
