@@ -105,6 +105,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (settings.local) {
         document.getElementById('local-enabled').checked = settings.local.enabled !== false; // Default to true
         document.getElementById('local-subfolder-domain').checked = settings.local.subfolderPerDomain !== false; // Default to true
+        
+        // Set base folder if it exists
+        if (document.getElementById('local-base-folder')) {
+          document.getElementById('local-base-folder').value = settings.local.baseFolder || 'PageImageSaver';
+        }
       }
       
       // Set general settings
@@ -156,7 +161,9 @@ document.addEventListener('DOMContentLoaded', () => {
       },
       local: {
         enabled: document.getElementById('local-enabled').checked,
-        subfolderPerDomain: document.getElementById('local-subfolder-domain').checked
+        subfolderPerDomain: document.getElementById('local-subfolder-domain').checked,
+        baseFolder: document.getElementById('local-base-folder') ? 
+          document.getElementById('local-base-folder').value.trim() || 'PageImageSaver' : 'PageImageSaver'
       },
       preserveFilenames: document.getElementById('preserve-filenames').checked,
       addMetadata: document.getElementById('add-metadata').checked,

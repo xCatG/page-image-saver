@@ -1,4 +1,34 @@
 //background.js
+// Debugging helper - will show a notification with download paths
+function showSavePathNotification(path) {
+  chrome.notifications.create({
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: 'Image Saved',
+    message: `File saved to:\n${path}`,
+    priority: 2
+  });
+}
+
+// Add a debug command to show download directory
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'debugShowDownloadPaths') {
+    chrome.downloads.search({}, (downloads) => {
+      if (downloads && downloads.length > 0) {
+        // Get the most recent download
+        const recentDownload = downloads[0];
+        debugLog('MOST RECENT DOWNLOAD PATH:', recentDownload.filename);
+        // Show a notification with the path
+        showSavePathNotification(recentDownload.filename);
+        sendResponse({success: true, path: recentDownload.filename});
+      } else {
+        sendResponse({success: false, error: 'No downloads found'});
+      }
+    });
+    return true; // Keep the message channel open for async response
+  }
+});
+
 // Default configuration (will be overridden by user settings)
 const DEFAULT_CONFIG = {
   // Set to true to use S3, false to use R2
@@ -24,6 +54,13 @@ const DEFAULT_CONFIG = {
     secretAccessKey: '',
     apiToken: '',
     makePublic: false
+  },
+  
+  // Local download settings
+  local: {
+    enabled: true,
+    subfolderPerDomain: true,
+    baseFolder: 'PageImageSaver'
   },
   
   // General settings
@@ -70,10 +107,129 @@ chrome.contextMenus.create({
   contexts: ['action'] // Only show when clicking on extension icon
 });
 
+// Add a debug menu item to check download paths
+chrome.contextMenus.create({
+  id: 'debugDownloadPath',
+  title: 'Debug: Show Download Location',
+  contexts: ['action'] // Only show when clicking on extension icon
+});
+
+// If we're in Edge, add an Edge-specific option
+if (detectBrowser() === "Edge") {
+  chrome.contextMenus.create({
+    id: 'edgeFilenameMode',
+    title: 'Edge Mode: Always Show Save Dialog',
+    contexts: ['action']
+  });
+}
+
 // Handle context menu clicks
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'openSettings') {
     chrome.tabs.create({ url: 'settings.html' });
+  } else if (info.menuItemId === 'edgeFilenameMode') {
+    // Toggle a flag in storage for Edge mode
+    chrome.storage.local.get(['edgeMode'], (result) => {
+      const currentMode = result.edgeMode || false;
+      const newMode = !currentMode;
+      
+      chrome.storage.local.set({ edgeMode: newMode }, () => {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: 'icons/icon128.png',
+          title: 'Edge Save Mode',
+          message: newMode 
+            ? 'Edge Mode enabled: Save dialog will always be shown for downloads' 
+            : 'Edge Mode disabled: Using normal download behavior',
+          priority: 2
+        });
+      });
+    });
+  } else if (info.menuItemId === 'debugDownloadPath') {
+    // Show the user where downloads are saved
+    debugLog('Debug: Checking download locations');
+    chrome.downloads.search({}, (downloads) => {
+      if (downloads && downloads.length > 0) {
+        // Show the 3 most recent download locations
+        const recentDownloads = downloads.slice(0, 3);
+        recentDownloads.forEach(download => {
+          debugLog(`Recent download path: ${download.filename}`);
+          // Extract the directory path from the full file path
+          const filePath = download.filename;
+          const lastSlashIndex = filePath.lastIndexOf('/');
+          const lastBackslashIndex = filePath.lastIndexOf('\\');
+          const lastSeparatorIndex = Math.max(lastSlashIndex, lastBackslashIndex);
+          const directoryPath = lastSeparatorIndex > -1 ? filePath.substring(0, lastSeparatorIndex) : 'Unknown';
+          
+          // Show notification with the directory path
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Download Directory',
+            message: `Chrome is saving files to:\n${directoryPath}`,
+            priority: 2
+          });
+        });
+      } else {
+        debugLog('No recent downloads found');
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: 'icons/icon128.png',
+          title: 'Download Directory',
+          message: 'No recent downloads found to determine the directory.',
+          priority: 2
+        });
+      }
+    });
+    
+    // Add a test download with explicit filename to debug the Chrome downloads API behavior
+    debugLog('Creating test download with explicit filename...');
+    
+    // Create a simple text file
+    const testBlob = new Blob(['This is a test file to check filename behavior'], { type: 'text/plain' });
+    
+    // Convert blob to data URL
+    const reader = new FileReader();
+    reader.onload = function() {
+      const dataUrl = reader.result;
+      
+      // Try to download with explicit filename
+      const testFilename = `test_file_${Date.now()}.txt`;
+      debugLog(`Attempting to download with filename: ${testFilename}`);
+      
+      chrome.downloads.download({
+        url: dataUrl,
+        filename: testFilename,
+        saveAs: false,
+        conflictAction: 'uniquify'
+      }, (downloadId) => {
+        debugLog(`Test download started with ID: ${downloadId}`);
+        
+        // Check the actual filename used
+        setTimeout(() => {
+          chrome.downloads.search({ id: downloadId }, (results) => {
+            if (results && results.length > 0) {
+              const download = results[0];
+              const fullPath = download.filename;
+              const lastSeparatorIndex = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
+              const actualFilename = lastSeparatorIndex > -1 ? fullPath.substring(lastSeparatorIndex + 1) : fullPath;
+              
+              debugLog(`Test download filename: Expected "${testFilename}", Actual: "${actualFilename}"`);
+              debugLog(`Test download full path: ${fullPath}`);
+              
+              chrome.notifications.create({
+                type: 'basic',
+                iconUrl: 'icons/icon128.png',
+                title: 'Test Download Filename',
+                message: `Expected: ${testFilename}\nActual: ${actualFilename}`,
+                priority: 2
+              });
+            }
+          });
+        }, 1000); // Wait a second for the download to complete
+      });
+    };
+    reader.readAsDataURL(testBlob);
   }
 });
 
@@ -407,7 +563,16 @@ async function processImage(image, sourceInfo) {
     
     // If at least one operation succeeded, consider the overall process a success
     if (successfulResults.length > 0) {
-      console.log(`Successfully saved ${filename}`);
+      debugLog(`Successfully saved ${filename}`);
+      
+      // Log more detailed information about where files were saved
+      successfulResults.forEach(result => {
+        if (result.type === 'local' && result.fullPath) {
+          debugLog(`📁 IMAGE SAVED TO LOCAL PATH: ${result.fullPath}`);
+        } else if (result.url) {
+          debugLog(`🌐 IMAGE SAVED TO REMOTE URL: ${result.url}`);
+        }
+      });
       
       return { 
         success: true, 
@@ -447,38 +612,67 @@ async function downloadImage(url) {
 
 // Generate a valid filename from URL
 function getFilename(url, contentType) {
+  debugLog(`Generating filename from URL: ${url}`);
+  debugLog(`Content type: ${contentType}`);
+  
   try {
     // Try to extract the original filename if available
     if (CONFIG.preserveFilenames) {
+      debugLog(`Preserve filenames is enabled`);
       const urlObj = new URL(url);
       const pathname = urlObj.pathname;
       let filename = pathname.substring(pathname.lastIndexOf('/') + 1);
       
+      debugLog(`Original filename from pathname: "${filename}"`);
+      
       // Clean the filename (remove query parameters, etc.)
       filename = filename.split('?')[0].split('#')[0];
+      debugLog(`Cleaned filename: "${filename}"`);
       
       // If filename has a valid extension, use it
       if (filename && filename.includes('.')) {
-        return sanitizeFilename(filename);
+        const sanitized = sanitizeFilename(filename);
+        debugLog(`Using sanitized original filename: "${sanitized}"`);
+        return sanitized;
+      } else {
+        debugLog(`Filename doesn't have a valid extension, will generate one`);
       }
+    } else {
+      debugLog(`Preserve filenames is disabled, will generate filename`);
     }
     
     // Generate a filename based on content type and timestamp
     const ext = getExtensionFromContentType(contentType);
     const timestamp = Date.now();
-    return `image_${timestamp}${ext}`;
+    const generatedName = `image_${timestamp}${ext}`;
+    debugLog(`Generated filename: "${generatedName}"`);
+    return generatedName;
   } catch (error) {
-    console.error('Error generating filename:', error);
-    return `image_${Date.now()}.jpg`;
+    debugLog(`❌ Error generating filename: ${error.message}`);
+    const fallbackName = `image_${Date.now()}.jpg`;
+    debugLog(`Using fallback filename: "${fallbackName}"`);
+    return fallbackName;
   }
 }
 
 // Sanitize filename to be safe for storage
 function sanitizeFilename(filename) {
+  debugLog(`Sanitizing filename: "${filename}"`);
+  
   // Remove characters that aren't allowed in filenames
-  return filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+  const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
     // Ensure the filename isn't too long
     .substring(0, 100);
+  
+  debugLog(`Sanitized result: "${sanitized}"`);
+  
+  // Make sure there's an extension
+  if (!sanitized.includes('.')) {
+    debugLog(`Adding .jpg extension to filename without extension`);
+    return sanitized + '.jpg';
+  }
+  
+  return sanitized;
 }
 
 // Extract base domain name (identifies the main domain without common subdomains)
@@ -540,6 +734,8 @@ function sanitizeDomain(domain) {
 
 // Get file extension from content type
 function getExtensionFromContentType(contentType) {
+  debugLog(`Getting file extension for content type: ${contentType}`);
+  
   const typeMap = {
     'image/jpeg': '.jpg',
     'image/png': '.png',
@@ -551,7 +747,9 @@ function getExtensionFromContentType(contentType) {
     'text/plain': '.txt'
   };
   
-  return typeMap[contentType] || '.jpg';
+  const extension = typeMap[contentType] || '.jpg';
+  debugLog(`Using extension: ${extension} for content type: ${contentType}`);
+  return extension;
 }
 
 // Upload to storage (S3 or R2)
@@ -838,59 +1036,203 @@ async function uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settin
   }
 }
 
+// Dedicated debug logging function that ensures visibility in console
+function debugLog(message, data) {
+  const timestamp = new Date().toISOString();
+  const prefix = '[PAGE-IMAGE-SAVER DEBUG]';
+  
+  if (data) {
+    console.log(prefix, timestamp, message, data);
+    // Force an error to make the log more visible in the console
+    console.trace(prefix + ' ' + timestamp + ' ' + message);
+  } else {
+    console.log(prefix, timestamp, message);
+    console.trace(prefix + ' ' + timestamp + ' ' + message);
+  }
+}
+
 // Save file to local disk using the Chrome Downloads API
 async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '') {
   try {
-    console.log('Starting local download for:', filename);
-    console.log('Local download settings:', CONFIG.local);
+    debugLog(`Starting local download for: ${filename}`);
+    debugLog('Local download settings:', CONFIG.local);
     
-    // Prepare path with optional domain subfolder
-    let path = '';
+    // Use the custom base folder from settings, defaulting to PageImageSaver
+    const baseFolder = CONFIG.local.baseFolder || 'PageImageSaver';
+    
+    // Make sure the base folder name is valid
+    const sanitizedBaseFolder = baseFolder.replace(/[^a-zA-Z0-9._-]/g, '_');
+    
+    // Always start with a base folder for the extension to keep downloads organized
+    let path = sanitizedBaseFolder + '/';
+    debugLog(`Using base folder: ${path}`);
     
     // Add domain subfolder if enabled
     if (CONFIG.local.subfolderPerDomain && domain) {
       const sanitizedDomain = sanitizeDomain(domain);
-      path = sanitizedDomain + '/';
-      console.log('Using domain folder:', path);
+      path += sanitizedDomain + '/';
+      debugLog(`Using domain subfolder: ${path}`);
+    } else {
+      // If not using domain folders, at least organize by date
+      const today = new Date();
+      const dateFolder = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}/`;
+      path += dateFolder;
+      debugLog(`Using date folder: ${path}`);
     }
     
-    // Create a URL for the blob
-    const blobUrl = URL.createObjectURL(blob);
-    console.log('Created blob URL:', blobUrl);
+    debugLog(`Final path structure: ${path}`);
     
-    // Prepare download options
+    // For service workers, we need to use a different approach since URL.createObjectURL is not available
+    // Convert the blob to a base64 data URL
+    const reader = new FileReader();
+    const dataUrlPromise = new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Failed to convert blob to data URL'));
+      reader.readAsDataURL(blob);
+    });
+    
+    const dataUrl = await dataUrlPromise;
+    debugLog(`Converted blob to data URL (length: ${dataUrl.length})`);
+    
+    // Track the filename we're trying to use
+    const targetFilename = path + filename;
+    debugLog(`🔍 Attempting to save with filename: "${targetFilename}"`);
+    
+    // Make sure the target filename has the right file extension based on the content type
+    let finalTargetFilename = targetFilename;
+    if (!finalTargetFilename.includes('.')) {
+      // Add appropriate extension based on content type
+      const ext = getExtensionFromContentType(blob.type);
+      finalTargetFilename += ext;
+      debugLog(`Added file extension to filename: "${finalTargetFilename}"`);
+    }
+    
+    // Prepare download options - Edge may have issues with file paths
+    // Try with saveAs option to allow the user to confirm the filename
     const downloadOptions = {
-      url: blobUrl,
-      filename: path + filename,
-      saveAs: false, // Don't show save dialog
+      url: dataUrl,
+      filename: finalTargetFilename,
+      saveAs: true, // Show save dialog to ensure proper filename (works better in Edge)
       conflictAction: 'uniquify' // Automatically rename if file exists
     };
     
-    console.log('Download options:', downloadOptions);
+    // Check browser type
+    const browserType = detectBrowser();
+    debugLog(`Browser detected for this download: ${browserType}`);
+    
+    // Check if we're in Edge or if Edge mode is enabled
+    let edgeMode = browserType === "Edge";
+    
+    // Check if Edge mode is manually enabled/disabled in settings
+    chrome.storage.local.get(['edgeMode'], (result) => {
+      if (result.edgeMode !== undefined) {
+        edgeMode = result.edgeMode;
+        debugLog(`Using manual Edge mode setting: ${edgeMode}`);
+      }
+    });
+    
+    if (browserType === "Edge" || edgeMode) {
+      debugLog("⚠️ Microsoft Edge detected or Edge mode enabled - using saveAs dialog");
+      // For Edge, show the save dialog to let user choose the save location and confirm filename
+      downloadOptions.saveAs = true;
+      
+      // Create a "suggested" filename that's more descriptive than "download.jpg"
+      // This helps the user identify what they're saving even if Edge doesn't use the folder structure
+      if (!finalTargetFilename.includes('/')) {
+        // If there's no path separator, it's just a filename
+        const edgeFilename = `PageImageSaver_${Date.now()}_${finalTargetFilename}`;
+        downloadOptions.filename = edgeFilename;
+        debugLog(`📋 Edge-specific filename: ${edgeFilename}`);
+      } else {
+        // If there is a path, extract just the filename part for Edge
+        const lastSlash = finalTargetFilename.lastIndexOf('/');
+        const filenameOnly = finalTargetFilename.substring(lastSlash + 1);
+        const edgeFilename = `PageImageSaver_${filenameOnly}`;
+        downloadOptions.filename = edgeFilename;
+        debugLog(`📋 Edge-specific filename (extracted): ${edgeFilename}`);
+      }
+    }
+    
+    // Log the complete download options
+    debugLog('Complete download options:', JSON.stringify(downloadOptions, null, 2));
+    
+    debugLog('Download options:', downloadOptions);
     
     // Start the download
-    console.log('Initiating chrome.downloads.download...');
+    debugLog('Initiating chrome.downloads.download...');
     const downloadId = await chrome.downloads.download(downloadOptions);
-    console.log('Download started with ID:', downloadId);
+    debugLog(`Download started with ID: ${downloadId}`);
     
-    // Revoke the blob URL after download starts
-    URL.revokeObjectURL(blobUrl);
+    // Explicitly log download destinations right away
+    chrome.downloads.search({id: downloadId}, (downloads) => {
+      if (downloads && downloads.length > 0) {
+        const download = downloads[0];
+        debugLog('⭐⭐⭐ INITIAL DOWNLOAD DESTINATION:', download.filename);
+        
+        // Also check the default download directory settings
+        chrome.downloads.search({}, (allDownloads) => {
+          debugLog('Recent downloads to help identify download location:');
+          const recentDownloads = allDownloads.slice(0, 3);
+          recentDownloads.forEach(d => {
+            debugLog(`Download #${d.id}: ${d.filename}`);
+          });
+        });
+      }
+    });
+    
+    // No need to revoke data URLs as they're not stored in the browser's memory like blob URLs
     
     // Listen for download completion
     return new Promise((resolve, reject) => {
       const downloadListener = (delta) => {
-        console.log('Download status change:', delta);
+        debugLog('Download status change:', delta);
         if (delta.id === downloadId && delta.state) {
           if (delta.state.current === 'complete') {
-            console.log('Download completed successfully');
-            chrome.downloads.onChanged.removeListener(downloadListener);
-            resolve({
-              success: true,
-              type: 'local',
-              path: path + filename
+            debugLog(`✅ Download #${downloadId} completed successfully`);
+            
+            // Get the full path from the downloads API
+            chrome.downloads.search({ id: downloadId }, (results) => {
+              if (results && results.length > 0) {
+                const download = results[0];
+                
+                // Parse the actual filename from the full path
+                const fullPath = download.filename;
+                const lastSeparatorIndex = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
+                const actualFilename = lastSeparatorIndex > -1 ? fullPath.substring(lastSeparatorIndex + 1) : fullPath;
+                
+                debugLog('💾 DOWNLOAD SAVED TO LOCAL PATH:', download.filename);
+                debugLog(`📄 ACTUAL FILENAME USED: "${actualFilename}" (expected: "${path + filename}")`);
+                debugLog('Download complete details:', download);
+                debugLog(`⭐⭐⭐ DOWNLOAD STATE: ${download.state} - Expected filename: ${path + filename}`);
+                
+                // Check if the filename matches what we expected
+                if (actualFilename === 'download.jpg' || actualFilename.startsWith('download')) {
+                  debugLog(`⚠️ WARNING: Generic filename "${actualFilename}" was used instead of "${path + filename}"`);
+                }
+                
+                // Add a definitive breakpoint opportunity
+                debugger; // This will pause execution when DevTools is open
+                
+                chrome.downloads.onChanged.removeListener(downloadListener);
+                resolve({
+                  success: true,
+                  type: 'local',
+                  path: path + filename,
+                  fullPath: download.filename,
+                  actualFilename: actualFilename
+                });
+              } else {
+                debugLog(`⚠️ Could not find download details for ID: ${downloadId}`);
+                chrome.downloads.onChanged.removeListener(downloadListener);
+                resolve({
+                  success: true,
+                  type: 'local',
+                  path: path + filename
+                });
+              }
             });
           } else if (delta.state.current === 'interrupted') {
-            console.error('Download interrupted:', delta.error);
+            debugLog(`❌ Download interrupted:`, delta.error);
             chrome.downloads.onChanged.removeListener(downloadListener);
             reject(new Error(`Download failed: ${delta.error?.current || 'unknown error'}`));
           }
@@ -900,8 +1242,8 @@ async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '
       chrome.downloads.onChanged.addListener(downloadListener);
     });
   } catch (error) {
-    console.error('Local download error:', error);
-    console.error(error.stack);
+    debugLog(`❌ Local download error: ${error.message}`);
+    debugLog('Error stack:', error.stack);
     return {
       success: false,
       error: `Local download failed: ${error.message}`
@@ -944,5 +1286,41 @@ function dataURItoBlob(dataURI) {
   return new Blob([ia], { type: mimeString });
 }
 
-// Log that the background script has loaded
-console.log('Page Image Saver background script loaded.');
+// Helper function to convert Blob to data URL (useful in service worker context)
+async function blobToDataURL(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Failed to convert blob to data URL'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Detect browser type
+function detectBrowser() {
+  const userAgent = navigator.userAgent;
+  let browserName;
+  
+  if (userAgent.match(/chrome|chromium|crios/i)) {
+    browserName = "Chrome";
+    if (userAgent.match(/edg/i)) {
+      browserName = "Edge";
+    }
+  } else if (userAgent.match(/firefox|fxios/i)) {
+    browserName = "Firefox";
+  } else if (userAgent.match(/safari/i)) {
+    browserName = "Safari";
+  } else if (userAgent.match(/opr\//i)) {
+    browserName = "Opera";
+  } else {
+    browserName = "Unknown";
+  }
+  
+  return browserName;
+}
+
+// Log browser information
+const browserType = detectBrowser();
+console.log(`Page Image Saver background script loaded in ${browserType} browser.`);
+debugLog(`🌐 Browser detected: ${browserType}`);
+debugLog(`🔍 Full User Agent: ${navigator.userAgent}`);

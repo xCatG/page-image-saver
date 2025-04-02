@@ -1,8 +1,0 @@
-Fix local download feature and add detailed logging
-
-- Fixed processImage function to properly handle local disk saving
-- Updated processScreenshot function to support local download
-- Added detailed logging to track local download progress
-- Fixed icon paths in manifest.json to use SVG icons
-- Added proper checking for local download config in message handlers
-- Improved error handling for downloads API
