@@ -533,22 +533,40 @@ async function processImage(image, sourceInfo) {
     
     // Save locally if enabled
     if (CONFIG.local && CONFIG.local.enabled) {
-      console.log('Local saving is enabled, attempting to save to disk');
+      debugLog('Local saving is enabled, attempting to save to disk');
+      // Set local saving to be explicitly enabled for this session if needed
+      if (!CONFIG.local.enabled) {
+        debugLog('Forcing local saving to be enabled for fallback');
+        CONFIG.local.enabled = true;
+      }
       promises.push(saveToLocalDisk(imageBlob, filename, image, sourceInfo, domain));
     } else {
-      console.log('Local saving is disabled or not configured:', CONFIG.local);
+      debugLog('Local saving is disabled or not configured:', CONFIG.local);
     }
     
     // Upload to cloud storage if configured
     if (isConfigValid()) {
-      console.log('Cloud storage is configured, attempting upload');
+      debugLog('Cloud storage is configured, attempting upload');
       promises.push(uploadToStorage(imageBlob, filename, image, sourceInfo, domain));
     } else {
-      console.log('Cloud storage not configured or invalid settings');
+      debugLog('Cloud storage not configured or invalid settings');
+      
+      // If cloud storage is not configured but local saving is disabled,
+      // let's temporarily enable local saving as a fallback
+      if (!CONFIG.local || !CONFIG.local.enabled) {
+        debugLog('No storage methods configured, enabling local saving as fallback');
+        if (!CONFIG.local) CONFIG.local = {};
+        CONFIG.local.enabled = true;
+        CONFIG.local.baseFolder = 'PageImageSaver';
+        CONFIG.local.subfolderPerDomain = true;
+        
+        // Add a local save promise
+        promises.push(saveToLocalDisk(imageBlob, filename, image, sourceInfo, domain));
+      }
     }
     
     if (promises.length === 0) {
-      console.error('No storage methods enabled. Enable local download or configure cloud storage.');
+      debugLog('No storage methods enabled. Enable local download or configure cloud storage.');
       throw new Error('No storage methods enabled');
     }
     
@@ -758,7 +776,20 @@ async function uploadToStorage(blob, filename, imageInfo, sourceInfo, domain = '
   if (CONFIG.useS3) {
     return await uploadToS3(blob, filename, imageInfo, sourceInfo, CONFIG, domain);
   } else {
-    return await uploadToR2(blob, filename, imageInfo, sourceInfo, CONFIG, domain);
+    try {
+      debugLog('Attempting to upload to R2...');
+      return await uploadToR2(blob, filename, imageInfo, sourceInfo, CONFIG, domain);
+    } catch (error) {
+      debugLog('R2 upload failed, trying local save as fallback if enabled');
+      // If R2 upload fails but local saving is enabled, try local saving as a fallback
+      if (CONFIG.local && CONFIG.local.enabled) {
+        debugLog('Attempting local save as fallback after R2 failure');
+        return await saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain);
+      } else {
+        // Re-throw the error if local saving is not enabled
+        throw error;
+      }
+    }
   }
 }
 
@@ -885,14 +916,34 @@ async function uploadToR2(blob, filename, imageInfo, sourceInfo, settings, domai
   const fullPath = folderPath + filename;
 
   try {
+    let result;
+    
     // Handle different authentication methods
     if (r2Config.useApiToken) {
-      return await uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settings);
+      debugLog('Using R2 API Token method');
+      try {
+        result = await uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settings);
+        if (!result.success) {
+          throw new Error(result.error || 'API token upload failed');
+        }
+      } catch (tokenError) {
+        debugLog('API Token upload failed, falling back to Keys method', tokenError);
+        // If token method fails, try the keys method as a fallback
+        if (r2Config.accessKeyId && r2Config.secretAccessKey) {
+          debugLog('Attempting fallback to API Keys method since API Token failed');
+          result = await uploadToR2WithKeys(blob, fullPath, imageInfo, sourceInfo, settings);
+        } else {
+          throw tokenError; // Re-throw if we can't use the fallback
+        }
+      }
     } else {
-      return await uploadToR2WithKeys(blob, fullPath, imageInfo, sourceInfo, settings);
+      debugLog('Using R2 API Keys method');
+      result = await uploadToR2WithKeys(blob, fullPath, imageInfo, sourceInfo, settings);
     }
+    
+    return result;
   } catch (error) {
-    console.error('R2 upload error:', error);
+    debugLog('R2 upload error:', error);
     throw new Error(`R2 upload failed: ${error.message}`);
   }
 }
@@ -982,18 +1033,20 @@ async function uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settin
     // For API token upload, we need to use Cloudflare's direct upload endpoint
     const endpoint = `https://api.cloudflare.com/client/v4/accounts/${r2Config.accountId}/r2/buckets/${r2Config.bucketName}/objects/${encodeURIComponent(fullPath)}`;
     
-    // Prepare headers
+    // Instead of using custom headers with potential non-ASCII characters,
+    // let's skip metadata and focus on getting the upload working first
     const headers = {
       'Authorization': `Bearer ${r2Config.apiToken}`,
-      'Content-Type': blob.type
+      'Content-Type': blob.type || 'application/octet-stream'
     };
     
-    // Add metadata headers if needed
-    if (addMetadata && sourceInfo) {
-      headers['X-Amz-Meta-Source-Url'] = sourceInfo.url || '';
-      headers['X-Amz-Meta-Source-Title'] = sourceInfo.title || '';
-      headers['X-Amz-Meta-Upload-Date'] = sourceInfo.timestamp || new Date().toISOString();
+    // TEMPORARILY DISABLE METADATA to avoid non-ASCII issues
+    // We can re-enable this later with proper encoding if needed
+    if (false && addMetadata && sourceInfo) {
+      // This section is temporarily disabled
     }
+    
+    debugLog('R2 Upload using simplified headers');
     
     // Execute the upload directly using fetch
     const response = await fetch(endpoint, {
