@@ -3,6 +3,7 @@
 // Global variables for domain-specific settings
 let currentDomain = '';
 let allImagesCache = [];
+let currentFilteredImages = []; // Add this line to track current filtered images
 let domainSettings = {
   minWidth: 50,
   minHeight: 50
@@ -103,7 +104,12 @@ function findAllImages() {
   allImagesCache = allImages;
   
   // Now filter by the current domain settings
-  return filterImagesBySize(allImages, domainSettings.minWidth, domainSettings.minHeight);
+  const filteredImages = filterImagesBySize(allImages, domainSettings.minWidth, domainSettings.minHeight);
+  
+  // Set the current filtered images
+  currentFilteredImages = filteredImages;
+  
+  return filteredImages;
 }
 
 // Function to check image file size before saving
@@ -200,6 +206,9 @@ async function checkImagesFileSizes(images) {
 
 // UI to show found images
 function createImageSelectionUI(images) {
+  // Initialize currentFilteredImages with the images being displayed
+  currentFilteredImages = images;
+  
   // Remove any existing UI
   const existingContainer = document.getElementById('image-selector-container');
   if (existingContainer) {
@@ -402,8 +411,9 @@ function createImageSelectionUI(images) {
     checkboxes.forEach(cb => {
       try {
         const index = parseInt(cb.dataset.index);
-        if (!isNaN(index) && index >= 0 && index < images.length) {
-          const image = images[index];
+        // Use currentFilteredImages instead of images
+        if (!isNaN(index) && index >= 0 && index < currentFilteredImages.length) {
+          const image = currentFilteredImages[index];
           if (image && image.url) {
             selectedImages.push(image);
           }
@@ -515,6 +525,9 @@ function saveImageSizeFilter() {
 
 // Update image list with filtered images
 function updateImageList(filteredImages) {
+  // Store the filtered images in our global variable
+  currentFilteredImages = filteredImages;
+  
   // Update title count
   const titleElement = document.querySelector('#image-selector-container h2');
   if (titleElement) {
