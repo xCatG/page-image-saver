@@ -1,5 +1,8 @@
 // content_script.js - This gets injected into web pages
 
+// Add a global flag that the background script can check to see if we're loaded
+window.PageImageSaverLoaded = true;
+
 // Global variables for domain-specific settings
 let currentDomain = '';
 let allImagesCache = [];
@@ -60,30 +63,143 @@ function findAllImages() {
     return bgImage && bgImage !== 'none' && bgImage.startsWith('url(');
   });
   
-  // Extract image URLs from the elements
+  // Extract image URLs from the elements with enhanced metadata
   const imageUrls = imgElements.map(img => {
+    let altText = img.alt || '';
+    
+    // If no alt text is available, try to find it in parent or sibling elements
+    if (!altText) {
+      // Check for figure caption
+      const figure = img.closest('figure');
+      if (figure) {
+        const figcaption = figure.querySelector('figcaption');
+        if (figcaption) {
+          altText = figcaption.textContent.trim();
+        }
+      }
+      
+      // Check for nearby captions or descriptive text
+      if (!altText) {
+        // Try nearby div with class containing 'caption'
+        const parent = img.parentElement;
+        if (parent) {
+          const caption = parent.querySelector('div[class*="caption"], .caption, [class*="Caption"], [id*="caption"]');
+          if (caption) {
+            altText = caption.textContent.trim();
+          }
+        }
+      }
+    }
+    
+    // If still no alt text, look for title attribute
+    if (!altText) {
+      altText = img.title || 'No description';
+    }
+    
+    // Get image filename from src
+    let filename = '';
+    try {
+      const urlObj = new URL(img.src);
+      const pathname = urlObj.pathname;
+      filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+      // Remove query parameters
+      filename = filename.split('?')[0];
+    } catch (e) {
+      // If URL parsing fails, just use the last part of the src
+      const parts = img.src.split('/');
+      filename = parts[parts.length - 1].split('?')[0];
+    }
+    
+    // Collect any data attributes that might contain useful metadata
+    const dataAttributes = {};
+    for (const attr of img.attributes) {
+      if (attr.name.startsWith('data-')) {
+        dataAttributes[attr.name] = attr.value;
+      }
+    }
+    
     return {
       url: img.src,
-      alt: img.alt || 'No description',
+      alt: altText,
       width: img.width,
       height: img.height,
       naturalWidth: img.naturalWidth,
       naturalHeight: img.naturalHeight,
-      type: 'img'
+      type: 'img',
+      filename: filename,
+      title: img.title || '',
+      loading: img.loading || '',
+      dataAttributes: dataAttributes
     };
   });
   
-  // Extract background image URLs
+  // Extract background image URLs with enhanced metadata
   const bgImageUrls = elementsWithBgImages.map(el => {
     const style = window.getComputedStyle(el);
     const bgImageUrl = style.backgroundImage.match(/url\(['"]?(.*?)['"]?\)/)[1];
+    
+    // Get image filename from url
+    let filename = '';
+    try {
+      const urlObj = new URL(bgImageUrl);
+      const pathname = urlObj.pathname;
+      filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+      // Remove query parameters
+      filename = filename.split('?')[0];
+    } catch (e) {
+      // If URL parsing fails, just use the last part of the url
+      const parts = bgImageUrl.split('/');
+      filename = parts[parts.length - 1].split('?')[0];
+    }
+    
+    // Try to determine alt text from surrounding context
+    let altText = el.getAttribute('aria-label') || el.title || '';
+    
+    // If no alt text, try to get text content if it's a short description
+    if (!altText && el.textContent && el.textContent.trim().length < 100) {
+      altText = el.textContent.trim();
+    }
+    
+    // Look for nearby headings or text that might describe the image
+    if (!altText) {
+      const heading = el.querySelector('h1, h2, h3, h4, h5, h6');
+      if (heading) {
+        altText = heading.textContent.trim();
+      }
+    }
+    
+    // If still no alt text, fall back to a more descriptive default
+    if (!altText) {
+      altText = `Background image for ${el.tagName.toLowerCase()} element`;
+    }
+    
+    // Collect any data attributes that might contain useful metadata
+    const dataAttributes = {};
+    for (const attr of el.attributes) {
+      if (attr.name.startsWith('data-')) {
+        dataAttributes[attr.name] = attr.value;
+      }
+    }
+    
+    // Collect more style information for better context
+    const bgSize = style.backgroundSize;
+    const bgPosition = style.backgroundPosition;
+    const bgRepeat = style.backgroundRepeat;
+    
     return {
       url: bgImageUrl,
-      alt: 'Background image',
+      alt: altText,
       width: el.offsetWidth,
       height: el.offsetHeight,
       type: 'background',
-      element: el.tagName
+      element: el.tagName,
+      filename: filename,
+      className: el.className || '',
+      id: el.id || '',
+      bgSize: bgSize,
+      bgPosition: bgPosition,
+      bgRepeat: bgRepeat,
+      dataAttributes: dataAttributes
     };
   });
   
@@ -122,35 +238,101 @@ async function checkImagesFileSizes(images) {
   // Function to check a single image with timeout
   async function checkImage(image) {
     try {
-      // Create an AbortController for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      // First, try a more reliable method to check if the image is valid
+      // by using the Image constructor which works with cross-origin images
+      const prevalidateImage = () => {
+        return new Promise((resolve) => {
+          // Create temporary image element to verify the URL is a valid image
+          const img = new Image();
+          
+          // Set a timeout in case the image doesn't load
+          const imgTimeout = setTimeout(() => {
+            console.log(`Image prevalidation timed out: ${image.url}`);
+            resolve(true); // Continue anyway, let the server handle it
+          }, 2000);
+          
+          // Image loaded successfully
+          img.onload = () => {
+            clearTimeout(imgTimeout);
+            resolve(true);
+          };
+          
+          // Image failed to load
+          img.onerror = () => {
+            clearTimeout(imgTimeout);
+            console.log(`Image prevalidation failed: ${image.url}`);
+            // We'll still proceed to try the fetch, but log it
+            resolve(true);
+          };
+          
+          // Set crossOrigin to anonymous to avoid tainting the canvas
+          img.crossOrigin = "anonymous";
+          img.src = image.url;
+        });
+      };
       
-      // Fetch headers only with timeout
-      const response = await fetch(image.url, { 
-        method: 'HEAD', 
-        credentials: 'include',
-        signal: controller.signal 
-      });
+      // Always prevalidate, but don't fail if it doesn't work
+      await prevalidateImage();
       
-      // Clear the timeout
-      clearTimeout(timeoutId);
-      
-      // If we can get content-length, use it to filter small files
-      const contentLength = response.headers.get('Content-Length');
-      
-      if (contentLength && parseInt(contentLength) < MIN_FILE_SIZE) {
-        console.log(`Skipping small image (${contentLength} bytes): ${image.url}`);
-        return null; // Skip this image
-      } else {
-        // Check content type to ensure it's actually an image
-        const contentType = response.headers.get('Content-Type');
-        if (contentType && contentType.startsWith('image/')) {
-          return image; // Keep this image
-        } else {
-          console.log(`Skipping non-image content type (${contentType}): ${image.url}`);
-          return null;
+      try {
+        // Create an AbortController for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+        
+        // Try a fetch with 'no-cors' mode first to handle cross-origin requests
+        try {
+          const response = await fetch(image.url, { 
+            method: 'HEAD', 
+            credentials: 'include',
+            mode: 'no-cors', // Use no-cors mode to avoid CORS issues
+            signal: controller.signal 
+          });
+          
+          // Clear the timeout
+          clearTimeout(timeoutId);
+          
+          // If using no-cors mode, we can't actually read the headers
+          // But if we got here without an error, the image is probably valid
+          return image;
+        } catch (corsError) {
+          // If no-cors mode failed, try a normal request
+          console.log(`No-cors request failed for ${image.url}, trying regular request`);
+          
+          // Create a new AbortController for the second attempt
+          const controller2 = new AbortController();
+          const timeoutId2 = setTimeout(() => controller2.abort(), TIMEOUT_MS);
+          
+          const response = await fetch(image.url, { 
+            method: 'HEAD', 
+            credentials: 'include',
+            signal: controller2.signal 
+          });
+          
+          // Clear the timeout
+          clearTimeout(timeoutId2);
+          
+          // If we can get content-length, use it to filter small files
+          const contentLength = response.headers.get('Content-Length');
+          
+          if (contentLength && parseInt(contentLength) < MIN_FILE_SIZE) {
+            console.log(`Skipping small image (${contentLength} bytes): ${image.url}`);
+            return null; // Skip this image
+          } else {
+            // Check content type to ensure it's actually an image
+            const contentType = response.headers.get('Content-Type');
+            if (contentType && contentType.startsWith('image/')) {
+              return image; // Keep this image
+            } else {
+              console.log(`Skipping non-image content type (${contentType}): ${image.url}`);
+              return null;
+            }
+          }
         }
+      } catch (fetchError) {
+        // If both fetch attempts failed, but the image loaded in the browser,
+        // let's trust that it's valid and include it
+        console.log(`All fetch attempts failed for ${image.url}, but proceeding anyway`);
+        return image;
       }
     } catch (error) {
       // If the error is due to timeout, log appropriately
@@ -164,6 +346,7 @@ async function checkImagesFileSizes(images) {
       // This prevents the UI from getting stuck on problematic images
       return image;
     }
+  
   }
   
   // Use image dimensions as a quick local filter first before making network requests
@@ -319,7 +502,7 @@ function createImageSelectionUI(images) {
       background-color: #f5f5f5;
     `;
     
-    // Create thumbnail
+    // Create thumbnail using IMG element instead of background-image to handle CORS better
     const thumbnail = document.createElement('div');
     thumbnail.style.cssText = `
       position: absolute;
@@ -327,11 +510,42 @@ function createImageSelectionUI(images) {
       left: 0;
       width: 100%;
       height: 100%;
-      background-image: url(${image.url});
-      background-size: contain;
-      background-position: center;
-      background-repeat: no-repeat;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
     `;
+    
+    // Create actual image element
+    const imgEl = document.createElement('img');
+    imgEl.src = image.url;
+    imgEl.style.cssText = `
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    `;
+    
+    // Set crossOrigin to anonymous to prevent CORS issues
+    imgEl.crossOrigin = "anonymous";
+    
+    // Add error handling to show placeholder if image fails to load
+    imgEl.onerror = () => {
+      // Create a colored placeholder with text if image fails to load
+      imgEl.style.display = "none";
+      thumbnail.style.backgroundColor = "#f5f5f5";
+      thumbnail.style.color = "#666";
+      thumbnail.style.display = "flex";
+      thumbnail.style.alignItems = "center";
+      thumbnail.style.justifyContent = "center";
+      thumbnail.style.padding = "5px";
+      thumbnail.style.textAlign = "center";
+      thumbnail.style.fontSize = "10px";
+      thumbnail.textContent = "Image Preview Unavailable";
+    };
+    
+    // Append the image to the thumbnail container
+    thumbnail.appendChild(imgEl);
     
     thumbnailContainer.appendChild(thumbnail);
     
@@ -350,8 +564,9 @@ function createImageSelectionUI(images) {
       pointer-events: none;
     `;
     
-    // Set description text
-    info.textContent = image.alt !== 'No description' ? image.alt : '';
+    // Set description text - only show alt text if it's meaningful
+    const hasAltText = image.alt && image.alt !== 'No description';
+    info.textContent = hasAltText ? image.alt : '';
     
     // Add dimensions as a separate line
     const dimensionsInfo = document.createElement('div');
@@ -362,12 +577,40 @@ function createImageSelectionUI(images) {
       pointer-events: none;
     `;
     
-    // Add size information
+    // Format image dimensions
     const dimensions = image.naturalWidth && image.naturalHeight 
       ? `${image.naturalWidth}x${image.naturalHeight}` 
       : `${image.width}x${image.height}`;
-      
-    dimensionsInfo.textContent = dimensions;
+    
+    // Always show dimensions
+    let displayText = dimensions;
+    
+    // If alt text is missing, add filename before dimensions
+    if (!hasAltText && image.filename) {
+      const shortName = `${image.filename.substring(0, 15)}${image.filename.length > 15 ? '...' : ''}`;
+      displayText = `${shortName} | ${dimensions}`;
+    }
+    
+    dimensionsInfo.textContent = displayText;
+    
+    // Add a tooltip with complete metadata
+    let tooltipContent = `Dimensions: ${dimensions}\n`;
+    
+    if (image.filename) {
+      tooltipContent += `Filename: ${image.filename}\n`;
+    }
+    
+    if (image.alt && image.alt !== 'No description') {
+      tooltipContent += `Alt text: ${image.alt}\n`;
+    }
+    
+    if (image.type === 'background') {
+      tooltipContent += `Element: ${image.element}\n`;
+      if (image.className) tooltipContent += `Class: ${image.className}\n`;
+      if (image.bgSize) tooltipContent += `Background size: ${image.bgSize}\n`;
+    }
+    
+    dimensionsInfo.title = tooltipContent;
     
     imgContainer.appendChild(checkbox);
     imgContainer.appendChild(thumbnailContainer);
@@ -582,7 +825,7 @@ function updateImageList(filteredImages) {
       background-color: #f5f5f5;
     `;
     
-    // Create thumbnail
+    // Create thumbnail using IMG element instead of background-image to handle CORS better
     const thumbnail = document.createElement('div');
     thumbnail.style.cssText = `
       position: absolute;
@@ -590,11 +833,42 @@ function updateImageList(filteredImages) {
       left: 0;
       width: 100%;
       height: 100%;
-      background-image: url(${image.url});
-      background-size: contain;
-      background-position: center;
-      background-repeat: no-repeat;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
     `;
+    
+    // Create actual image element
+    const imgEl = document.createElement('img');
+    imgEl.src = image.url;
+    imgEl.style.cssText = `
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    `;
+    
+    // Set crossOrigin to anonymous to prevent CORS issues
+    imgEl.crossOrigin = "anonymous";
+    
+    // Add error handling to show placeholder if image fails to load
+    imgEl.onerror = () => {
+      // Create a colored placeholder with text if image fails to load
+      imgEl.style.display = "none";
+      thumbnail.style.backgroundColor = "#f5f5f5";
+      thumbnail.style.color = "#666";
+      thumbnail.style.display = "flex";
+      thumbnail.style.alignItems = "center";
+      thumbnail.style.justifyContent = "center";
+      thumbnail.style.padding = "5px";
+      thumbnail.style.textAlign = "center";
+      thumbnail.style.fontSize = "10px";
+      thumbnail.textContent = "Image Preview Unavailable";
+    };
+    
+    // Append the image to the thumbnail container
+    thumbnail.appendChild(imgEl);
     
     thumbnailContainer.appendChild(thumbnail);
     
@@ -613,8 +887,9 @@ function updateImageList(filteredImages) {
       pointer-events: none;
     `;
     
-    // Set description text
-    info.textContent = image.alt !== 'No description' ? image.alt : '';
+    // Set description text - only show alt text if it's meaningful
+    const hasAltText = image.alt && image.alt !== 'No description';
+    info.textContent = hasAltText ? image.alt : '';
     
     // Add dimensions as a separate line
     const dimensionsInfo = document.createElement('div');
@@ -625,12 +900,40 @@ function updateImageList(filteredImages) {
       pointer-events: none;
     `;
     
-    // Add size information
+    // Format image dimensions
     const dimensions = image.naturalWidth && image.naturalHeight 
       ? `${image.naturalWidth}x${image.naturalHeight}` 
       : `${image.width}x${image.height}`;
-      
-    dimensionsInfo.textContent = dimensions;
+    
+    // Always show dimensions
+    let displayText = dimensions;
+    
+    // If alt text is missing, add filename before dimensions
+    if (!hasAltText && image.filename) {
+      const shortName = `${image.filename.substring(0, 15)}${image.filename.length > 15 ? '...' : ''}`;
+      displayText = `${shortName} | ${dimensions}`;
+    }
+    
+    dimensionsInfo.textContent = displayText;
+    
+    // Add a tooltip with complete metadata
+    let tooltipContent = `Dimensions: ${dimensions}\n`;
+    
+    if (image.filename) {
+      tooltipContent += `Filename: ${image.filename}\n`;
+    }
+    
+    if (image.alt && image.alt !== 'No description') {
+      tooltipContent += `Alt text: ${image.alt}\n`;
+    }
+    
+    if (image.type === 'background') {
+      tooltipContent += `Element: ${image.element}\n`;
+      if (image.className) tooltipContent += `Class: ${image.className}\n`;
+      if (image.bgSize) tooltipContent += `Background size: ${image.bgSize}\n`;
+    }
+    
+    dimensionsInfo.title = tooltipContent;
     
     imgContainer.appendChild(checkbox);
     imgContainer.appendChild(thumbnailContainer);
@@ -934,3 +1237,12 @@ loadScreenshotModule();
 
 // Log that the content script has loaded
 console.log('Page Image Saver content script loaded.');
+
+// Add an event listener to notify when the DOM is fully loaded
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('Page Image Saver: DOM fully loaded and parsed');
+  });
+} else {
+  console.log('Page Image Saver: DOM already loaded when script ran');
+}

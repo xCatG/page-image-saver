@@ -401,8 +401,8 @@ document.addEventListener('DOMContentLoaded', () => {
         makePublic: false
       },
       local: {
-        enabled: true,
-        subfolderPerDomain: true
+        enabled: false, // Local saving disabled by default
+        subfolderPerDomain: false
       },
       preserveFilenames: true,
       addMetadata: true,

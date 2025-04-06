@@ -8,8 +8,12 @@
     "storage",
     "contextMenus",
     "downloads",
-    "notifications"
+    "notifications",
+    "scripting"
   ],
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; img-src 'self' data: https: http:; connect-src 'self' https: http:"
+  },
   "host_permissions": [
     "<all_urls>"
   ],
@@ -27,9 +31,9 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["http://*/*", "https://*/*"],
       "js": ["content_script.js"],
-      "run_at": "document_idle"
+      "run_at": "document_end"
     }
   ],
   "web_accessible_resources": [

@@ -56,10 +56,10 @@ const DEFAULT_CONFIG = {
     makePublic: false
   },
   
-  // Local download settings
+  // Local download settings - disabled by default
   local: {
-    enabled: true,
-    subfolderPerDomain: true,
+    enabled: false,
+    subfolderPerDomain: false,
     baseFolder: 'PageImageSaver'
   },
   
@@ -235,35 +235,96 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 // Initialize the extension
 chrome.action.onClicked.addListener(tab => {
-  chrome.tabs.sendMessage(tab.id, {action: 'findImages'})
-    .catch(error => {
-      console.error('Error sending message to content script:', error);
-      // If we can't communicate with the content script, it might not be loaded
-      // Open the settings page instead
-      if (error.message && error.message.includes('Could not establish connection')) {
-        chrome.tabs.create({ url: 'settings.html' });
+  // Make sure we're on a valid tab and page has finished loading
+  if (tab.url && tab.url.startsWith('http')) {
+    // Check if the content script is already injected
+    chrome.scripting.executeScript({
+      target: {tabId: tab.id},
+      func: () => {
+        return typeof window.PageImageSaverLoaded !== 'undefined';
       }
+    }).then(results => {
+      // If content script is not loaded (or the check failed)
+      if (!results || !results[0] || !results[0].result) {
+        // Inject content script manually
+        chrome.scripting.executeScript({
+          target: {tabId: tab.id},
+          files: ['content_script.js']
+        }).then(() => {
+          // Wait a moment for the script to initialize
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tab.id, {action: 'findImages'})
+              .catch(error => {
+                console.error('Error sending message after injection:', error);
+                chrome.tabs.create({ url: 'settings.html' });
+              });
+          }, 500);
+        }).catch(error => {
+          console.error('Error injecting content script:', error);
+          chrome.tabs.create({ url: 'settings.html' });
+        });
+      } else {
+        // Content script is loaded, send message directly
+        chrome.tabs.sendMessage(tab.id, {action: 'findImages'})
+          .catch(error => {
+            console.error('Error sending message to content script:', error);
+            if (error.message && error.message.includes('Could not establish connection')) {
+              chrome.tabs.create({ url: 'settings.html' });
+            }
+          });
+      }
+    }).catch(error => {
+      console.error('Error checking for content script:', error);
+      chrome.tabs.create({ url: 'settings.html' });
     });
+  } else {
+    // Not a valid URL for content script, open settings page
+    chrome.tabs.create({ url: 'settings.html' });
+  }
 });
 
 // Handle keyboard shortcuts
 chrome.commands.onCommand.addListener(command => {
-  if (command === 'find_images') {
+  if (command === 'find_images' || command === 'take_screenshot') {
     chrome.tabs.query({active: true, currentWindow: true}, tabs => {
-      if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, {action: 'findImages'})
-          .catch(error => {
-            console.error('Error sending message to content script:', error);
-          });
-      }
-    });
-  } else if (command === 'take_screenshot') {
-    chrome.tabs.query({active: true, currentWindow: true}, tabs => {
-      if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, {action: 'takeScreenshot'})
-          .catch(error => {
-            console.error('Error sending message to content script:', error);
-          });
+      const tab = tabs[0];
+      if (tab && tab.url && tab.url.startsWith('http')) {
+        // Check if content script is loaded
+        chrome.scripting.executeScript({
+          target: {tabId: tab.id},
+          func: () => {
+            return typeof window.PageImageSaverLoaded !== 'undefined';
+          }
+        }).then(results => {
+          // If content script is not loaded (or the check failed)
+          if (!results || !results[0] || !results[0].result) {
+            // Inject content script manually
+            chrome.scripting.executeScript({
+              target: {tabId: tab.id},
+              files: ['content_script.js']
+            }).then(() => {
+              // Wait a moment for script to initialize
+              setTimeout(() => {
+                const action = command === 'find_images' ? 'findImages' : 'takeScreenshot';
+                chrome.tabs.sendMessage(tab.id, {action: action})
+                  .catch(error => {
+                    console.error(`Error sending ${action} message after injection:`, error);
+                  });
+              }, 500);
+            }).catch(error => {
+              console.error('Error injecting content script:', error);
+            });
+          } else {
+            // Content script is loaded, send message directly
+            const action = command === 'find_images' ? 'findImages' : 'takeScreenshot';
+            chrome.tabs.sendMessage(tab.id, {action: action})
+              .catch(error => {
+                console.error(`Error sending ${action} message to content script:`, error);
+              });
+          }
+        }).catch(error => {
+          console.error('Error checking for content script:', error);
+        });
       }
     });
   }
@@ -367,13 +428,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     const promises = [];
     
-    // Save locally if enabled
-    if (CONFIG.local && CONFIG.local.enabled) {
-      console.log('Local saving is enabled, attempting to save screenshot to disk');
-      promises.push(saveToLocalDisk(blob, filename, { type: 'screenshot' }, metadata, domain));
-    } else {
-      console.log('Local saving is disabled or not configured:', CONFIG.local);
-    }
+    // REMOVED: Local saving option for screenshots
+    // We're no longer using local saves to avoid incorrect folder save dialogs
     
     // Upload to cloud storage if configured
     if (isConfigValid()) {
@@ -384,10 +440,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     
     if (promises.length === 0) {
-      console.error('No storage methods enabled. Enable local download or configure cloud storage.');
+      console.error('No storage methods enabled. Please configure cloud storage in settings.');
       sendResponse({
         success: false,
-        error: 'No storage methods enabled. Please configure at least one storage method in settings.'
+        error: 'Cloud storage not configured. Please set up S3 or R2 storage in extension settings.'
       });
       return true;
     }
@@ -531,18 +587,8 @@ async function processImage(image, sourceInfo) {
     
     const promises = [];
     
-    // Save locally if enabled
-    if (CONFIG.local && CONFIG.local.enabled) {
-      debugLog('Local saving is enabled, attempting to save to disk');
-      // Set local saving to be explicitly enabled for this session if needed
-      if (!CONFIG.local.enabled) {
-        debugLog('Forcing local saving to be enabled for fallback');
-        CONFIG.local.enabled = true;
-      }
-      promises.push(saveToLocalDisk(imageBlob, filename, image, sourceInfo, domain));
-    } else {
-      debugLog('Local saving is disabled or not configured:', CONFIG.local);
-    }
+    // REMOVED: Local saving option
+    // We're no longer using local saves to avoid incorrect folder save dialogs
     
     // Upload to cloud storage if configured
     if (isConfigValid()) {
@@ -550,24 +596,13 @@ async function processImage(image, sourceInfo) {
       promises.push(uploadToStorage(imageBlob, filename, image, sourceInfo, domain));
     } else {
       debugLog('Cloud storage not configured or invalid settings');
-      
-      // If cloud storage is not configured but local saving is disabled,
-      // let's temporarily enable local saving as a fallback
-      if (!CONFIG.local || !CONFIG.local.enabled) {
-        debugLog('No storage methods configured, enabling local saving as fallback');
-        if (!CONFIG.local) CONFIG.local = {};
-        CONFIG.local.enabled = true;
-        CONFIG.local.baseFolder = 'PageImageSaver';
-        CONFIG.local.subfolderPerDomain = true;
-        
-        // Add a local save promise
-        promises.push(saveToLocalDisk(imageBlob, filename, image, sourceInfo, domain));
-      }
+      // REMOVED: Local saving fallback
+      // We now show an error message instead of falling back to local saving
     }
     
     if (promises.length === 0) {
-      debugLog('No storage methods enabled. Enable local download or configure cloud storage.');
-      throw new Error('No storage methods enabled');
+      debugLog('No storage methods enabled. Please configure cloud storage in settings.');
+      throw new Error('Storage not configured. Please set up S3 or R2 storage in extension settings.');
     }
     
     // Wait for all operations to complete
@@ -850,9 +885,30 @@ async function uploadToS3(blob, filename, imageInfo, sourceInfo, settings, domai
     // Create metadata object if needed
     const metadata = {};
     if (addMetadata && sourceInfo) {
-      metadata['source-url'] = sourceInfo.url || '';
-      metadata['source-title'] = sourceInfo.title || '';
+      // Add source information
+      if (sourceInfo.url) {
+        metadata['source-url'] = sourceInfo.url;
+      }
+      
+      if (sourceInfo.title) {
+        metadata['source-title'] = sourceInfo.title;
+      }
+      
       metadata['upload-date'] = sourceInfo.timestamp || new Date().toISOString();
+      
+      // Add alt text metadata if available
+      if (imageInfo && imageInfo.alt && imageInfo.alt !== 'No description') {
+        metadata['alt-text'] = imageInfo.alt;
+      }
+      
+      // Add image dimensions if available
+      if (imageInfo && imageInfo.naturalWidth && imageInfo.naturalHeight) {
+        metadata['width'] = imageInfo.naturalWidth.toString();
+        metadata['height'] = imageInfo.naturalHeight.toString();
+      } else if (imageInfo && imageInfo.width && imageInfo.height) {
+        metadata['width'] = imageInfo.width.toString();
+        metadata['height'] = imageInfo.height.toString();
+      }
     }
 
     // Prepare upload command
@@ -975,9 +1031,30 @@ async function uploadToR2WithKeys(blob, fullPath, imageInfo, sourceInfo, setting
     // Create metadata object if needed
     const metadata = {};
     if (addMetadata && sourceInfo) {
-      metadata['source-url'] = sourceInfo.url || '';
-      metadata['source-title'] = sourceInfo.title || '';
+      // Add source information
+      if (sourceInfo.url) {
+        metadata['source-url'] = sourceInfo.url;
+      }
+      
+      if (sourceInfo.title) {
+        metadata['source-title'] = sourceInfo.title;
+      }
+      
       metadata['upload-date'] = sourceInfo.timestamp || new Date().toISOString();
+      
+      // Add alt text metadata if available
+      if (imageInfo && imageInfo.alt && imageInfo.alt !== 'No description') {
+        metadata['alt-text'] = imageInfo.alt;
+      }
+      
+      // Add image dimensions if available
+      if (imageInfo && imageInfo.naturalWidth && imageInfo.naturalHeight) {
+        metadata['width'] = imageInfo.naturalWidth.toString();
+        metadata['height'] = imageInfo.naturalHeight.toString();
+      } else if (imageInfo && imageInfo.width && imageInfo.height) {
+        metadata['width'] = imageInfo.width.toString();
+        metadata['height'] = imageInfo.height.toString();
+      }
     }
 
     // Prepare upload command
@@ -1033,17 +1110,41 @@ async function uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settin
     // For API token upload, we need to use Cloudflare's direct upload endpoint
     const endpoint = `https://api.cloudflare.com/client/v4/accounts/${r2Config.accountId}/r2/buckets/${r2Config.bucketName}/objects/${encodeURIComponent(fullPath)}`;
     
-    // Instead of using custom headers with potential non-ASCII characters,
-    // let's skip metadata and focus on getting the upload working first
+    // Define headers with proper handling for non-ASCII characters
     const headers = {
       'Authorization': `Bearer ${r2Config.apiToken}`,
       'Content-Type': blob.type || 'application/octet-stream'
     };
     
-    // TEMPORARILY DISABLE METADATA to avoid non-ASCII issues
-    // We can re-enable this later with proper encoding if needed
-    if (false && addMetadata && sourceInfo) {
-      // This section is temporarily disabled
+    // Process metadata with proper encoding for non-ASCII characters
+    if (addMetadata && sourceInfo) {
+      // Add metadata as x-amz-meta-* headers with proper encoding
+      if (sourceInfo.url) {
+        headers['x-amz-meta-source-url'] = encodeURIComponent(sourceInfo.url);
+      }
+      
+      if (sourceInfo.title) {
+        // Encode title to handle non-ASCII characters
+        headers['x-amz-meta-source-title'] = encodeURIComponent(sourceInfo.title);
+      }
+      
+      if (sourceInfo.timestamp) {
+        headers['x-amz-meta-upload-date'] = sourceInfo.timestamp;
+      }
+      
+      // Add metadata for alt text if available
+      if (imageInfo && imageInfo.alt) {
+        headers['x-amz-meta-alt-text'] = encodeURIComponent(imageInfo.alt);
+      }
+      
+      // Add image dimensions if available
+      if (imageInfo && imageInfo.naturalWidth && imageInfo.naturalHeight) {
+        headers['x-amz-meta-width'] = imageInfo.naturalWidth.toString();
+        headers['x-amz-meta-height'] = imageInfo.naturalHeight.toString();
+      } else if (imageInfo && imageInfo.width && imageInfo.height) {
+        headers['x-amz-meta-width'] = imageInfo.width.toString();
+        headers['x-amz-meta-height'] = imageInfo.height.toString();
+      }
     }
     
     debugLog('R2 Upload using simplified headers');
@@ -1306,6 +1407,9 @@ async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '
 
 // Check if the configuration is valid for cloud storage operations
 function isConfigValid() {
+  // Specifically disable local saves to avoid save-as dialog issues
+  CONFIG.local = { enabled: false };
+  
   if (CONFIG.useS3) {
     return !!(CONFIG.s3.accessKeyId && CONFIG.s3.secretAccessKey && CONFIG.s3.bucketName);
   } else {
