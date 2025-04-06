@@ -382,6 +382,17 @@
         <div class="help-text">Creates separate folders for each website domain</div>
       </div>
       
+      <div class="checkbox-group">
+        <input type="checkbox" id="retry-enabled" name="retryEnabled" checked>
+        <label for="retry-enabled">Save failed uploads for later retry</label>
+        <div class="help-text">When uploads fail, they can be retried from the extension menu</div>
+      </div>
+      
+      <div class="checkbox-group">
+        <input type="checkbox" id="retry-notifications" name="retryNotifications" checked>
+        <label for="retry-notifications">Show notifications for failed uploads</label>
+      </div>
+      
       <div class="input-group">
         <label for="min-file-size">Minimum File Size (KB):</label>
         <input type="number" id="min-file-size" name="minFileSize" value="5" min="0" max="1000">

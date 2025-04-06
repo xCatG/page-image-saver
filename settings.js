@@ -112,6 +112,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
       
+      // Set retry settings
+      if (settings.retry) {
+        document.getElementById('retry-enabled').checked = settings.retry.enabled !== false; // Default to true
+        document.getElementById('retry-notifications').checked = settings.retry.showNotification !== false; // Default to true
+      }
+      
       // Set general settings
       document.getElementById('preserve-filenames').checked = settings.preserveFilenames;
       document.getElementById('add-metadata').checked = settings.addMetadata;
@@ -164,6 +170,11 @@ document.addEventListener('DOMContentLoaded', () => {
         subfolderPerDomain: document.getElementById('local-subfolder-domain').checked,
         baseFolder: document.getElementById('local-base-folder') ? 
           document.getElementById('local-base-folder').value.trim() || 'PageImageSaver' : 'PageImageSaver'
+      },
+      retry: {
+        enabled: document.getElementById('retry-enabled').checked,
+        showNotification: document.getElementById('retry-notifications').checked,
+        maxRetries: 3 // Fixed value for now
       },
       preserveFilenames: document.getElementById('preserve-filenames').checked,
       addMetadata: document.getElementById('add-metadata').checked,
@@ -403,6 +414,11 @@ document.addEventListener('DOMContentLoaded', () => {
       local: {
         enabled: false, // Local saving disabled by default
         subfolderPerDomain: false
+      },
+      retry: {
+        enabled: true,
+        showNotification: true,
+        maxRetries: 3
       },
       preserveFilenames: true,
       addMetadata: true,

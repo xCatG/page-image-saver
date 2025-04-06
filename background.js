@@ -63,6 +63,13 @@ const DEFAULT_CONFIG = {
     baseFolder: 'PageImageSaver'
   },
   
+  // Retry settings
+  retry: {
+    enabled: true,
+    maxRetries: 3,
+    showNotification: true
+  },
+  
   // General settings
   preserveFilenames: true, // Try to preserve original filenames when possible
   addMetadata: true, // Add metadata about the source page
@@ -107,6 +114,13 @@ chrome.contextMenus.create({
   contexts: ['action'] // Only show when clicking on extension icon
 });
 
+// Add a retry uploads menu item
+chrome.contextMenus.create({
+  id: 'retryUploads',
+  title: 'Retry Failed Uploads',
+  contexts: ['action'] // Only show when clicking on extension icon
+});
+
 // Add a debug menu item to check download paths
 chrome.contextMenus.create({
   id: 'debugDownloadPath',
@@ -127,6 +141,33 @@ if (detectBrowser() === "Edge") {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'openSettings') {
     chrome.tabs.create({ url: 'settings.html' });
+  } else if (info.menuItemId === 'retryUploads') {
+    // Show the number of failed uploads first
+    chrome.storage.local.get({failedUploads: []}, (result) => {
+      const failedUploads = result.failedUploads || [];
+      
+      if (failedUploads.length === 0) {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: 'icons/128.png',
+          title: 'Retry Uploads',
+          message: 'No failed uploads found to retry.',
+          priority: 2
+        });
+      } else {
+        // Confirm retry with the user
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: 'icons/128.png',
+          title: 'Retry Uploads',
+          message: `Found ${failedUploads.length} failed uploads. Retrying...`,
+          priority: 2
+        });
+        
+        // Start the retry process
+        retryFailedUploads();
+      }
+    });
   } else if (info.menuItemId === 'edgeFilenameMode') {
     // Toggle a flag in storage for Edge mode
     chrome.storage.local.get(['edgeMode'], (result) => {
@@ -949,11 +990,14 @@ async function uploadToS3(blob, filename, imageInfo, sourceInfo, settings, domai
 }
 
 // Upload to Cloudflare R2
-async function uploadToR2(blob, filename, imageInfo, sourceInfo, settings, domain = '') {
+async function uploadToR2(blob, filename, imageInfo, sourceInfo, settings, domain = '', retryCount = 0) {
   // Get the settings for this upload
   const r2Config = settings.r2;
   const addMetadata = settings.addMetadata;
   const useDomainFolders = settings.useDomainFolders;
+  
+  // Max number of retries
+  const MAX_RETRIES = 3;
   
   // Construct the full path with optional folder
   let folderPath = r2Config.folderPath || '';
@@ -976,19 +1020,31 @@ async function uploadToR2(blob, filename, imageInfo, sourceInfo, settings, domai
     
     // Handle different authentication methods
     if (r2Config.useApiToken) {
-      debugLog('Using R2 API Token method');
+      debugLog(`Using R2 API Token method (retry attempt: ${retryCount})`);
       try {
         result = await uploadToR2WithToken(blob, fullPath, imageInfo, sourceInfo, settings);
         if (!result.success) {
           throw new Error(result.error || 'API token upload failed');
         }
       } catch (tokenError) {
-        debugLog('API Token upload failed, falling back to Keys method', tokenError);
-        // If token method fails, try the keys method as a fallback
+        debugLog('API Token upload failed:', tokenError);
+        
+        // Check if we should retry due to Cloudflare error
+        if (tokenError.message && tokenError.message.includes('520') && retryCount < MAX_RETRIES) {
+          debugLog(`Cloudflare 520 error detected. Retrying (${retryCount + 1}/${MAX_RETRIES})...`);
+          // Wait with exponential backoff before retrying
+          const backoffTime = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
+          return uploadToR2(blob, filename, imageInfo, sourceInfo, settings, domain, retryCount + 1);
+        }
+        
+        // Try the keys method as a fallback if available
         if (r2Config.accessKeyId && r2Config.secretAccessKey) {
           debugLog('Attempting fallback to API Keys method since API Token failed');
           result = await uploadToR2WithKeys(blob, fullPath, imageInfo, sourceInfo, settings);
         } else {
+          // Save the failed upload info to retry later
+          saveFailedUpload(blob, filename, imageInfo, sourceInfo, settings, domain, tokenError.message);
           throw tokenError; // Re-throw if we can't use the fallback
         }
       }
@@ -1000,6 +1056,19 @@ async function uploadToR2(blob, filename, imageInfo, sourceInfo, settings, domai
     return result;
   } catch (error) {
     debugLog('R2 upload error:', error);
+    
+    // Check if we should retry
+    if (error.message && error.message.includes('520') && retryCount < MAX_RETRIES) {
+      debugLog(`Cloudflare 520 error detected. Retrying (${retryCount + 1}/${MAX_RETRIES})...`);
+      // Wait with exponential backoff before retrying
+      const backoffTime = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+      await new Promise(resolve => setTimeout(resolve, backoffTime));
+      return uploadToR2(blob, filename, imageInfo, sourceInfo, settings, domain, retryCount + 1);
+    }
+    
+    // Save the failed upload info to retry later
+    saveFailedUpload(blob, filename, imageInfo, sourceInfo, settings, domain, error.message);
+    
     throw new Error(`R2 upload failed: ${error.message}`);
   }
 }
@@ -1418,6 +1487,198 @@ function isConfigValid() {
     } else {
       return !!(CONFIG.r2.accessKeyId && CONFIG.r2.secretAccessKey && CONFIG.r2.bucketName && CONFIG.r2.accountId);
     }
+  }
+}
+
+// Functions for handling failed uploads and retries
+function saveFailedUpload(blob, filename, imageInfo, sourceInfo, settings, domain, errorMessage) {
+  if (!CONFIG.retry.enabled) return; // Don't save if retry is disabled
+  
+  // Convert blob to a data URL
+  blobToDataURL(blob).then(dataUrl => {
+    // Create a compressed entry to save
+    const uploadEntry = {
+      timestamp: Date.now(),
+      filename: filename,
+      dataUrl: dataUrl,
+      imageInfo: imageInfo,
+      sourceInfo: sourceInfo,
+      settings: {
+        useS3: settings.useS3,
+        s3: settings.useS3 ? {
+          region: settings.s3.region,
+          bucketName: settings.s3.bucketName,
+          folderPath: settings.s3.folderPath,
+          accessKeyId: "***", // Don't store sensitive info
+          secretAccessKey: "***",
+          makePublic: settings.s3.makePublic
+        } : null,
+        r2: !settings.useS3 ? {
+          accountId: settings.r2.accountId,
+          bucketName: settings.r2.bucketName,
+          folderPath: settings.r2.folderPath,
+          useApiToken: settings.r2.useApiToken,
+          accessKeyId: "***", // Don't store sensitive info
+          secretAccessKey: "***",
+          apiToken: "***",
+          makePublic: settings.r2.makePublic
+        } : null,
+        addMetadata: settings.addMetadata,
+        useDomainFolders: settings.useDomainFolders
+      },
+      domain: domain,
+      error: errorMessage,
+      retryCount: 0
+    };
+    
+    // Save to storage
+    chrome.storage.local.get({failedUploads: []}, (result) => {
+      const failedUploads = result.failedUploads || [];
+      failedUploads.push(uploadEntry);
+      
+      // Limit number of saved failed uploads (keep most recent 50)
+      if (failedUploads.length > 50) {
+        failedUploads.splice(0, failedUploads.length - 50);
+      }
+      
+      chrome.storage.local.set({failedUploads: failedUploads}, () => {
+        console.log('Failed upload saved for later retry');
+        
+        // Show notification if enabled
+        if (CONFIG.retry.showNotification) {
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/128.png',
+            title: 'Upload Failed',
+            message: `The image "${filename}" failed to upload (${errorMessage}). You can retry from the extension menu.`,
+            priority: 2
+          });
+        }
+      });
+    });
+  }).catch(error => {
+    console.error('Error saving failed upload:', error);
+  });
+}
+
+// Retry all failed uploads
+async function retryFailedUploads() {
+  try {
+    // Get current settings
+    const settings = await new Promise((resolve) => {
+      chrome.storage.sync.get('imageUploaderSettings', (result) => {
+        resolve(result.imageUploaderSettings || CONFIG);
+      });
+    });
+    
+    // Get failed uploads
+    const result = await new Promise((resolve) => {
+      chrome.storage.local.get({failedUploads: []}, (result) => {
+        resolve(result);
+      });
+    });
+    
+    const failedUploads = result.failedUploads || [];
+    
+    if (failedUploads.length === 0) {
+      // Show notification if there's nothing to retry
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/128.png',
+        title: 'Retry Uploads',
+        message: 'No failed uploads found to retry.',
+        priority: 2
+      });
+      return;
+    }
+    
+    // Show progress notification
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/128.png',
+      title: 'Retrying Uploads',
+      message: `Attempting to retry ${failedUploads.length} failed uploads...`,
+      priority: 2
+    });
+    
+    // Track successful and failed retries
+    let successCount = 0;
+    let failureCount = 0;
+    const stillFailed = [];
+    
+    // Process in batches
+    const batchSize = 3;
+    for (let i = 0; i < failedUploads.length; i += batchSize) {
+      const batch = failedUploads.slice(i, i + batchSize);
+      
+      // Process each batch
+      await Promise.all(batch.map(async (entry) => {
+        try {
+          // Convert data URL back to blob
+          const blob = dataURItoBlob(entry.dataUrl);
+          
+          // Get the actual credentials from current settings
+          const currentSettings = {...entry.settings};
+          
+          if (currentSettings.useS3) {
+            currentSettings.s3.accessKeyId = settings.s3.accessKeyId;
+            currentSettings.s3.secretAccessKey = settings.s3.secretAccessKey;
+          } else {
+            currentSettings.r2.accessKeyId = settings.r2.accessKeyId;
+            currentSettings.r2.secretAccessKey = settings.r2.secretAccessKey;
+            currentSettings.r2.apiToken = settings.r2.apiToken;
+          }
+          
+          // Attempt upload
+          if (currentSettings.useS3) {
+            await uploadToS3(blob, entry.filename, entry.imageInfo, entry.sourceInfo, currentSettings, entry.domain);
+          } else {
+            await uploadToR2(blob, entry.filename, entry.imageInfo, entry.sourceInfo, currentSettings, entry.domain);
+          }
+          
+          // Increment success count
+          successCount++;
+        } catch (error) {
+          // Increment failure count
+          failureCount++;
+          
+          // Update retry count and save for next attempt if under max retries
+          entry.retryCount = (entry.retryCount || 0) + 1;
+          entry.lastError = error.message;
+          entry.lastAttempt = Date.now();
+          
+          if (entry.retryCount < CONFIG.retry.maxRetries) {
+            stillFailed.push(entry);
+          }
+        }
+      }));
+    }
+    
+    // Update the failed uploads list
+    await new Promise((resolve) => {
+      chrome.storage.local.set({failedUploads: stillFailed}, resolve);
+    });
+    
+    // Show completion notification
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/128.png',
+      title: 'Retry Uploads Complete',
+      message: `Results: ${successCount} succeeded, ${failureCount} failed. ${stillFailed.length} will be retried later.`,
+      priority: 2
+    });
+    
+  } catch (error) {
+    console.error('Error retrying uploads:', error);
+    
+    // Show error notification
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/128.png',
+      title: 'Retry Error',
+      message: `Error retrying uploads: ${error.message}`,
+      priority: 2
+    });
   }
 }
 
