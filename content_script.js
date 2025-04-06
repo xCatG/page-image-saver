@@ -39,22 +39,37 @@ function loadDomainSettings(domain, callback) {
 
 // Filter images by size
 function filterImagesBySize(images, minWidth, minHeight) {
-  return images.filter(img => {
+  console.log(`Filtering images: ${images.length} images, min dimensions ${minWidth}x${minHeight}`);
+  
+  const filtered = images.filter(img => {
     if (img.type === 'img') {
       // For <img> elements, we can use naturalWidth/Height if available
       const actualWidth = img.naturalWidth || img.width;
       const actualHeight = img.naturalHeight || img.height;
-      return actualWidth >= minWidth && actualHeight >= minHeight;
+      const passes = actualWidth >= minWidth && actualHeight >= minHeight;
+      console.log(`Image (${img.url.substring(0, 30)}...): ${actualWidth}x${actualHeight}, passes: ${passes}`);
+      return passes;
     } else {
       // For background images, we just use the element dimensions
-      return img.width >= minWidth && img.height >= minHeight;
+      const passes = img.width >= minWidth && img.height >= minHeight;
+      console.log(`Background (${img.url.substring(0, 30)}...): ${img.width}x${img.height}, passes: ${passes}`);
+      return passes;
     }
   });
+  
+  console.log(`Filtering results: ${filtered.length} of ${images.length} images passed the filter`);
+  return filtered;
 }
 
 function findAllImages() {
+  console.log('findAllImages() called');
+  
+  // Clear the cache if it exists, to avoid stale data
+  allImagesCache = [];
+  
   // Get all standard image elements
   const imgElements = Array.from(document.querySelectorAll('img'));
+  console.log(`Found ${imgElements.length} img elements`);
   
   // Also look for background images in CSS
   const elementsWithBgImages = Array.from(document.querySelectorAll('*')).filter(el => {
@@ -204,7 +219,7 @@ function findAllImages() {
   });
   
   // Combine both sets of images
-  const allImages = [...imageUrls, ...bgImageUrls]
+  let allImages = [...imageUrls, ...bgImageUrls]
     .filter(img => img.url && img.url.trim() !== '')
     // Filter out data URIs, we want real URLs
     .filter(img => !img.url.startsWith('data:'))
@@ -216,11 +231,29 @@ function findAllImages() {
       return true;
     });
   
+  // Remove duplicate images by URL
+  const uniqueUrls = new Set();
+  allImages = allImages.filter(img => {
+    if (uniqueUrls.has(img.url)) {
+      return false;
+    }
+    uniqueUrls.add(img.url);
+    return true;
+  });
+  
+  console.log(`Found ${allImages.length} unique images after removing duplicates`);
+  
+  console.log('Found images before filtering:', allImages.length);
+  
   // Store all valid images before filtering by size
-  allImagesCache = allImages;
+  allImagesCache = [...allImages]; // Create a clone of the array
+  
+  console.log('Cache size:', allImagesCache.length);
   
   // Now filter by the current domain settings
   const filteredImages = filterImagesBySize(allImages, domainSettings.minWidth, domainSettings.minHeight);
+  
+  console.log('Found images after filtering:', filteredImages.length);
   
   // Set the current filtered images
   currentFilteredImages = filteredImages;
@@ -389,18 +422,35 @@ async function checkImagesFileSizes(images) {
 
 // UI to show found images
 function createImageSelectionUI(images) {
+  console.log('Creating UI for', images.length, 'images');
+  
   // Initialize currentFilteredImages with the images being displayed
   currentFilteredImages = images;
   
-  // Remove any existing UI
+  // Make sure allImagesCache is properly set if it's empty
+  if (allImagesCache.length === 0) {
+    console.log('allImagesCache was empty, initializing from current images');
+    allImagesCache = [...images];
+  }
+  
+  // Remove any existing UI to prevent duplicates
   const existingContainer = document.getElementById('image-selector-container');
   if (existingContainer) {
+    console.log('Removing existing UI before creating a new one');
     document.body.removeChild(existingContainer);
+    // Return early if there's already a UI open and we're clicking the button again with the same images
+    // This prevents duplicate image display when clicking the button multiple times
+    if (currentFilteredImages === images && existingContainer.getAttribute('data-images-count') === images.length.toString()) {
+      console.log('UI was already open with the same images, not re-creating');
+      return;
+    }
   }
 
   // Create a container for our UI
   const container = document.createElement('div');
   container.id = 'image-selector-container';
+  // Add a data attribute to track how many images are being displayed
+  container.setAttribute('data-images-count', images.length.toString());
   container.style.cssText = `
     position: fixed;
     top: 0;
@@ -448,192 +498,29 @@ function createImageSelectionUI(images) {
   `;
   container.appendChild(header);
   
-  // Create scrollable image list
-  const imageList = document.createElement('div');
-  imageList.id = 'image-list';
-  imageList.style.cssText = `
-    flex: 1;
-    overflow-y: auto;
-    margin-top: 15px;
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    align-items: start;
-  `;
-  
-  images.forEach((image, index) => {
-    const imgContainer = document.createElement('div');
-    imgContainer.style.cssText = `
-      border: 1px solid #ddd;
-      padding: 10px;
-      border-radius: 4px;
-      position: relative;
-      height: 185px;
-      display: flex;
-      flex-direction: column;
-      cursor: pointer;
-    `;
-    
-    // Add data attribute for tracking
-    imgContainer.dataset.index = index;
-    
-    // Create checkbox for selection
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.id = `img-${index}`;
-    checkbox.dataset.index = index;
-    checkbox.checked = true;
-    checkbox.style.cssText = `
-      position: absolute;
-      top: 5px;
-      right: 5px;
-      width: 20px;
-      height: 20px;
-      z-index: 2;
-    `;
-    
-    // Create thumbnail container with fixed height
-    const thumbnailContainer = document.createElement('div');
-    thumbnailContainer.style.cssText = `
-      flex: 1;
-      position: relative;
-      overflow: hidden;
-      margin-bottom: 5px;
-      background-color: #f5f5f5;
-    `;
-    
-    // Create thumbnail using IMG element instead of background-image to handle CORS better
-    const thumbnail = document.createElement('div');
-    thumbnail.style.cssText = `
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    `;
-    
-    // Create actual image element
-    const imgEl = document.createElement('img');
-    imgEl.src = image.url;
-    imgEl.style.cssText = `
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-      display: block;
-    `;
-    
-    // Set crossOrigin to anonymous to prevent CORS issues
-    imgEl.crossOrigin = "anonymous";
-    
-    // Add error handling to show placeholder if image fails to load
-    imgEl.onerror = () => {
-      // Create a colored placeholder with text if image fails to load
-      imgEl.style.display = "none";
-      thumbnail.style.backgroundColor = "#f5f5f5";
-      thumbnail.style.color = "#666";
-      thumbnail.style.display = "flex";
-      thumbnail.style.alignItems = "center";
-      thumbnail.style.justifyContent = "center";
-      thumbnail.style.padding = "5px";
-      thumbnail.style.textAlign = "center";
-      thumbnail.style.fontSize = "10px";
-      thumbnail.textContent = "Image Preview Unavailable";
-    };
-    
-    // Append the image to the thumbnail container
-    thumbnail.appendChild(imgEl);
-    
-    thumbnailContainer.appendChild(thumbnail);
-    
-    // Add description
-    const info = document.createElement('div');
-    info.style.cssText = `
-      font-size: 12px;
-      max-height: 32px;
-      word-break: break-all;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      margin-bottom: 2px;
-      pointer-events: none;
-    `;
-    
-    // Set description text - only show alt text if it's meaningful
-    const hasAltText = image.alt && image.alt !== 'No description';
-    info.textContent = hasAltText ? image.alt : '';
-    
-    // Add dimensions as a separate line
-    const dimensionsInfo = document.createElement('div');
-    dimensionsInfo.style.cssText = `
-      font-size: 11px;
-      color: #666;
-      margin-top: 2px;
-      pointer-events: none;
-    `;
-    
-    // Format image dimensions
-    const dimensions = image.naturalWidth && image.naturalHeight 
-      ? `${image.naturalWidth}x${image.naturalHeight}` 
-      : `${image.width}x${image.height}`;
-    
-    // Always show dimensions
-    let displayText = dimensions;
-    
-    // If alt text is missing, add filename before dimensions
-    if (!hasAltText && image.filename) {
-      const shortName = `${image.filename.substring(0, 15)}${image.filename.length > 15 ? '...' : ''}`;
-      displayText = `${shortName} | ${dimensions}`;
-    }
-    
-    dimensionsInfo.textContent = displayText;
-    
-    // Add a tooltip with complete metadata
-    let tooltipContent = `Dimensions: ${dimensions}\n`;
-    
-    if (image.filename) {
-      tooltipContent += `Filename: ${image.filename}\n`;
-    }
-    
-    if (image.alt && image.alt !== 'No description') {
-      tooltipContent += `Alt text: ${image.alt}\n`;
-    }
-    
-    if (image.type === 'background') {
-      tooltipContent += `Element: ${image.element}\n`;
-      if (image.className) tooltipContent += `Class: ${image.className}\n`;
-      if (image.bgSize) tooltipContent += `Background size: ${image.bgSize}\n`;
-    }
-    
-    dimensionsInfo.title = tooltipContent;
-    
-    imgContainer.appendChild(checkbox);
-    imgContainer.appendChild(thumbnailContainer);
-    imgContainer.appendChild(info);
-    imgContainer.appendChild(dimensionsInfo);
-    imageList.appendChild(imgContainer);
-    
-    // Add click event to the container - toggle checkbox when clicking anywhere on the item
-    imgContainer.addEventListener('click', (event) => {
-      // Don't toggle if clicking directly on the checkbox (let the checkbox handle itself)
-      if (event.target !== checkbox) {
-        // Prevent event bubbling
-        event.preventDefault();
-        event.stopPropagation();
-        
-        // Toggle the checkbox
-        checkbox.checked = !checkbox.checked;
-      }
-    });
-  });
-  
-  container.appendChild(imageList);
-  document.body.appendChild(container);
+  //
+
+// Create scrollable image list
+const imageList = document.createElement('div');
+imageList.id = 'image-list';
+imageList.style.cssText = `
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 15px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  align-items: start;
+`;
+
+// Add each image item to the list
+images.forEach((image, index) => {
+  const imgContainer = _createImageItemElement(image, index);
+  imageList.appendChild(imgContainer);
+});
+
+container.appendChild(imageList);
+document.body.appendChild(container);
   
   // Add event listeners
   document.getElementById('select-all-btn').addEventListener('click', () => {
@@ -735,12 +622,28 @@ function applyImageSizeFilter() {
   const minWidth = parseInt(document.getElementById('min-width').value) || 0;
   const minHeight = parseInt(document.getElementById('min-height').value) || 0;
   
+  console.log('Applying size filter:', { minWidth, minHeight });
+  console.log('All images cache:', allImagesCache.length, 'images');
+  
+  // Ensure we have images to filter
+  if (allImagesCache.length === 0) {
+    console.error('Error: No images in cache to filter');
+    showStatusMessage('Error: No images available to filter', 'error');
+    return;
+  }
+  
   // Update domain settings (but don't save to storage yet)
   domainSettings.minWidth = minWidth;
   domainSettings.minHeight = minHeight;
   
+  // Create a shallow copy of the array to avoid modifying the original
+  const imagesToFilter = [...allImagesCache];
+  console.log(`Filtering ${imagesToFilter.length} images with min dimensions ${minWidth}x${minHeight}`);
+  
   // Filter images with new values
-  const filteredImages = filterImagesBySize(allImagesCache, minWidth, minHeight);
+  const filteredImages = filterImagesBySize(imagesToFilter, minWidth, minHeight);
+  
+  console.log('Filtered images:', filteredImages.length, 'images remaining');
   
   // Update the UI to show filtered images
   updateImageList(filteredImages);
@@ -766,8 +669,183 @@ function saveImageSizeFilter() {
   showStatusMessage(`Size filter saved for ${currentDomain}`, 'success');
 }
 
+// Helper function to create an image item element
+function _createImageItemElement(image, index) {
+  const imgContainer = document.createElement('div');
+  imgContainer.style.cssText = `
+    border: 1px solid #ddd;
+    padding: 10px;
+    border-radius: 4px;
+    position: relative;
+    height: 185px;
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+  `;
+  
+  // Add data attribute for tracking
+  imgContainer.dataset.index = index;
+  
+  // Create checkbox for selection
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.id = `img-${index}`;
+  checkbox.dataset.index = index;
+  checkbox.checked = true;
+  checkbox.style.cssText = `
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 20px;
+    height: 20px;
+    z-index: 2;
+  `;
+  
+  // Create thumbnail container with fixed height
+  const thumbnailContainer = document.createElement('div');
+  thumbnailContainer.style.cssText = `
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 5px;
+    background-color: #f5f5f5;
+  `;
+  
+  // Create thumbnail using IMG element instead of background-image to handle CORS better
+  const thumbnail = document.createElement('div');
+  thumbnail.style.cssText = `
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  `;
+  
+  // Create actual image element
+  const imgEl = document.createElement('img');
+  imgEl.src = image.url;
+  imgEl.style.cssText = `
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+  `;
+  
+  // Set crossOrigin to anonymous to prevent CORS issues
+  imgEl.crossOrigin = "anonymous";
+  
+  // Add error handling to show placeholder if image fails to load
+  imgEl.onerror = () => {
+    // Create a colored placeholder with text if image fails to load
+    imgEl.style.display = "none";
+    thumbnail.style.backgroundColor = "#f5f5f5";
+    thumbnail.style.color = "#666";
+    thumbnail.style.display = "flex";
+    thumbnail.style.alignItems = "center";
+    thumbnail.style.justifyContent = "center";
+    thumbnail.style.padding = "5px";
+    thumbnail.style.textAlign = "center";
+    thumbnail.style.fontSize = "10px";
+    thumbnail.textContent = "Image Preview Unavailable";
+  };
+  
+  // Append the image to the thumbnail container
+  thumbnail.appendChild(imgEl);
+  
+  thumbnailContainer.appendChild(thumbnail);
+  
+  // Add description
+  const info = document.createElement('div');
+  info.style.cssText = `
+    font-size: 12px;
+    max-height: 32px;
+    word-break: break-all;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    margin-bottom: 2px;
+    pointer-events: none;
+  `;
+  
+  // Set description text - only show alt text if it's meaningful
+  const hasAltText = image.alt && image.alt !== 'No description';
+  info.textContent = hasAltText ? image.alt : '';
+  
+  // Add dimensions as a separate line
+  const dimensionsInfo = document.createElement('div');
+  dimensionsInfo.style.cssText = `
+    font-size: 11px;
+    color: #666;
+    margin-top: 2px;
+    pointer-events: none;
+  `;
+  
+  // Format image dimensions
+  const dimensions = image.naturalWidth && image.naturalHeight 
+    ? `${image.naturalWidth}x${image.naturalHeight}` 
+    : `${image.width}x${image.height}`;
+  
+  // Always show dimensions
+  let displayText = dimensions;
+  
+  // If alt text is missing, add filename before dimensions
+  if (!hasAltText && image.filename) {
+    const shortName = `${image.filename.substring(0, 15)}${image.filename.length > 15 ? '...' : ''}`;
+    displayText = `${shortName} | ${dimensions}`;
+  }
+  
+  dimensionsInfo.textContent = displayText;
+  
+  // Add a tooltip with complete metadata
+  let tooltipContent = `Dimensions: ${dimensions}\n`;
+  
+  if (image.filename) {
+    tooltipContent += `Filename: ${image.filename}\n`;
+  }
+  
+  if (image.alt && image.alt !== 'No description') {
+    tooltipContent += `Alt text: ${image.alt}\n`;
+  }
+  
+  if (image.type === 'background') {
+    tooltipContent += `Element: ${image.element}\n`;
+    if (image.className) tooltipContent += `Class: ${image.className}\n`;
+    if (image.bgSize) tooltipContent += `Background size: ${image.bgSize}\n`;
+  }
+  
+  dimensionsInfo.title = tooltipContent;
+  
+  imgContainer.appendChild(checkbox);
+  imgContainer.appendChild(thumbnailContainer);
+  imgContainer.appendChild(info);
+  imgContainer.appendChild(dimensionsInfo);
+  
+  // Add click event to the container - toggle checkbox when clicking anywhere on the item
+  imgContainer.addEventListener('click', (event) => {
+    // Don't toggle if clicking directly on the checkbox (let the checkbox handle itself)
+    if (event.target !== checkbox) {
+      // Prevent event bubbling
+      event.preventDefault();
+      event.stopPropagation();
+      
+      // Toggle the checkbox
+      checkbox.checked = !checkbox.checked;
+    }
+  });
+  
+  return imgContainer;
+}
+
 // Update image list with filtered images
 function updateImageList(filteredImages) {
+  console.log('updateImageList called with', filteredImages.length, 'images');
+  
   // Store the filtered images in our global variable
   currentFilteredImages = filteredImages;
   
@@ -775,184 +853,24 @@ function updateImageList(filteredImages) {
   const titleElement = document.querySelector('#image-selector-container h2');
   if (titleElement) {
     titleElement.textContent = `Images Found (${filteredImages.length})`;
+    console.log('Updated title count to', filteredImages.length);
+  } else {
+    console.warn('Title element not found');
   }
   
   // Clear existing image list
   const imageList = document.getElementById('image-list');
-  if (!imageList) return;
+  if (!imageList) {
+    console.error('Image list element not found');
+    return;
+  }
   
   imageList.innerHTML = '';
   
-  // Populate with new filtered images
+  // Populate with new filtered images using the helper function
   filteredImages.forEach((image, index) => {
-    const imgContainer = document.createElement('div');
-    imgContainer.style.cssText = `
-      border: 1px solid #ddd;
-      padding: 10px;
-      border-radius: 4px;
-      position: relative;
-      height: 185px;
-      display: flex;
-      flex-direction: column;
-      cursor: pointer;
-    `;
-    
-    // Add data attribute for tracking
-    imgContainer.dataset.index = index;
-    
-    // Create checkbox for selection
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.id = `img-${index}`;
-    checkbox.dataset.index = index;
-    checkbox.checked = true;
-    checkbox.style.cssText = `
-      position: absolute;
-      top: 5px;
-      right: 5px;
-      width: 20px;
-      height: 20px;
-      z-index: 2;
-    `;
-    
-    // Create thumbnail container with fixed height
-    const thumbnailContainer = document.createElement('div');
-    thumbnailContainer.style.cssText = `
-      flex: 1;
-      position: relative;
-      overflow: hidden;
-      margin-bottom: 5px;
-      background-color: #f5f5f5;
-    `;
-    
-    // Create thumbnail using IMG element instead of background-image to handle CORS better
-    const thumbnail = document.createElement('div');
-    thumbnail.style.cssText = `
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    `;
-    
-    // Create actual image element
-    const imgEl = document.createElement('img');
-    imgEl.src = image.url;
-    imgEl.style.cssText = `
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-      display: block;
-    `;
-    
-    // Set crossOrigin to anonymous to prevent CORS issues
-    imgEl.crossOrigin = "anonymous";
-    
-    // Add error handling to show placeholder if image fails to load
-    imgEl.onerror = () => {
-      // Create a colored placeholder with text if image fails to load
-      imgEl.style.display = "none";
-      thumbnail.style.backgroundColor = "#f5f5f5";
-      thumbnail.style.color = "#666";
-      thumbnail.style.display = "flex";
-      thumbnail.style.alignItems = "center";
-      thumbnail.style.justifyContent = "center";
-      thumbnail.style.padding = "5px";
-      thumbnail.style.textAlign = "center";
-      thumbnail.style.fontSize = "10px";
-      thumbnail.textContent = "Image Preview Unavailable";
-    };
-    
-    // Append the image to the thumbnail container
-    thumbnail.appendChild(imgEl);
-    
-    thumbnailContainer.appendChild(thumbnail);
-    
-    // Add description
-    const info = document.createElement('div');
-    info.style.cssText = `
-      font-size: 12px;
-      max-height: 32px;
-      word-break: break-all;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      margin-bottom: 2px;
-      pointer-events: none;
-    `;
-    
-    // Set description text - only show alt text if it's meaningful
-    const hasAltText = image.alt && image.alt !== 'No description';
-    info.textContent = hasAltText ? image.alt : '';
-    
-    // Add dimensions as a separate line
-    const dimensionsInfo = document.createElement('div');
-    dimensionsInfo.style.cssText = `
-      font-size: 11px;
-      color: #666;
-      margin-top: 2px;
-      pointer-events: none;
-    `;
-    
-    // Format image dimensions
-    const dimensions = image.naturalWidth && image.naturalHeight 
-      ? `${image.naturalWidth}x${image.naturalHeight}` 
-      : `${image.width}x${image.height}`;
-    
-    // Always show dimensions
-    let displayText = dimensions;
-    
-    // If alt text is missing, add filename before dimensions
-    if (!hasAltText && image.filename) {
-      const shortName = `${image.filename.substring(0, 15)}${image.filename.length > 15 ? '...' : ''}`;
-      displayText = `${shortName} | ${dimensions}`;
-    }
-    
-    dimensionsInfo.textContent = displayText;
-    
-    // Add a tooltip with complete metadata
-    let tooltipContent = `Dimensions: ${dimensions}\n`;
-    
-    if (image.filename) {
-      tooltipContent += `Filename: ${image.filename}\n`;
-    }
-    
-    if (image.alt && image.alt !== 'No description') {
-      tooltipContent += `Alt text: ${image.alt}\n`;
-    }
-    
-    if (image.type === 'background') {
-      tooltipContent += `Element: ${image.element}\n`;
-      if (image.className) tooltipContent += `Class: ${image.className}\n`;
-      if (image.bgSize) tooltipContent += `Background size: ${image.bgSize}\n`;
-    }
-    
-    dimensionsInfo.title = tooltipContent;
-    
-    imgContainer.appendChild(checkbox);
-    imgContainer.appendChild(thumbnailContainer);
-    imgContainer.appendChild(info);
-    imgContainer.appendChild(dimensionsInfo);
+    const imgContainer = _createImageItemElement(image, index);
     imageList.appendChild(imgContainer);
-    
-    // Add click event to the container - toggle checkbox when clicking anywhere on the item
-    imgContainer.addEventListener('click', (event) => {
-      // Don't toggle if clicking directly on the checkbox (let the checkbox handle itself)
-      if (event.target !== checkbox) {
-        // Prevent event bubbling
-        event.preventDefault();
-        event.stopPropagation();
-        
-        // Toggle the checkbox
-        checkbox.checked = !checkbox.checked;
-      }
-    });
   });
 }
 
@@ -1189,16 +1107,31 @@ function saveImagesToStorage(images) {
 // Initialize when the user clicks the extension icon or uses keyboard shortcut
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'findImages') {
+    // Check if UI is already open, and just return success if it is
+    const existingContainer = document.getElementById('image-selector-container');
+    if (existingContainer) {
+      console.log('UI already open, not recreating');
+      sendResponse({success: true, count: parseInt(existingContainer.getAttribute('data-images-count') || '0')});
+      return true;
+    }
+    
     // Get current domain and load saved settings for it
     currentDomain = getCurrentDomain();
+    console.log('Finding images for domain:', currentDomain);
     
     loadDomainSettings(currentDomain, (settings) => {
       // Update domain settings
       domainSettings = settings;
+      console.log('Domain settings loaded:', domainSettings);
       
       // Find all images with the loaded filter settings
       const images = findAllImages();
+      console.log(`Found ${images.length} images, creating UI`);
+      
+      // Create the UI with the images
       createImageSelectionUI(images);
+      
+      // Send response with the count
       sendResponse({success: true, count: images.length});
     });
     

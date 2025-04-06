@@ -101,16 +101,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       document.getElementById('r2-public').checked = settings.r2.makePublic || false;
       
-      // Set local download settings
-      if (settings.local) {
-        document.getElementById('local-enabled').checked = settings.local.enabled !== false; // Default to true
-        document.getElementById('local-subfolder-domain').checked = settings.local.subfolderPerDomain !== false; // Default to true
-        
-        // Set base folder if it exists
-        if (document.getElementById('local-base-folder')) {
-          document.getElementById('local-base-folder').value = settings.local.baseFolder || 'PageImageSaver';
-        }
-      }
+      // Local download settings section has been removed from the UI
+      // Keep the data structure in settings for backward compatibility
       
       // Set retry settings
       if (settings.retry) {
@@ -166,10 +158,9 @@ document.addEventListener('DOMContentLoaded', () => {
         makePublic: document.getElementById('r2-public').checked
       },
       local: {
-        enabled: document.getElementById('local-enabled').checked,
-        subfolderPerDomain: document.getElementById('local-subfolder-domain').checked,
-        baseFolder: document.getElementById('local-base-folder') ? 
-          document.getElementById('local-base-folder').value.trim() || 'PageImageSaver' : 'PageImageSaver'
+        enabled: false, // Local download functionality has been removed
+        subfolderPerDomain: false,
+        baseFolder: 'PageImageSaver'
       },
       retry: {
         enabled: document.getElementById('retry-enabled').checked,
@@ -412,8 +403,9 @@ document.addEventListener('DOMContentLoaded', () => {
         makePublic: false
       },
       local: {
-        enabled: false, // Local saving disabled by default
-        subfolderPerDomain: false
+        enabled: false, // Local download functionality has been removed
+        subfolderPerDomain: false,
+        baseFolder: 'PageImageSaver'
       },
       retry: {
         enabled: true,

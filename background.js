@@ -474,8 +474,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     const promises = [];
     
-    // REMOVED: Local saving option for screenshots
-    // We're no longer using local saves to avoid incorrect folder save dialogs
+    // Local saving functionality has been removed
     
     // Upload to cloud storage if configured
     if (isConfigValid()) {
@@ -642,8 +641,7 @@ async function processImage(image, sourceInfo) {
       promises.push(uploadToStorage(imageBlob, filename, image, sourceInfo, domain));
     } else {
       debugLog('Cloud storage not configured or invalid settings');
-      // REMOVED: Local saving fallback
-      // We now show an error message instead of falling back to local saving
+      // Local saving functionality has been removed
     }
     
     if (promises.length === 0) {
@@ -861,15 +859,9 @@ async function uploadToStorage(blob, filename, imageInfo, sourceInfo, domain = '
       debugLog('Attempting to upload to R2...');
       return await uploadToR2(blob, filename, imageInfo, sourceInfo, CONFIG, domain);
     } catch (error) {
-      debugLog('R2 upload failed, trying local save as fallback if enabled');
-      // If R2 upload fails but local saving is enabled, try local saving as a fallback
-      if (CONFIG.local && CONFIG.local.enabled) {
-        debugLog('Attempting local save as fallback after R2 failure');
-        return await saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain);
-      } else {
-        // Re-throw the error if local saving is not enabled
-        throw error;
-      }
+      // Local saving functionality has been removed, just re-throw the error
+      debugLog('R2 upload failed, no fallback available');
+      throw error;
     }
   }
 }
@@ -1279,210 +1271,11 @@ function debugLog(message, data) {
   }
 }
 
-// Save file to local disk using the Chrome Downloads API
-async function saveToLocalDisk(blob, filename, imageInfo, sourceInfo, domain = '') {
-  try {
-    debugLog(`Starting local download for: ${filename}`);
-    debugLog('Local download settings:', CONFIG.local);
-    
-    // Use the custom base folder from settings, defaulting to PageImageSaver
-    const baseFolder = CONFIG.local.baseFolder || 'PageImageSaver';
-    
-    // Make sure the base folder name is valid
-    const sanitizedBaseFolder = baseFolder.replace(/[^a-zA-Z0-9._-]/g, '_');
-    
-    // Always start with a base folder for the extension to keep downloads organized
-    let path = sanitizedBaseFolder + '/';
-    debugLog(`Using base folder: ${path}`);
-    
-    // Add domain subfolder if enabled
-    if (CONFIG.local.subfolderPerDomain && domain) {
-      const sanitizedDomain = sanitizeDomain(domain);
-      path += sanitizedDomain + '/';
-      debugLog(`Using domain subfolder: ${path}`);
-    } else {
-      // If not using domain folders, at least organize by date
-      const today = new Date();
-      const dateFolder = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}/`;
-      path += dateFolder;
-      debugLog(`Using date folder: ${path}`);
-    }
-    
-    debugLog(`Final path structure: ${path}`);
-    
-    // For service workers, we need to use a different approach since URL.createObjectURL is not available
-    // Convert the blob to a base64 data URL
-    const reader = new FileReader();
-    const dataUrlPromise = new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('Failed to convert blob to data URL'));
-      reader.readAsDataURL(blob);
-    });
-    
-    const dataUrl = await dataUrlPromise;
-    debugLog(`Converted blob to data URL (length: ${dataUrl.length})`);
-    
-    // Track the filename we're trying to use
-    const targetFilename = path + filename;
-    debugLog(`🔍 Attempting to save with filename: "${targetFilename}"`);
-    
-    // Make sure the target filename has the right file extension based on the content type
-    let finalTargetFilename = targetFilename;
-    if (!finalTargetFilename.includes('.')) {
-      // Add appropriate extension based on content type
-      const ext = getExtensionFromContentType(blob.type);
-      finalTargetFilename += ext;
-      debugLog(`Added file extension to filename: "${finalTargetFilename}"`);
-    }
-    
-    // Prepare download options - Edge may have issues with file paths
-    // Try with saveAs option to allow the user to confirm the filename
-    const downloadOptions = {
-      url: dataUrl,
-      filename: finalTargetFilename,
-      saveAs: true, // Show save dialog to ensure proper filename (works better in Edge)
-      conflictAction: 'uniquify' // Automatically rename if file exists
-    };
-    
-    // Check browser type
-    const browserType = detectBrowser();
-    debugLog(`Browser detected for this download: ${browserType}`);
-    
-    // Check if we're in Edge or if Edge mode is enabled
-    let edgeMode = browserType === "Edge";
-    
-    // Check if Edge mode is manually enabled/disabled in settings
-    chrome.storage.local.get(['edgeMode'], (result) => {
-      if (result.edgeMode !== undefined) {
-        edgeMode = result.edgeMode;
-        debugLog(`Using manual Edge mode setting: ${edgeMode}`);
-      }
-    });
-    
-    if (browserType === "Edge" || edgeMode) {
-      debugLog("⚠️ Microsoft Edge detected or Edge mode enabled - using saveAs dialog");
-      // For Edge, show the save dialog to let user choose the save location and confirm filename
-      downloadOptions.saveAs = true;
-      
-      // Create a "suggested" filename that's more descriptive than "download.jpg"
-      // This helps the user identify what they're saving even if Edge doesn't use the folder structure
-      if (!finalTargetFilename.includes('/')) {
-        // If there's no path separator, it's just a filename
-        const edgeFilename = `PageImageSaver_${Date.now()}_${finalTargetFilename}`;
-        downloadOptions.filename = edgeFilename;
-        debugLog(`📋 Edge-specific filename: ${edgeFilename}`);
-      } else {
-        // If there is a path, extract just the filename part for Edge
-        const lastSlash = finalTargetFilename.lastIndexOf('/');
-        const filenameOnly = finalTargetFilename.substring(lastSlash + 1);
-        const edgeFilename = `PageImageSaver_${filenameOnly}`;
-        downloadOptions.filename = edgeFilename;
-        debugLog(`📋 Edge-specific filename (extracted): ${edgeFilename}`);
-      }
-    }
-    
-    // Log the complete download options
-    debugLog('Complete download options:', JSON.stringify(downloadOptions, null, 2));
-    
-    debugLog('Download options:', downloadOptions);
-    
-    // Start the download
-    debugLog('Initiating chrome.downloads.download...');
-    const downloadId = await chrome.downloads.download(downloadOptions);
-    debugLog(`Download started with ID: ${downloadId}`);
-    
-    // Explicitly log download destinations right away
-    chrome.downloads.search({id: downloadId}, (downloads) => {
-      if (downloads && downloads.length > 0) {
-        const download = downloads[0];
-        debugLog('⭐⭐⭐ INITIAL DOWNLOAD DESTINATION:', download.filename);
-        
-        // Also check the default download directory settings
-        chrome.downloads.search({}, (allDownloads) => {
-          debugLog('Recent downloads to help identify download location:');
-          const recentDownloads = allDownloads.slice(0, 3);
-          recentDownloads.forEach(d => {
-            debugLog(`Download #${d.id}: ${d.filename}`);
-          });
-        });
-      }
-    });
-    
-    // No need to revoke data URLs as they're not stored in the browser's memory like blob URLs
-    
-    // Listen for download completion
-    return new Promise((resolve, reject) => {
-      const downloadListener = (delta) => {
-        debugLog('Download status change:', delta);
-        if (delta.id === downloadId && delta.state) {
-          if (delta.state.current === 'complete') {
-            debugLog(`✅ Download #${downloadId} completed successfully`);
-            
-            // Get the full path from the downloads API
-            chrome.downloads.search({ id: downloadId }, (results) => {
-              if (results && results.length > 0) {
-                const download = results[0];
-                
-                // Parse the actual filename from the full path
-                const fullPath = download.filename;
-                const lastSeparatorIndex = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
-                const actualFilename = lastSeparatorIndex > -1 ? fullPath.substring(lastSeparatorIndex + 1) : fullPath;
-                
-                debugLog('💾 DOWNLOAD SAVED TO LOCAL PATH:', download.filename);
-                debugLog(`📄 ACTUAL FILENAME USED: "${actualFilename}" (expected: "${path + filename}")`);
-                debugLog('Download complete details:', download);
-                debugLog(`⭐⭐⭐ DOWNLOAD STATE: ${download.state} - Expected filename: ${path + filename}`);
-                
-                // Check if the filename matches what we expected
-                if (actualFilename === 'download.jpg' || actualFilename.startsWith('download')) {
-                  debugLog(`⚠️ WARNING: Generic filename "${actualFilename}" was used instead of "${path + filename}"`);
-                }
-                
-                // Add a definitive breakpoint opportunity
-                debugger; // This will pause execution when DevTools is open
-                
-                chrome.downloads.onChanged.removeListener(downloadListener);
-                resolve({
-                  success: true,
-                  type: 'local',
-                  path: path + filename,
-                  fullPath: download.filename,
-                  actualFilename: actualFilename
-                });
-              } else {
-                debugLog(`⚠️ Could not find download details for ID: ${downloadId}`);
-                chrome.downloads.onChanged.removeListener(downloadListener);
-                resolve({
-                  success: true,
-                  type: 'local',
-                  path: path + filename
-                });
-              }
-            });
-          } else if (delta.state.current === 'interrupted') {
-            debugLog(`❌ Download interrupted:`, delta.error);
-            chrome.downloads.onChanged.removeListener(downloadListener);
-            reject(new Error(`Download failed: ${delta.error?.current || 'unknown error'}`));
-          }
-        }
-      };
-      
-      chrome.downloads.onChanged.addListener(downloadListener);
-    });
-  } catch (error) {
-    debugLog(`❌ Local download error: ${error.message}`);
-    debugLog('Error stack:', error.stack);
-    return {
-      success: false,
-      error: `Local download failed: ${error.message}`
-    };
-  }
-}
+// Local disk saving functionality has been removed
 
 // Check if the configuration is valid for cloud storage operations
 function isConfigValid() {
-  // Specifically disable local saves to avoid save-as dialog issues
-  CONFIG.local = { enabled: false };
+  // Local saving functionality has been removed
   
   if (CONFIG.useS3) {
     return !!(CONFIG.s3.accessKeyId && CONFIG.s3.secretAccessKey && CONFIG.s3.bucketName);
