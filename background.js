@@ -3,7 +3,7 @@
 function showSavePathNotification(path) {
   chrome.notifications.create({
     type: 'basic',
-    iconUrl: 'icons/icon128.png',
+    iconUrl: 'icons/48.png',
     title: 'Image Saved',
     message: `File saved to:\n${path}`,
     priority: 2
@@ -107,25 +107,30 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// Add a context menu item to open settings
-chrome.contextMenus.create({
-  id: 'openSettings',
-  title: 'Settings',
-  contexts: ['action'] // Only show when clicking on extension icon
-});
-
-// Add a retry uploads menu item
-chrome.contextMenus.create({
-  id: 'retryUploads',
-  title: 'Retry Failed Uploads',
-  contexts: ['action'] // Only show when clicking on extension icon
-});
-
-// Add a debug menu item to check download paths
-chrome.contextMenus.create({
-  id: 'debugDownloadPath',
-  title: 'Debug: Show Download Location',
-  contexts: ['action'] // Only show when clicking on extension icon
+// Clear existing context menus to avoid duplicates
+chrome.contextMenus.removeAll(() => {
+  console.log('Removed all existing context menus');
+  
+  // Add a context menu item to open settings
+  chrome.contextMenus.create({
+    id: 'openSettings',
+    title: 'Settings',
+    contexts: ['action'] // Only show when clicking on extension icon
+  });
+  
+  // Add a retry uploads menu item
+  chrome.contextMenus.create({
+    id: 'retryUploads',
+    title: 'Retry Failed Uploads',
+    contexts: ['action'] // Only show when clicking on extension icon
+  });
+  
+  // Add a debug menu item to check download paths
+  chrome.contextMenus.create({
+    id: 'debugDownloadPath',
+    title: 'Debug: Show Download Location',
+    contexts: ['action'] // Only show when clicking on extension icon
+  });
 });
 
 // If we're in Edge, add an Edge-specific option
@@ -149,7 +154,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       if (failedUploads.length === 0) {
         chrome.notifications.create({
           type: 'basic',
-          iconUrl: 'icons/128.png',
+          iconUrl: 'icons/48.png',
           title: 'Retry Uploads',
           message: 'No failed uploads found to retry.',
           priority: 2
@@ -158,7 +163,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         // Confirm retry with the user
         chrome.notifications.create({
           type: 'basic',
-          iconUrl: 'icons/128.png',
+          iconUrl: 'icons/48.png',
           title: 'Retry Uploads',
           message: `Found ${failedUploads.length} failed uploads. Retrying...`,
           priority: 2
@@ -177,7 +182,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       chrome.storage.local.set({ edgeMode: newMode }, () => {
         chrome.notifications.create({
           type: 'basic',
-          iconUrl: 'icons/icon128.png',
+          iconUrl: 'icons/48.png',
           title: 'Edge Save Mode',
           message: newMode 
             ? 'Edge Mode enabled: Save dialog will always be shown for downloads' 
@@ -205,7 +210,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           // Show notification with the directory path
           chrome.notifications.create({
             type: 'basic',
-            iconUrl: 'icons/icon128.png',
+            iconUrl: 'icons/48.png',
             title: 'Download Directory',
             message: `Chrome is saving files to:\n${directoryPath}`,
             priority: 2
@@ -215,7 +220,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         debugLog('No recent downloads found');
         chrome.notifications.create({
           type: 'basic',
-          iconUrl: 'icons/icon128.png',
+          iconUrl: 'icons/48.png',
           title: 'Download Directory',
           message: 'No recent downloads found to determine the directory.',
           priority: 2
@@ -260,7 +265,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
               
               chrome.notifications.create({
                 type: 'basic',
-                iconUrl: 'icons/icon128.png',
+                iconUrl: 'icons/48.png',
                 title: 'Test Download Filename',
                 message: `Expected: ${testFilename}\nActual: ${actualFilename}`,
                 priority: 2
@@ -1548,7 +1553,7 @@ function saveFailedUpload(blob, filename, imageInfo, sourceInfo, settings, domai
         if (CONFIG.retry.showNotification) {
           chrome.notifications.create({
             type: 'basic',
-            iconUrl: 'icons/128.png',
+            iconUrl: 'icons/48.png', // Use an icon that definitely exists
             title: 'Upload Failed',
             message: `The image "${filename}" failed to upload (${errorMessage}). You can retry from the extension menu.`,
             priority: 2
@@ -1584,7 +1589,7 @@ async function retryFailedUploads() {
       // Show notification if there's nothing to retry
       chrome.notifications.create({
         type: 'basic',
-        iconUrl: 'icons/128.png',
+        iconUrl: 'icons/48.png',
         title: 'Retry Uploads',
         message: 'No failed uploads found to retry.',
         priority: 2
@@ -1595,7 +1600,7 @@ async function retryFailedUploads() {
     // Show progress notification
     chrome.notifications.create({
       type: 'basic',
-      iconUrl: 'icons/128.png',
+      iconUrl: 'icons/48.png',
       title: 'Retrying Uploads',
       message: `Attempting to retry ${failedUploads.length} failed uploads...`,
       priority: 2
@@ -1662,7 +1667,7 @@ async function retryFailedUploads() {
     // Show completion notification
     chrome.notifications.create({
       type: 'basic',
-      iconUrl: 'icons/128.png',
+      iconUrl: 'icons/48.png',
       title: 'Retry Uploads Complete',
       message: `Results: ${successCount} succeeded, ${failureCount} failed. ${stillFailed.length} will be retried later.`,
       priority: 2
@@ -1674,7 +1679,7 @@ async function retryFailedUploads() {
     // Show error notification
     chrome.notifications.create({
       type: 'basic',
-      iconUrl: 'icons/128.png',
+      iconUrl: 'icons/48.png',
       title: 'Retry Error',
       message: `Error retrying uploads: ${error.message}`,
       priority: 2
