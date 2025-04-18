@@ -39,6 +39,7 @@ This error occurred in the `uploadToR2WithToken` function when trying to upload 
 - Implemented a global `mouseover` listener (with a short debounce) to trigger `findAllImages()` on hover events, catching pop‑up or lazy‑load widgets that inject/remove nodes too quickly for the observer alone.
 - Centralized de‑duplication via a global `discoveredUrls` `Set`, ensuring no URL is processed more than once across the initial static scan, network-level intercepts, and DOM hooks.
 - Wrapped all `chrome.tabs.sendMessage` calls in callback form to handle `chrome.runtime.lastError` and avoid uncaught exceptions when sending to tabs without a listener.
+- Introduced a `dynamicImageObjs` cache to store images discovered *before* the UI is opened and merged this cache into the static initial scan in `findAllImages()`, ensuring pre-UI hover and lazy-loaded images appear when the picker is first displayed.
 
 ## Testing Results
 The fixes allow images to be saved even if there are issues with the R2 upload process. If R2 upload fails, the extension will attempt to save locally based on the user's settings.
