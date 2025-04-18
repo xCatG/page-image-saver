@@ -1067,28 +1067,31 @@ function _createImageItemElement(image, index) {
 
 // Update image list with filtered images
 function updateImageList(filteredImages) {
-  // Ensure the UI container and title element exist before updating
-  const container = document.getElementById('image-selector-container');
-  if (!container) return;
-  const titleElement = container.querySelector('h2');
-  if (!titleElement) return;
-  
-  // Store the filtered images in our global variable
-  currentFilteredImages = filteredImages;
-  // Update title count
-  titleElement.textContent = `Images Found (${filteredImages.length})`;
-  console.log('Updated title count to', filteredImages.length);
-  
-  // Clear existing image list
-  const imageList = document.getElementById('image-list');
-  if (!imageList) return;
-  imageList.innerHTML = '';
-  
-  // Populate with new filtered images using the helper function
-  filteredImages.forEach((image, index) => {
-    const imgContainer = _createImageItemElement(image, index);
-    imageList.appendChild(imgContainer);
-  });
+  try {
+    // Ensure the UI container and title element exist before updating
+    const container = document.getElementById('image-selector-container');
+    if (!container) return;
+    const titleElement = container.querySelector('h2');
+    if (!titleElement) return;
+
+    // Store the filtered images in our global variable
+    currentFilteredImages = filteredImages;
+    // Update title count
+    titleElement.textContent = `Images Found (${filteredImages.length})`;
+
+    // Clear existing image list
+    const imageList = document.getElementById('image-list');
+    if (!imageList) return;
+    imageList.innerHTML = '';
+
+    // Populate with new filtered images using the helper function
+    filteredImages.forEach((image, index) => {
+      const imgContainer = _createImageItemElement(image, index);
+      imageList.appendChild(imgContainer);
+    });
+  } catch (error) {
+    // UI may not be ready; silently ignore update errors
+  }
 }
 
 // Function to show status message
