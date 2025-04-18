@@ -31,6 +31,14 @@ This error occurred in the `uploadToR2WithToken` function when trying to upload 
 - Modified the `uploadToStorage` function to properly handle errors and attempt fallbacks
 - Updated the image processing function to ensure local saving is tried when needed
 - Added sanitization for strings used in headers to prevent encoding issues
+  
+### 5. Dynamic Image Discovery Enhancements
+- Added a `chrome.webRequest.onCompleted` listener in the background service worker to intercept **all** image network requests (including those never inserted into the DOM) and forward each URL to the content script via a `dynamicImageLoaded` message.
+- Introduced `handleDynamicImage(url)` in the content script: uses a JS `Image()` object to load transient images, extract natural dimensions, construct a full metadata object, and feed it into the existing UI if it passes domain size filters.
+- Deployed a `MutationObserver` on `document.documentElement` to watch for newly added `<img>` elements and CSS `background-image` changes (including elements that appear only on hover or via dynamic scripts), routing all discovered URLs to `handleDynamicImage`.
+- Implemented a global `mouseover` listener (with a short debounce) to trigger `findAllImages()` on hover events, catching pop‑up or lazy‑load widgets that inject/remove nodes too quickly for the observer alone.
+- Centralized de‑duplication via a global `discoveredUrls` `Set`, ensuring no URL is processed more than once across the initial static scan, network-level intercepts, and DOM hooks.
+- Wrapped all `chrome.tabs.sendMessage` calls in callback form to handle `chrome.runtime.lastError` and avoid uncaught exceptions when sending to tabs without a listener.
 
 ## Testing Results
 The fixes allow images to be saved even if there are issues with the R2 upload process. If R2 upload fails, the extension will attempt to save locally based on the user's settings.
