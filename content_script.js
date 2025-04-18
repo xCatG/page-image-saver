@@ -7,6 +7,8 @@ window.PageImageSaverLoaded = true;
 let currentDomain = '';
 let allImagesCache = [];
 let currentFilteredImages = []; // Add this line to track current filtered images
+// Global set to dedupe URLs across all discovery methods
+let discoveredUrls = new Set();
 let domainSettings = {
   minWidth: 50,
   minHeight: 50
@@ -150,6 +152,50 @@ function getExtensionFromContentType(contentType) {
       'image/tiff': '.tiff',
     };
     return typeMap[contentType.toLowerCase()] || '.jpg'; // Default to .jpg
+}
+/**
+ * Handle a dynamically loaded image URL (from network or DOM),
+ * create an Image object to extract metadata, and update UI.
+ */
+function handleDynamicImage(url) {
+  // Avoid duplicates using global discoveredUrls set
+  if (discoveredUrls.has(url)) {
+    return;
+  }
+  // Load image for metadata
+  const imgEl = new Image();
+  imgEl.onload = () => {
+    const imageObj = {
+      url: url,
+      alt: url.split('/').pop() || '',
+      width: imgEl.naturalWidth,
+      height: imgEl.naturalHeight,
+      naturalWidth: imgEl.naturalWidth,
+      naturalHeight: imgEl.naturalHeight,
+      type: 'dynamic',
+      filename: url.split('/').pop().split('?')[0].split('#')[0],
+      title: '',
+      loading: '',
+      dataAttributes: {},
+      sourceAttribute: 'dynamic',
+      isLoaded: true
+    };
+    // Mark URL as seen and add to cache
+    discoveredUrls.add(url);
+    allImagesCache.push(imageObj);
+    // Apply current domain size filters
+    if (imageObj.width >= domainSettings.minWidth && imageObj.height >= domainSettings.minHeight) {
+      currentFilteredImages.push(imageObj);
+      // Only update UI if the image selector UI is open
+      if (document.getElementById('image-selector-container')) {
+        updateImageList(currentFilteredImages);
+      }
+    }
+  };
+  imgEl.onerror = () => {
+    console.warn('Failed to load dynamic image for metadata:', url);
+  };
+  imgEl.src = url;
 }
 
 function findAllImages() {
@@ -418,7 +464,7 @@ function findAllImages() {
     // Remove duplicates by URL
     const uniqueUrls = new Set();
     allImages = allImages.filter(img => {
-        if (!img || !img.url) return false; // Extra safety check
+        if (!img || !img.url) return false;
         if (uniqueUrls.has(img.url)) {
             return false;
         }
@@ -1021,27 +1067,21 @@ function _createImageItemElement(image, index) {
 
 // Update image list with filtered images
 function updateImageList(filteredImages) {
-  console.log('updateImageList called with', filteredImages.length, 'images');
+  // Ensure the UI container and title element exist before updating
+  const container = document.getElementById('image-selector-container');
+  if (!container) return;
+  const titleElement = container.querySelector('h2');
+  if (!titleElement) return;
   
   // Store the filtered images in our global variable
   currentFilteredImages = filteredImages;
-  
   // Update title count
-  const titleElement = document.querySelector('#image-selector-container h2');
-  if (titleElement) {
-    titleElement.textContent = `Images Found (${filteredImages.length})`;
-    console.log('Updated title count to', filteredImages.length);
-  } else {
-    console.warn('Title element not found');
-  }
+  titleElement.textContent = `Images Found (${filteredImages.length})`;
+  console.log('Updated title count to', filteredImages.length);
   
   // Clear existing image list
   const imageList = document.getElementById('image-list');
-  if (!imageList) {
-    console.error('Image list element not found');
-    return;
-  }
-  
+  if (!imageList) return;
   imageList.innerHTML = '';
   
   // Populate with new filtered images using the helper function
@@ -1322,8 +1362,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Initialize screenshot flow
     window.PageScreenshot.initiateScreenshot();
     sendResponse({success: true});
+    return true;
+  } else if (message.action === 'dynamicImageLoaded') {
+    handleDynamicImage(message.url);
+    try { sendResponse({received: true}); } catch (e) {}
+    return true;
   }
-  return true; // Keep the message channel open for async responses
+  // Keep the message channel open for async responses
+  return true;
 });
 
 // Load the screenshot functionality
@@ -1361,3 +1407,54 @@ if (document.readyState === 'loading') {
 } else {
   console.log('Page Image Saver: DOM already loaded when script ran');
 }
+// ================= Dynamic Image Capture (network & DOM & hover) =================
+(function() {
+  // 2. MutationObserver to catch transient DOM additions/removals
+  const mo = new MutationObserver(records => {
+    records.forEach(record => {
+      record.addedNodes.forEach(node => {
+        if (node.nodeType !== 1) return;
+        if (node.tagName === 'IMG' && node.src) {
+          handleDynamicImage(node.src);
+        }
+        const style = window.getComputedStyle(node);
+        const bg = style.backgroundImage;
+        if (bg && bg.startsWith('url(')) {
+          const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
+          if (m && m[1]) {
+            handleDynamicImage(m[1]);
+          }
+        }
+      });
+      if (record.type === 'attributes' && (record.attributeName === 'style' || record.attributeName === 'class')) {
+        const node = record.target;
+        if (node.nodeType !== 1) return;
+        const style = window.getComputedStyle(node);
+        const bg = style.backgroundImage;
+        if (bg && bg.startsWith('url(')) {
+          const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
+          if (m && m[1]) {
+            handleDynamicImage(m[1]);
+          }
+        }
+      }
+    });
+  });
+  mo.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['style', 'class']
+  });
+
+  // 3. Hover listener to catch pop-up or lazy-loaded content on mouseover
+  let hoverTimer;
+  document.addEventListener('mouseover', () => {
+    findAllImages();
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      findAllImages();
+    }, 200);
+  }, true);
+})();
+// =======================================================================

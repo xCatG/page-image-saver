@@ -28,6 +28,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep the message channel open for async response
   }
 });
+// Listen to all image network requests and notify content scripts of dynamic loads
+chrome.webRequest.onCompleted.addListener((details) => {
+  // Only forward image requests from valid tabs
+  if (details.tabId >= 0 && details.type === 'image' && details.url) {
+    // Fire-and-forget; include callback to swallow errors if no content script is listening
+    chrome.tabs.sendMessage(details.tabId, {
+      action: 'dynamicImageLoaded',
+      url: details.url,
+      timestamp: details.timeStamp
+    }, () => {
+      if (chrome.runtime.lastError) {
+        // No receiver in tab (content script not loaded); ignore
+      }
+    });
+  }
+}, {
+  urls: ["<all_urls>"]
+});
 
 // Default configuration (will be overridden by user settings)
 const DEFAULT_CONFIG = {
@@ -299,11 +317,12 @@ chrome.action.onClicked.addListener(tab => {
         }).then(() => {
           // Wait a moment for the script to initialize
           setTimeout(() => {
-            chrome.tabs.sendMessage(tab.id, {action: 'findImages'})
-              .catch(error => {
-                console.error('Error sending message after injection:', error);
+            chrome.tabs.sendMessage(tab.id, {action: 'findImages'}, response => {
+              if (chrome.runtime.lastError) {
+                console.error('Error sending message after injection:', chrome.runtime.lastError);
                 chrome.tabs.create({ url: 'settings.html' });
-              });
+              }
+            });
           }, 500);
         }).catch(error => {
           console.error('Error injecting content script:', error);
@@ -311,13 +330,14 @@ chrome.action.onClicked.addListener(tab => {
         });
       } else {
         // Content script is loaded, send message directly
-        chrome.tabs.sendMessage(tab.id, {action: 'findImages'})
-          .catch(error => {
-            console.error('Error sending message to content script:', error);
-            if (error.message && error.message.includes('Could not establish connection')) {
+        chrome.tabs.sendMessage(tab.id, {action: 'findImages'}, response => {
+          if (chrome.runtime.lastError) {
+            console.error('Error sending message to content script:', chrome.runtime.lastError);
+            if (chrome.runtime.lastError.message && chrome.runtime.lastError.message.includes('Could not establish connection')) {
               chrome.tabs.create({ url: 'settings.html' });
             }
-          });
+          }
+        });
       }
     }).catch(error => {
       console.error('Error checking for content script:', error);
@@ -352,10 +372,11 @@ chrome.commands.onCommand.addListener(command => {
               // Wait a moment for script to initialize
               setTimeout(() => {
                 const action = command === 'find_images' ? 'findImages' : 'takeScreenshot';
-                chrome.tabs.sendMessage(tab.id, {action: action})
-                  .catch(error => {
-                    console.error(`Error sending ${action} message after injection:`, error);
-                  });
+                chrome.tabs.sendMessage(tab.id, {action: action}, response => {
+                  if (chrome.runtime.lastError) {
+                    console.error(`Error sending ${action} message after injection:`, chrome.runtime.lastError);
+                  }
+                });
               }, 500);
             }).catch(error => {
               console.error('Error injecting content script:', error);
@@ -363,10 +384,11 @@ chrome.commands.onCommand.addListener(command => {
           } else {
             // Content script is loaded, send message directly
             const action = command === 'find_images' ? 'findImages' : 'takeScreenshot';
-            chrome.tabs.sendMessage(tab.id, {action: action})
-              .catch(error => {
-                console.error(`Error sending ${action} message to content script:`, error);
-              });
+            chrome.tabs.sendMessage(tab.id, {action: action}, response => {
+              if (chrome.runtime.lastError) {
+                console.error(`Error sending ${action} message to content script:`, chrome.runtime.lastError);
+              }
+            });
           }
         }).catch(error => {
           console.error('Error checking for content script:', error);
