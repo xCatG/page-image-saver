@@ -61,204 +61,381 @@ function filterImagesBySize(images, minWidth, minHeight) {
   return filtered;
 }
 
+/**
+ * Helper function to parse srcset attribute and find the best (highest width) URL.
+ * Handles cases with and without 'w' descriptors.
+ * @param {string} srcsetValue The srcset string.
+ * @returns {{url: string, width: number} | null} The best source object found or null.
+ */
+function parseSrcset(srcsetValue) {
+    if (!srcsetValue) return null;
+
+    try {
+        const sources = srcsetValue.split(',').map(s => s.trim());
+        let bestSource = { url: '', width: -1 }; // Use -1 to indicate nothing found yet
+        let firstValidUrl = null; // Track the first valid URL for fallback
+
+        sources.forEach(item => {
+            const parts = item.split(/\s+/); // Split URL and potential descriptor
+            const url = parts[0];
+            let width = 0; // Default width if no 'w' descriptor
+
+            // Basic URL validation (skip empty, data, blob)
+            if (!url || url.trim() === '' || url.startsWith('data:') || url.startsWith('blob:')) {
+                return; // Skip this source candidate
+            }
+
+            // Additional path validation - accept absolute URLs, protocol-relative URLs (//) 
+            // and reject relative URLs that start with a single slash
+            if (!(url.startsWith('http://') || url.startsWith('https://') || 
+                   url.startsWith('//') || !url.startsWith('/'))) {
+                return; // Skip invalid URLs
+            }
+
+            // Track the first *valid* URL found in the list as a fallback
+            if (firstValidUrl === null) {
+                firstValidUrl = url;
+            }
+
+            // Check if a width descriptor ('w') exists
+            if (parts.length > 1 && parts[1].endsWith('w')) {
+                const parsedWidth = parseInt(parts[1].replace('w', ''), 10);
+                // Use the parsed width if valid, otherwise keep width = 0
+                if (!isNaN(parsedWidth)) {
+                    width = parsedWidth;
+                }
+            }
+
+            // --- Logic to select the best source ---
+            // If the current source's width is greater than the best one found so far,
+            // update bestSource.
+            if (width > bestSource.width) {
+                bestSource = { url: url, width: width };
+            }
+            // --- End selection logic ---
+        });
+
+        // --- Determine final result ---
+        // If we found at least one source with a valid width descriptor (even 0w),
+        // 'bestSource.width' will be >= 0. Return that best source.
+        if (bestSource.width > -1) {
+            return bestSource;
+        }
+
+        // Otherwise, if no width descriptors were found at all, but we did find
+        // at least one valid URL, return the *first* valid URL encountered.
+        if (firstValidUrl !== null) {
+            return { url: firstValidUrl, width: 0 }; // Indicate width is unknown/default
+        }
+
+        // If the srcset was empty or contained no valid sources
+        return null;
+
+    } catch (error) {
+        console.warn('Error parsing srcset:', srcsetValue, error);
+        return null; // Return null on any parsing error
+    }
+}
+
+// Helper function for extension recognition
+function getExtensionFromContentType(contentType) {
+    if (!contentType) return '.jpg';
+    const typeMap = {
+      'image/jpeg': '.jpg', 'image/jpg': '.jpg',
+      'image/png': '.png',
+      'image/gif': '.gif',
+      'image/webp': '.webp',
+      'image/svg+xml': '.svg',
+      'image/bmp': '.bmp',
+      'image/tiff': '.tiff',
+    };
+    return typeMap[contentType.toLowerCase()] || '.jpg'; // Default to .jpg
+}
+
 function findAllImages() {
-  console.log('findAllImages() called');
-  
-  // Clear the cache if it exists, to avoid stale data
-  allImagesCache = [];
-  
-  // Get all standard image elements
-  const imgElements = Array.from(document.querySelectorAll('img'));
-  console.log(`Found ${imgElements.length} img elements`);
-  
-  // Also look for background images in CSS
-  const elementsWithBgImages = Array.from(document.querySelectorAll('*')).filter(el => {
-    const style = window.getComputedStyle(el);
-    const bgImage = style.backgroundImage;
-    return bgImage && bgImage !== 'none' && bgImage.startsWith('url(');
-  });
-  
-  // Extract image URLs from the elements with enhanced metadata
-  const imageUrls = imgElements.map(img => {
-    let altText = img.alt || '';
-    
-    // If no alt text is available, try to find it in parent or sibling elements
-    if (!altText) {
-      // Check for figure caption
-      const figure = img.closest('figure');
-      if (figure) {
-        const figcaption = figure.querySelector('figcaption');
-        if (figcaption) {
-          altText = figcaption.textContent.trim();
-        }
-      }
-      
-      // Check for nearby captions or descriptive text
-      if (!altText) {
-        // Try nearby div with class containing 'caption'
-        const parent = img.parentElement;
-        if (parent) {
-          const caption = parent.querySelector('div[class*="caption"], .caption, [class*="Caption"], [id*="caption"]');
-          if (caption) {
-            altText = caption.textContent.trim();
-          }
-        }
-      }
-    }
-    
-    // If still no alt text, look for title attribute
-    if (!altText) {
-      altText = img.title || 'No description';
-    }
-    
-    // Get image filename from src
-    let filename = '';
-    try {
-      const urlObj = new URL(img.src);
-      const pathname = urlObj.pathname;
-      filename = pathname.substring(pathname.lastIndexOf('/') + 1);
-      // Remove query parameters
-      filename = filename.split('?')[0];
-    } catch (e) {
-      // If URL parsing fails, just use the last part of the src
-      const parts = img.src.split('/');
-      filename = parts[parts.length - 1].split('?')[0];
-    }
-    
-    // Collect any data attributes that might contain useful metadata
-    const dataAttributes = {};
-    for (const attr of img.attributes) {
-      if (attr.name.startsWith('data-')) {
-        dataAttributes[attr.name] = attr.value;
-      }
-    }
-    
-    return {
-      url: img.src,
-      alt: altText,
-      width: img.width,
-      height: img.height,
-      naturalWidth: img.naturalWidth,
-      naturalHeight: img.naturalHeight,
-      type: 'img',
-      filename: filename,
-      title: img.title || '',
-      loading: img.loading || '',
-      dataAttributes: dataAttributes
-    };
-  });
-  
-  // Extract background image URLs with enhanced metadata
-  const bgImageUrls = elementsWithBgImages.map(el => {
-    const style = window.getComputedStyle(el);
-    const bgImageUrl = style.backgroundImage.match(/url\(['"]?(.*?)['"]?\)/)[1];
-    
-    // Get image filename from url
-    let filename = '';
-    try {
-      const urlObj = new URL(bgImageUrl);
-      const pathname = urlObj.pathname;
-      filename = pathname.substring(pathname.lastIndexOf('/') + 1);
-      // Remove query parameters
-      filename = filename.split('?')[0];
-    } catch (e) {
-      // If URL parsing fails, just use the last part of the url
-      const parts = bgImageUrl.split('/');
-      filename = parts[parts.length - 1].split('?')[0];
-    }
-    
-    // Try to determine alt text from surrounding context
-    let altText = el.getAttribute('aria-label') || el.title || '';
-    
-    // If no alt text, try to get text content if it's a short description
-    if (!altText && el.textContent && el.textContent.trim().length < 100) {
-      altText = el.textContent.trim();
-    }
-    
-    // Look for nearby headings or text that might describe the image
-    if (!altText) {
-      const heading = el.querySelector('h1, h2, h3, h4, h5, h6');
-      if (heading) {
-        altText = heading.textContent.trim();
-      }
-    }
-    
-    // If still no alt text, fall back to a more descriptive default
-    if (!altText) {
-      altText = `Background image for ${el.tagName.toLowerCase()} element`;
-    }
-    
-    // Collect any data attributes that might contain useful metadata
-    const dataAttributes = {};
-    for (const attr of el.attributes) {
-      if (attr.name.startsWith('data-')) {
-        dataAttributes[attr.name] = attr.value;
-      }
-    }
-    
-    // Collect more style information for better context
-    const bgSize = style.backgroundSize;
-    const bgPosition = style.backgroundPosition;
-    const bgRepeat = style.backgroundRepeat;
-    
-    return {
-      url: bgImageUrl,
-      alt: altText,
-      width: el.offsetWidth,
-      height: el.offsetHeight,
-      type: 'background',
-      element: el.tagName,
-      filename: filename,
-      className: el.className || '',
-      id: el.id || '',
-      bgSize: bgSize,
-      bgPosition: bgPosition,
-      bgRepeat: bgRepeat,
-      dataAttributes: dataAttributes
-    };
-  });
-  
-  // Combine both sets of images
-  let allImages = [...imageUrls, ...bgImageUrls]
-    .filter(img => img.url && img.url.trim() !== '')
-    // Filter out data URIs, we want real URLs
-    .filter(img => !img.url.startsWith('data:'))
-    // Filter out SVG images that are likely icons
-    .filter(img => {
-      if (img.url.endsWith('.svg') && img.width < 100 && img.height < 100) {
-        return false;
-      }
-      return true;
+    console.log('findAllImages() called');
+    allImagesCache = [];
+
+    const imgElements = Array.from(document.querySelectorAll('img'));
+    console.log(`Found ${imgElements.length} img elements`);
+
+    const elementsWithBgImages = Array.from(document.querySelectorAll('*')).filter(el => {
+        const style = window.getComputedStyle(el);
+        const bgImage = style.backgroundImage;
+        return bgImage && bgImage !== 'none' && bgImage.startsWith('url(');
     });
-  
-  // Remove duplicate images by URL
-  const uniqueUrls = new Set();
-  allImages = allImages.filter(img => {
-    if (uniqueUrls.has(img.url)) {
-      return false;
-    }
-    uniqueUrls.add(img.url);
-    return true;
-  });
-  
-  console.log(`Found ${allImages.length} unique images after removing duplicates`);
-  
-  console.log('Found images before filtering:', allImages.length);
-  
-  // Store all valid images before filtering by size
-  allImagesCache = [...allImages]; // Create a clone of the array
-  
-  console.log('Cache size:', allImagesCache.length);
-  
-  // Now filter by the current domain settings
-  const filteredImages = filterImagesBySize(allImages, domainSettings.minWidth, domainSettings.minHeight);
-  
-  console.log('Found images after filtering:', filteredImages.length);
-  
-  // Set the current filtered images
-  currentFilteredImages = filteredImages;
-  
-  return filteredImages;
+
+    const imageUrls = imgElements.map(img => {
+        let potentialUrl = '';
+        let sourceAttribute = '';
+        let bestSrcsetSource = null;
+
+        // 1. Prioritize srcset (parse for highest resolution)
+        bestSrcsetSource = parseSrcset(img.srcset);
+        if (bestSrcsetSource) {
+            potentialUrl = bestSrcsetSource.url;
+            sourceAttribute = 'srcset';
+        }
+
+        // 2. Fallback to data-srcset (parse for highest resolution)
+        if (!potentialUrl) {
+            bestSrcsetSource = parseSrcset(img.dataset.srcset);
+            if (bestSrcsetSource) {
+                potentialUrl = bestSrcsetSource.url;
+                sourceAttribute = 'data-srcset';
+            }
+        }
+
+        // 3. Fallback to data-src (common lazy-load attribute)
+        if (!potentialUrl && img.dataset.src) {
+            potentialUrl = img.dataset.src;
+            sourceAttribute = 'data-src';
+        }
+
+        // 4. Fallback to data-lazy-src (another common lazy-load attribute)
+        if (!potentialUrl && img.dataset.lazySrc) {
+             potentialUrl = img.dataset.lazySrc;
+             sourceAttribute = 'data-lazy-src';
+        }
+         // Add more data-* attributes here if needed (e.g., data-lazy, data-original)
+         if (!potentialUrl && img.dataset.lazy) {
+             potentialUrl = img.dataset.lazy;
+             sourceAttribute = 'data-lazy';
+         }
+         if (!potentialUrl && img.dataset.original) {
+             potentialUrl = img.dataset.original;
+             sourceAttribute = 'data-original';
+         }
+
+
+        // 5. Final fallback to src
+        if (!potentialUrl && img.src) {
+            potentialUrl = img.src;
+            sourceAttribute = 'src';
+        }
+
+        // Skip if no URL found or it's a data URI or clearly invalid
+        if (!potentialUrl || potentialUrl.startsWith('data:') || potentialUrl.trim() === '' || potentialUrl.startsWith('blob:')) {
+             // console.log('Skipping image element with no valid src/srcset/data-* or data/blob URI:', img);
+             return null;
+        }
+
+        // Resolve relative URLs to absolute
+        let resolvedUrl = '';
+        try {
+            // Handle protocol-relative URLs (starting with //)
+            if (potentialUrl.startsWith('//')) {
+                resolvedUrl = new URL(`${window.location.protocol}${potentialUrl}`).href;
+            }
+            // Check if potentialUrl is already absolute with protocol
+            else if (potentialUrl.startsWith('http://') || potentialUrl.startsWith('https://')) {
+                resolvedUrl = new URL(potentialUrl).href; // Validate and normalize absolute URL
+            } else {
+                // Handle all other relative URLs
+                resolvedUrl = new URL(potentialUrl, window.location.href).href; // Resolve relative URL
+            }
+        } catch (e) {
+            console.warn(`Could not create URL object for potential URL "${potentialUrl}" derived from ${sourceAttribute}:`, e);
+            return null; // Skip invalid URLs
+        }
+
+        // Check if image has loaded its intrinsic dimensions
+        const isLoaded = img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
+
+        // --- Alt Text Logic (remains the same) ---
+        let altText = img.alt || '';
+        if (!altText) {
+            const figure = img.closest('figure');
+            if (figure) {
+                const figcaption = figure.querySelector('figcaption');
+                if (figcaption) altText = figcaption.textContent.trim();
+            }
+            if (!altText) {
+                const parent = img.parentElement;
+                if (parent) {
+                    const caption = parent.querySelector('div[class*="caption"], .caption, [class*="Caption"], [id*="caption"]');
+                    if (caption) altText = caption.textContent.trim();
+                }
+            }
+        }
+        if (!altText) altText = img.title || 'No description';
+        // --- End Alt Text ---
+
+
+        // --- Filename Extraction Logic (using resolvedUrl) ---
+        let filename = '';
+        try {
+            const urlObj = new URL(resolvedUrl);
+            const pathname = urlObj.pathname;
+            // Decode URI component first to handle encoded chars like %20
+            filename = decodeURIComponent(pathname.substring(pathname.lastIndexOf('/') + 1));
+            filename = filename.split('?')[0].split('#')[0]; // Clean query/hash
+        } catch (e) { /* Fallback below */ }
+
+        // Fallback or if path ends in /
+        if (!filename) {
+             const parts = resolvedUrl.split('/');
+             filename = parts[parts.length - 1].split('?')[0].split('#')[0];
+             // If still no filename, generate one
+             if (!filename) {
+                const ext = getExtensionFromContentType(img.type || 'image/jpeg'); // Guess extension
+                filename = `image_${Date.now()}${ext}`;
+             }
+        }
+        // Basic sanitize just in case
+        filename = filename.replace(/[\/\\]/g, '_'); // Replace slashes just to be safe
+
+        // --- End Filename ---
+
+        // Data Attributes
+        const dataAttributes = {};
+        for (const attr of img.attributes) {
+            if (attr.name.startsWith('data-')) {
+                dataAttributes[attr.name] = attr.value;
+            }
+        }
+
+        return {
+            url: resolvedUrl,
+            alt: altText,
+            // Use natural dimensions if available AND loaded, otherwise element dimensions
+            width: isLoaded ? img.naturalWidth : img.width,
+            height: isLoaded ? img.naturalHeight : img.height,
+            naturalWidth: img.naturalWidth || 0, // Store natural even if not loaded
+            naturalHeight: img.naturalHeight || 0,
+            type: 'img',
+            filename: filename,
+            title: img.title || '',
+            loading: img.loading || '', // e.g., "lazy"
+            dataAttributes: dataAttributes,
+            sourceAttribute: sourceAttribute, // Track source for debugging
+            isLoaded: isLoaded // Track if browser has decoded it
+        };
+    }).filter(img => img !== null); // Filter out skipped elements
+
+    // --- Background Image Logic (mostly same, added URL resolution/validation) ---
+    const bgImageUrls = elementsWithBgImages.map(el => {
+        const style = window.getComputedStyle(el);
+        const bgMatch = style.backgroundImage.match(/url\(['"]?(.*?)['"]?\)/);
+
+        if (!bgMatch || !bgMatch[1] || bgMatch[1].startsWith('data:') || bgMatch[1].trim() === '' || bgMatch[1].startsWith('blob:')) {
+            return null;
+        }
+        const bgImageUrl = bgMatch[1];
+
+        let resolvedBgUrl = '';
+        try {
+            // Handle protocol-relative URLs (starting with //)
+            if (bgImageUrl.startsWith('//')) {
+                resolvedBgUrl = new URL(`${window.location.protocol}${bgImageUrl}`).href;
+            }
+            // Check if URL is already absolute with protocol
+            else if (bgImageUrl.startsWith('http://') || bgImageUrl.startsWith('https://')) {
+                resolvedBgUrl = new URL(bgImageUrl).href;
+            } else {
+                // Handle all other relative URLs
+                resolvedBgUrl = new URL(bgImageUrl, window.location.href).href;
+            }
+        } catch (e) {
+            console.warn(`Could not create URL object for background image "${bgImageUrl}":`, e);
+            return null;
+        }
+
+        // Filename extraction
+        let filename = '';
+        try {
+            const urlObj = new URL(resolvedBgUrl);
+            const pathname = urlObj.pathname;
+            filename = decodeURIComponent(pathname.substring(pathname.lastIndexOf('/') + 1));
+            filename = filename.split('?')[0].split('#')[0];
+        } catch (e) { /* Fallback below */ }
+
+         if (!filename) {
+             const parts = resolvedBgUrl.split('/');
+             filename = parts[parts.length - 1].split('?')[0].split('#')[0];
+              if (!filename) filename = `background_image_${Date.now()}.jpg`;
+         }
+          filename = filename.replace(/[\/\\]/g, '_');
+
+
+        // Alt text logic (same as before)
+        let altText = el.getAttribute('aria-label') || el.title || '';
+        if (!altText && el.textContent && el.textContent.trim().length < 100) {
+            altText = el.textContent.trim();
+        }
+        if (!altText) {
+            const heading = el.querySelector('h1, h2, h3, h4, h5, h6');
+            if (heading) altText = heading.textContent.trim();
+        }
+        if (!altText) altText = `Background image for ${el.tagName.toLowerCase()} element`;
+
+        // Data Attributes
+        const dataAttributes = {};
+        for (const attr of el.attributes) {
+            if (attr.name.startsWith('data-')) dataAttributes[attr.name] = attr.value;
+        }
+
+        const bgSize = style.backgroundSize;
+        const bgPosition = style.backgroundPosition;
+        const bgRepeat = style.backgroundRepeat;
+
+        return {
+            url: resolvedBgUrl,
+            alt: altText,
+            width: el.offsetWidth, // Background uses element dimensions
+            height: el.offsetHeight,
+            naturalWidth: 0, // N/A for background
+            naturalHeight: 0,
+            type: 'background',
+            element: el.tagName,
+            filename: filename,
+            className: el.className || '',
+            id: el.id || '',
+            bgSize: bgSize,
+            bgPosition: bgPosition,
+            bgRepeat: bgRepeat,
+            dataAttributes: dataAttributes,
+            sourceAttribute: 'background-image',
+            isLoaded: true // Assume background images controlled by CSS are 'loaded' contextually
+        };
+    }).filter(img => img !== null);
+    // --- End Background ---
+
+    // Combine, filter duplicates, filter SVGs (same as Proposal 2)
+    let allImages = [...imageUrls, ...bgImageUrls];
+
+    // Filter out small SVGs likely used as icons
+    allImages = allImages.filter(img => {
+        const isSvg = img.url.toLowerCase().includes('.svg'); // Check extension or mime type if available later
+        const isSmall = (img.width || 0) < 100 && (img.height || 0) < 100;
+        if (isSvg && isSmall) {
+            console.log(`Filtering out small SVG icon: ${img.url}`);
+            return false;
+        }
+        return true;
+    });
+
+    // Remove duplicates by URL
+    const uniqueUrls = new Set();
+    allImages = allImages.filter(img => {
+        if (!img || !img.url) return false; // Extra safety check
+        if (uniqueUrls.has(img.url)) {
+            return false;
+        }
+        uniqueUrls.add(img.url);
+        return true;
+    });
+
+    console.log(`Found ${allImages.length} unique images after removing duplicates and filtering`);
+    allImagesCache = [...allImages]; // Store unfiltered cache
+    console.log('Cache size:', allImagesCache.length);
+
+    // Filter by size using domain settings
+    const filteredImages = filterImagesBySize(allImages, domainSettings.minWidth, domainSettings.minHeight);
+    console.log('Found images after size filtering:', filteredImages.length);
+    currentFilteredImages = filteredImages; // Update the currently displayed/filtered list
+
+    return filteredImages;
 }
 
 // Function to check image file size before saving
@@ -1098,9 +1275,14 @@ function saveImagesToStorage(images) {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'uploadProgress') {
       updateProgressIndicator(message.completed, message.total);
-      sendResponse({received: true});
+      // Always respond immediately to prevent message channel issues
+      try {
+        sendResponse({received: true});
+      } catch (error) {
+        console.warn('Error sending response to progress update:', error);
+      }
     }
-    return true;
+    // Do NOT return true here - we're responding synchronously, not async
   });
 }
 

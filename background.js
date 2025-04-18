@@ -400,19 +400,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
     
+    // Set a timeout to ensure sendResponse happens even if processing takes too long
+    const responseTimeout = setTimeout(() => {
+      console.warn('Processing took too long, sending preliminary response');
+      sendResponse({
+        success: true,
+        provisional: true,
+        message: 'Processing started, check notifications for completion'
+      });
+    }, 5000); // 5 second timeout
+    
     // Process images in batches to limit concurrent uploads
     processImagesInBatches(images, sourceInfo, sender.tab.id)
       .then(results => {
+        // Clear the timeout since we're about to send the response
+        clearTimeout(responseTimeout);
+        
         const successCount = results.filter(r => r.success).length;
-        sendResponse({
-          success: true, 
-          count: successCount,
-          failures: results.length - successCount
-        });
+        
+        try {
+          sendResponse({
+            success: true, 
+            count: successCount,
+            failures: results.length - successCount
+          });
+        } catch (responseError) {
+          // Message channel might be closed - show notification instead
+          console.warn('Could not send response, channel may be closed:', responseError);
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/48.png',
+            title: 'Image Upload Complete',
+            message: `Saved ${successCount} of ${results.length} images`,
+            priority: 2
+          });
+        }
       })
       .catch(error => {
+        // Clear the timeout since we're about to send the response
+        clearTimeout(responseTimeout);
+        
         console.error('Error saving images:', error);
-        sendResponse({success: false, error: error.message});
+        
+        try {
+          sendResponse({success: false, error: error.message});
+        } catch (responseError) {
+          // Message channel might be closed - show notification instead
+          console.warn('Could not send error response, channel may be closed');
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/48.png',
+            title: 'Image Upload Error',
+            message: `Error: ${error.message}`,
+            priority: 2
+          });
+        }
       });
     
     return true; // Keep the message channel open for async response
@@ -493,33 +535,86 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
     
+    // Set a timeout to ensure sendResponse happens even if processing takes too long
+    const responseTimeout = setTimeout(() => {
+      console.warn('Screenshot processing took too long, sending preliminary response');
+      sendResponse({
+        success: true,
+        provisional: true,
+        message: 'Processing started, check notifications for completion'
+      });
+    }, 5000); // 5 second timeout
+    
     // Wait for all operations to complete
     Promise.all(promises)
       .then(results => {
+        // Clear the timeout
+        clearTimeout(responseTimeout);
+        
         console.log('Screenshot save operations completed:', results);
         
         // Filter successful results
         const successfulResults = results.filter(r => r && r.success);
         console.log('Successful operations:', successfulResults.length);
         
-        if (successfulResults.length > 0) {
-          sendResponse({
-            success: true,
-            url: successfulResults[0].url || 'File saved'
-          });
-        } else {
-          sendResponse({
-            success: false,
-            error: 'Failed to save screenshot'
-          });
+        try {
+          if (successfulResults.length > 0) {
+            sendResponse({
+              success: true,
+              url: successfulResults[0].url || 'File saved'
+            });
+          } else {
+            sendResponse({
+              success: false,
+              error: 'Failed to save screenshot'
+            });
+          }
+        } catch (responseError) {
+          console.warn('Could not send screenshot response, channel may be closed:', responseError);
+          
+          // Show notification instead
+          if (successfulResults.length > 0) {
+            chrome.notifications.create({
+              type: 'basic',
+              iconUrl: 'icons/48.png',
+              title: 'Screenshot Saved',
+              message: 'Screenshot was successfully saved to your storage.',
+              priority: 2
+            });
+          } else {
+            chrome.notifications.create({
+              type: 'basic',
+              iconUrl: 'icons/48.png',
+              title: 'Screenshot Error',
+              message: 'Failed to save screenshot. Please check settings.',
+              priority: 2
+            });
+          }
         }
       })
       .catch(error => {
+        // Clear the timeout
+        clearTimeout(responseTimeout);
+        
         console.error('Error processing screenshot:', error);
-        sendResponse({
-          success: false,
-          error: error.message
-        });
+        
+        try {
+          sendResponse({
+            success: false,
+            error: error.message
+          });
+        } catch (responseError) {
+          console.warn('Could not send screenshot error response, channel may be closed');
+          
+          // Show notification instead
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/48.png',
+            title: 'Screenshot Error',
+            message: `Error: ${error.message}`,
+            priority: 2
+          });
+        }
       });
     
     return true; // Keep the message channel open for async response
@@ -529,20 +624,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const testBlob = dataURItoBlob('data:text/plain;base64,' + btoa('test file content'));
     const testFilename = message.testFile.filename;
     
+    // Set a timeout to ensure sendResponse happens even if processing takes too long
+    const responseTimeout = setTimeout(() => {
+      console.warn('Connection test took too long, sending preliminary response');
+      sendResponse({
+        success: false,
+        error: 'The connection test is taking longer than expected. This usually indicates connectivity issues.'
+      });
+    }, 10000); // 10 second timeout
+    
     // Use the provided settings for this test instead of the global CONFIG
     testUploadToStorage(testBlob, testFilename, { type: 'test' }, { test: true }, testSettings)
       .then(result => {
-        sendResponse({
-          success: true,
-          url: result.url
-        });
+        // Clear the timeout
+        clearTimeout(responseTimeout);
+        
+        try {
+          sendResponse({
+            success: true,
+            url: result.url
+          });
+        } catch (responseError) {
+          console.warn('Could not send test connection response, channel may be closed:', responseError);
+          
+          // Show notification instead
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/48.png',
+            title: 'Connection Test',
+            message: 'Connection test successful! Your storage is properly configured.',
+            priority: 2
+          });
+        }
       })
       .catch(error => {
+        // Clear the timeout
+        clearTimeout(responseTimeout);
+        
         console.error('Error testing connection:', error);
-        sendResponse({
-          success: false,
-          error: error.message
-        });
+        
+        try {
+          sendResponse({
+            success: false,
+            error: error.message
+          });
+        } catch (responseError) {
+          console.warn('Could not send test connection error response, channel may be closed');
+          
+          // Show notification instead
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/48.png',
+            title: 'Connection Test Failed',
+            message: `Error: ${error.message}`,
+            priority: 2
+          });
+        }
       });
     
     return true; // Keep the message channel open for async response
@@ -555,33 +692,61 @@ async function processImagesInBatches(images, sourceInfo, tabId) {
   const batchSize = CONFIG.maxConcurrentUploads;
   let totalCompleted = 0;
   
-  // Process in batches
-  for (let i = 0; i < images.length; i += batchSize) {
-    const batch = images.slice(i, i + batchSize);
-    const batchPromises = batch.map(image => processImage(image, sourceInfo));
-    
-    // Wait for the current batch to complete
-    const batchResults = await Promise.all(batchPromises);
-    
-    // Filter out unsuccessful results
-    const successfulResults = batchResults.filter(r => r.success);
-    results.push(...batchResults);
-    
-    // Update progress after each batch
-    totalCompleted += batch.length;
-    
-    // Send progress update to the content script
-    if (tabId) {
-      chrome.tabs.sendMessage(tabId, {
-        action: 'uploadProgress',
-        completed: totalCompleted,
-        total: images.length,
-        successCount: successfulResults.length
-      });
+  try {
+    // Process in batches
+    for (let i = 0; i < images.length; i += batchSize) {
+      const batch = images.slice(i, i + batchSize);
+      const batchPromises = batch.map(image => processImage(image, sourceInfo));
+      
+      // Wait for the current batch to complete
+      const batchResults = await Promise.all(batchPromises);
+      
+      // Filter out unsuccessful results
+      const successfulResults = batchResults.filter(r => r.success);
+      results.push(...batchResults);
+      
+      // Update progress after each batch
+      totalCompleted += batch.length;
+      
+      // Send progress update to the content script
+      if (tabId) {
+        try {
+          await new Promise((resolve, reject) => {
+            chrome.tabs.sendMessage(
+              tabId, 
+              {
+                action: 'uploadProgress',
+                completed: totalCompleted,
+                total: images.length,
+                successCount: successfulResults.length
+              },
+              (response) => {
+                // Check for error
+                const error = chrome.runtime.lastError;
+                if (error) {
+                  console.warn('Error sending progress update:', error);
+                  reject(error);
+                } else {
+                  resolve(response);
+                }
+              }
+            );
+            
+            // Set a timeout to resolve the promise if we don't get a response
+            setTimeout(() => resolve({received: false}), 1000);
+          });
+        } catch (error) {
+          console.warn('Failed to send progress update:', error);
+          // Continue processing even if progress updates fail
+        }
+      }
     }
+    
+    return results;
+  } catch (error) {
+    console.error('Error in batch processing:', error);
+    return results; // Return any results we managed to get
   }
-  
-  return results;
 }
 
 // Process a single image
