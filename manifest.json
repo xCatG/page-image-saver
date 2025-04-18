@@ -9,7 +9,8 @@
     "contextMenus",
     "downloads",
     "notifications",
-    "scripting"
+    "scripting",
+    "webRequest"
   ],
   "content_security_policy": {
     "extension_pages": "default-src 'self'; img-src 'self' data: https: http:; connect-src 'self' https: http:; style-src 'self' 'unsafe-inline'"
