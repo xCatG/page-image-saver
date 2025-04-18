@@ -9,6 +9,8 @@ let allImagesCache = [];
 let currentFilteredImages = []; // Add this line to track current filtered images
 // Global set to dedupe URLs across all discovery methods
 let discoveredUrls = new Set();
+// Cache for dynamic image objects discovered before UI open
+let dynamicImageObjs = [];
 let domainSettings = {
   minWidth: 50,
   minHeight: 50
@@ -180,13 +182,13 @@ function handleDynamicImage(url) {
       sourceAttribute: 'dynamic',
       isLoaded: true
     };
-    // Mark URL as seen and add to cache
+    // Mark URL as seen and add to dynamic cache
     discoveredUrls.add(url);
-    allImagesCache.push(imageObj);
+    dynamicImageObjs.push(imageObj);
     // Apply current domain size filters
     if (imageObj.width >= domainSettings.minWidth && imageObj.height >= domainSettings.minHeight) {
       currentFilteredImages.push(imageObj);
-      // Only update UI if the image selector UI is open
+      // Update UI if open
       if (document.getElementById('image-selector-container')) {
         updateImageList(currentFilteredImages);
       }
@@ -447,8 +449,17 @@ function findAllImages() {
     }).filter(img => img !== null);
     // --- End Background ---
 
-    // Combine, filter duplicates, filter SVGs (same as Proposal 2)
+    // Combine static image list
     let allImages = [...imageUrls, ...bgImageUrls];
+
+    // Merge in any dynamic images discovered before UI open
+    if (dynamicImageObjs.length > 0) {
+      dynamicImageObjs.forEach(imgObj => {
+        if (imgObj && imgObj.url && !allImages.some(i => i.url === imgObj.url)) {
+          allImages.push(imgObj);
+        }
+      });
+    }
 
     // Filter out small SVGs likely used as icons
     allImages = allImages.filter(img => {
