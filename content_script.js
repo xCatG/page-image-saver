@@ -164,9 +164,20 @@ function handleDynamicImage(url) {
   if (discoveredUrls.has(url)) {
     return;
   }
+  
+  // Skip tracking pixels, analytics URLs, and other non-image resources
+  if (shouldSkipImage(url)) {
+    return;
+  }
+  
   // Load image for metadata
   const imgEl = new Image();
   imgEl.onload = () => {
+    // Skip tiny images that are likely tracking pixels (less than 10x10)
+    if (imgEl.naturalWidth < 10 || imgEl.naturalHeight < 10) {
+      return;
+    }
+    
     const imageObj = {
       url: url,
       alt: url.split('/').pop() || '',
@@ -195,9 +206,57 @@ function handleDynamicImage(url) {
     }
   };
   imgEl.onerror = () => {
-    console.warn('Failed to load dynamic image for metadata:', url);
+    // Mark URL as seen to avoid repeated attempts
+    discoveredUrls.add(url);
+    // Suppressed console warning to avoid cluttering console with tracking pixels
   };
   imgEl.src = url;
+}
+
+/**
+ * Helper function to determine if an image URL should be skipped
+ * (tracking pixels, analytics, etc)
+ */
+function shouldSkipImage(url) {
+  try {
+    // Skip URLs with certain patterns that are commonly used for tracking
+    const trackingPatterns = [
+      '/fd/ls/l?', // Bing tracking
+      '/pagead/', // Google ads
+      '/ga-audiences', // Google Analytics
+      '/pixel', // Generic pixel trackers
+      '/beacon', // Beacons
+      '/track', // Generic tracking
+      '/analytics', // Analytics
+      '/collect', // Collection endpoints
+      '/metric', // Metrics
+      '/p.gif', // Tracking pixels with p.gif
+      '/ping', // Ping endpoints
+      '/stats', // Stats collection
+      '/impression', // Ad impressions
+      '/piwik', // Piwik/Matomo analytics
+      '/counter', // Counters
+      '/B?BF=', // Specific Bing format
+      '/ClientInst', // Microsoft client instrumentation
+      '/FilterFlare', // More Bing tracking
+    ];
+    
+    // Check if URL contains any of the tracking patterns
+    if (trackingPatterns.some(pattern => url.includes(pattern))) {
+      return true;
+    }
+    
+    // Check for small GIF images that end with a 1x1 or have a query string
+    if (url.toLowerCase().endsWith('.gif') && 
+        (url.includes('1x1') || url.includes('?'))) {
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.warn('Error in shouldSkipImage:', error);
+    return false;
+  }
 }
 
 function findAllImages() {
@@ -1428,28 +1487,46 @@ if (document.readyState === 'loading') {
     records.forEach(record => {
       record.addedNodes.forEach(node => {
         if (node.nodeType !== 1) return;
+        
+        // Process IMG elements
         if (node.tagName === 'IMG' && node.src) {
-          handleDynamicImage(node.src);
-        }
-        const style = window.getComputedStyle(node);
-        const bg = style.backgroundImage;
-        if (bg && bg.startsWith('url(')) {
-          const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
-          if (m && m[1]) {
-            handleDynamicImage(m[1]);
+          // Skip tiny images likely to be tracking pixels
+          if (node.width > 10 && node.height > 10 && !shouldSkipImage(node.src)) {
+            handleDynamicImage(node.src);
           }
         }
+        
+        // Process background images
+        try {
+          const style = window.getComputedStyle(node);
+          const bg = style.backgroundImage;
+          if (bg && bg.startsWith('url(')) {
+            const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
+            if (m && m[1] && !shouldSkipImage(m[1])) {
+              handleDynamicImage(m[1]);
+            }
+          }
+        } catch (error) {
+          // Ignore style computation errors on invalid nodes
+        }
       });
+      
+      // Process attribute changes
       if (record.type === 'attributes' && (record.attributeName === 'style' || record.attributeName === 'class')) {
         const node = record.target;
         if (node.nodeType !== 1) return;
-        const style = window.getComputedStyle(node);
-        const bg = style.backgroundImage;
-        if (bg && bg.startsWith('url(')) {
-          const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
-          if (m && m[1]) {
-            handleDynamicImage(m[1]);
+        
+        try {
+          const style = window.getComputedStyle(node);
+          const bg = style.backgroundImage;
+          if (bg && bg.startsWith('url(')) {
+            const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
+            if (m && m[1] && !shouldSkipImage(m[1])) {
+              handleDynamicImage(m[1]);
+            }
           }
+        } catch (error) {
+          // Ignore style computation errors on invalid nodes
         }
       }
     });

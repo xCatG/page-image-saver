@@ -28,10 +28,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep the message channel open for async response
   }
 });
+// Helper function to check if a URL is likely a tracking pixel
+function isTrackingPixel(url) {
+  const trackingPatterns = [
+    '/fd/ls/l?', // Bing tracking
+    '/pagead/', // Google ads
+    '/ga-audiences', // Google Analytics
+    '/pixel', // Generic pixel trackers
+    '/beacon', // Beacons
+    '/track', // Generic tracking
+    '/analytics', // Analytics
+    '/collect', // Collection endpoints
+    '/metric', // Metrics
+    '/p.gif', // Tracking pixels with p.gif
+    '/ping', // Ping endpoints
+    '/stats', // Stats collection
+    '/impression', // Ad impressions
+    '/piwik', // Piwik/Matomo analytics
+    '/counter', // Counters
+    '/B?BF=', // Specific Bing format
+    '/ClientInst', // Microsoft client instrumentation
+    '/FilterFlare', // More Bing tracking
+  ];
+  
+  return trackingPatterns.some(pattern => url.includes(pattern));
+}
+
 // Listen to all image network requests and notify content scripts of dynamic loads
 chrome.webRequest.onCompleted.addListener((details) => {
   // Only forward image requests from valid tabs
   if (details.tabId >= 0 && details.type === 'image' && details.url) {
+    // Skip tracking pixels and other tracking related images
+    if (isTrackingPixel(details.url)) {
+      return;
+    }
+    
+    // Skip tiny images (likely tracking pixels) by checking content length if available
+    if (details.responseHeaders) {
+      const contentLengthHeader = details.responseHeaders.find(
+        header => header.name.toLowerCase() === 'content-length'
+      );
+      if (contentLengthHeader && parseInt(contentLengthHeader.value) < 1024) {
+        // Skip images smaller than 1KB (likely tracking pixels)
+        return;
+      }
+    }
+    
     // Fire-and-forget; include callback to swallow errors if no content script is listening
     chrome.tabs.sendMessage(details.tabId, {
       action: 'dynamicImageLoaded',
@@ -45,7 +87,7 @@ chrome.webRequest.onCompleted.addListener((details) => {
   }
 }, {
   urls: ["<all_urls>"]
-});
+}, ['responseHeaders']);
 
 // Default configuration (will be overridden by user settings)
 const DEFAULT_CONFIG = {
