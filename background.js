@@ -465,37 +465,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
     
-    // Set a timeout to ensure sendResponse happens even if processing takes too long
-    const responseTimeout = setTimeout(() => {
-      console.warn('[UPLOAD TIMEOUT] Processing took too long, sending preliminary response');
-      sendResponse({
-        success: true,
-        provisional: true,
-        message: 'Processing started, check console for progress logs'
-      });
-    }, 5000); // 5 second timeout
+    // Start a processing job to handle the image uploads
+    // We'll immediately send a provisional response to keep the channel open,
+    // but we won't send the final response until everything is done
+    let processingComplete = false;
+    
+    // Send an immediate provisional response to acknowledge receipt
+    console.log(`[UPLOAD START] Sending provisional response for ${images.length} images`);
+    sendResponse({
+      success: true,
+      provisional: true,
+      message: 'Processing started, check console for progress',
+      total: images.length
+    });
     
     // Process images in batches to limit concurrent uploads
     processImagesInBatches(images, sourceInfo, sender.tab.id)
       .then(results => {
-        // Clear the timeout since we're about to send the response
-        clearTimeout(responseTimeout);
+        processingComplete = true;
         
         const successCount = results.filter(r => r.success).length;
-        console.log(`[UPLOAD FINAL] Upload process completed. Preparing final response: ${successCount} successful, ${results.length - successCount} failed`);
+        console.log(`[UPLOAD FINAL] Upload process completed. Final stats: ${successCount} successful, ${results.length - successCount} failed`);
         
+        // Send a final completion message to the tab
         try {
-          console.log(`[UPLOAD RESPONSE] Sending final response to content script`);
-          sendResponse({
+          console.log(`[UPLOAD COMPLETE] Sending completion message to tab ${sender.tab.id}`);
+          chrome.tabs.sendMessage(sender.tab.id, {
+            action: 'uploadComplete',
             success: true, 
             count: successCount,
             failures: results.length - successCount,
+            total: results.length,
             timestamp: Date.now()
+          }, response => {
+            console.log(`[UPLOAD COMPLETE] Completion message response:`, response || 'No response');
           });
-          console.log(`[UPLOAD RESPONSE] Final response sent successfully`);
-        } catch (responseError) {
-          // Message channel might be closed - show notification instead
-          console.warn('[UPLOAD ERROR] Could not send response, channel may be closed:', responseError);
+        } catch (sendError) {
+          // If we can't send the message, show a notification
+          console.warn('[UPLOAD ERROR] Could not send completion message:', sendError);
           chrome.notifications.create({
             type: 'basic',
             iconUrl: 'icons/48.png',
@@ -503,26 +510,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             message: `Saved ${successCount} of ${results.length} images`,
             priority: 2
           });
-          console.log(`[UPLOAD NOTIFICATION] Created notification since response channel was closed`);
         }
       })
       .catch(error => {
-        // Clear the timeout since we're about to send the response
-        clearTimeout(responseTimeout);
-        
+        processingComplete = true;
         console.error('[UPLOAD ERROR] Error saving images:', error);
         
+        // Send error completion message to tab
         try {
-          console.log(`[UPLOAD ERROR] Sending error response to content script`);
-          sendResponse({
+          console.log(`[UPLOAD ERROR] Sending error completion message to tab ${sender.tab.id}`);
+          chrome.tabs.sendMessage(sender.tab.id, {
+            action: 'uploadComplete',
             success: false, 
             error: error.message,
             timestamp: Date.now()
+          }, response => {
+            console.log(`[UPLOAD ERROR] Error completion message response:`, response || 'No response');
           });
-          console.log(`[UPLOAD ERROR] Error response sent successfully`);
-        } catch (responseError) {
-          // Message channel might be closed - show notification instead
-          console.warn('[UPLOAD ERROR] Could not send error response, channel may be closed');
+        } catch (sendError) {
+          // If we can't send the message, show a notification
+          console.warn('[UPLOAD ERROR] Could not send error message:', sendError);
           chrome.notifications.create({
             type: 'basic',
             iconUrl: 'icons/48.png',
@@ -530,7 +537,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             message: `Error: ${error.message}`,
             priority: 2
           });
-          console.log(`[UPLOAD NOTIFICATION] Created error notification since response channel was closed`);
+          console.log(`[UPLOAD NOTIFICATION] Created error notification since tab message failed`);
         }
       });
     

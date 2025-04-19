@@ -9,6 +9,8 @@ let allImagesCache = [];
 let currentFilteredImages = []; // Add this line to track current filtered images
 // Global set to dedupe URLs across all discovery methods
 let discoveredUrls = new Set();
+// Global set to track URLs that have already been sent for upload in the current session
+let alreadyUploadedUrls = new Set();
 // Cache for dynamic image objects discovered before UI open
 let dynamicImageObjs = [];
 let domainSettings = {
@@ -173,8 +175,8 @@ function handleDynamicImage(url) {
   // Load image for metadata
   const imgEl = new Image();
   
-  // Set crossOrigin to anonymous to handle CORS properly
-  imgEl.crossOrigin = "anonymous";
+  // Start with null crossOrigin to match default preload behavior
+  imgEl.crossOrigin = null;
   
   // Set up load handler
   imgEl.onload = () => {
@@ -211,24 +213,26 @@ function handleDynamicImage(url) {
     }
   };
   
-  // Set up error handler
+  // Set up error handler with multiple fallback attempts
   imgEl.onerror = () => {
-    // If the image fails with crossOrigin, try without it as a fallback
-    if (imgEl.crossOrigin) {
+    // First attempt: try with anonymous if null failed
+    if (imgEl.crossOrigin === null) {
       // Only use debug-level logging to reduce console noise
-      console.debug(`[CORS] Retrying image without crossOrigin: ${url.substring(0, 40)}...`);
-      // Create a new image without crossOrigin
-      const fallbackImg = new Image();
-      fallbackImg.onload = imgEl.onload; // Reuse the same handler
-      fallbackImg.onerror = () => {
-        // Mark URL as seen to avoid repeated attempts if both methods fail
-        discoveredUrls.add(url);
-        // No logging to avoid console spam
-      };
-      fallbackImg.src = url;
+      console.debug(`[CORS] Retrying image with anonymous crossOrigin: ${url.substring(0, 40)}...`);
+      imgEl.crossOrigin = "anonymous";
+      imgEl.src = url;
       return;
     }
     
+    // Second attempt: try with no crossorigin attribute
+    if (imgEl.crossOrigin === "anonymous") {
+      console.debug(`[CORS] Final fallback attempt with no crossorigin: ${url.substring(0, 40)}...`);
+      imgEl.removeAttribute('crossorigin');
+      imgEl.src = url;
+      return;
+    }
+    
+    // All attempts failed
     // Mark URL as seen to avoid repeated attempts
     discoveredUrls.add(url);
     // No console warning to avoid cluttering console
@@ -613,6 +617,31 @@ async function checkImagesFileSizes(images) {
   const BATCH_SIZE = 10; // Process 10 images at a time to avoid too many concurrent requests
   let validImages = [];
   
+  // Skip images that have already been sent for upload this session
+  let imagesToCheck = images.filter(image => !alreadyUploadedUrls.has(image.url));
+  
+  // If all images were already uploaded, return the original array for UI feedback
+  if (imagesToCheck.length === 0 && images.length > 0) {
+    console.log(`[CONTENT LOG] All ${images.length} images have already been sent for upload`);
+    
+    // Show a message in the UI if it's open
+    const statusDiv = document.getElementById('status-message');
+    if (statusDiv) {
+      statusDiv.innerHTML = `<div class="alert alert-info">All ${images.length} selected images have already been sent for upload in this session.</div>`;
+    }
+    
+    return images; // Return original images so UI can proceed normally
+  }
+  
+  // Continue checking the new images
+  console.log(`[CONTENT LOG] Checking file sizes for ${imagesToCheck.length} new images (${images.length - imagesToCheck.length} already uploaded)`);
+  
+  // If we filtered any previously uploaded images, update the status message
+  const statusDiv = document.getElementById('status-message');
+  if (statusDiv && imagesToCheck.length < images.length) {
+    statusDiv.innerHTML = `<div class="alert alert-info">Checking ${imagesToCheck.length} new images (${images.length - imagesToCheck.length} were already uploaded)</div>`;
+  }
+  
   // Function to check a single image with timeout
   async function checkImage(image) {
     try {
@@ -756,7 +785,7 @@ async function checkImagesFileSizes(images) {
   
   // Use image dimensions as a quick local filter first before making network requests
   // This can quickly eliminate tiny images
-  const preFilteredImages = images.filter(img => {
+  const preFilteredImages = imagesToCheck.filter(img => {
     // Make sure the image object is valid
     if (!img) return false;
     
@@ -787,6 +816,13 @@ async function checkImagesFileSizes(images) {
     if (statusDiv) {
       statusDiv.innerHTML = `<div class="alert alert-info">Checking images: ${processed}/${preFilteredImages.length} (${validImages.length} valid so far)...</div>`;
     }
+  }
+  
+  // Add any previously uploaded images to the valid images list for UI feedback
+  if (images.length > imagesToCheck.length) {
+    const previouslyUploaded = images.filter(image => alreadyUploadedUrls.has(image.url));
+    console.log(`[CONTENT LOG] Adding ${previouslyUploaded.length} previously uploaded images to UI selection`);
+    validImages = [...previouslyUploaded, ...validImages];
   }
   
   return validImages;
@@ -1058,6 +1094,31 @@ function _createImageItemElement(image, index) {
   // Add data attribute for tracking
   imgContainer.dataset.index = index;
   
+  // Check if this image URL has already been uploaded during this session
+  const alreadyUploaded = alreadyUploadedUrls.has(image.url);
+  
+  // If already uploaded, add visual indicator
+  if (alreadyUploaded) {
+    imgContainer.style.borderColor = '#4CAF50'; // Green border for uploaded images
+    imgContainer.style.borderWidth = '2px';
+    
+    // Add an "uploaded" badge
+    const badge = document.createElement('div');
+    badge.style.cssText = `
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      background-color: #4CAF50;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      z-index: 2;
+    `;
+    badge.textContent = 'Uploaded';
+    imgContainer.appendChild(badge);
+  }
+  
   // Create checkbox for selection
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
@@ -1194,7 +1255,9 @@ function _createImageItemElement(image, index) {
   const imgEl = document.createElement('img');
   
   // Set crossOrigin attribute before setting the src
-  imgEl.crossOrigin = "anonymous";
+  // Use null initially for sites with preloaded images since 
+  // that will match the default credentials mode of 'same-origin'
+  imgEl.crossOrigin = null;
   
   imgEl.style.cssText = `
     max-width: 100%;
@@ -1203,29 +1266,36 @@ function _createImageItemElement(image, index) {
     display: block;
   `;
   
-  // Add error handling to show placeholder if image fails to load with crossOrigin
+  // Add error handling to show placeholder if image fails to load
   imgEl.onerror = () => {
-    // If it fails with crossOrigin, try without it
-    if (imgEl.crossOrigin) {
+    // If initial load fails (with null crossOrigin), try with anonymous
+    if (imgEl.crossOrigin === null) {
       // Use debug level to reduce console noise
-      console.debug(`[CORS] Thumbnail retry: ${image.url.substring(0, 30)}...`);
-      imgEl.crossOrigin = null;
+      console.debug(`[CORS] Thumbnail retry with anonymous: ${image.url.substring(0, 30)}...`);
+      imgEl.crossOrigin = "anonymous";
       imgEl.src = image.url;
       
       // Set up a second error handler for the fallback attempt
       imgEl.onerror = () => {
-        // No logging for complete failure to avoid console spam
-        // Use our helper function to show placeholder
-        if (imgEl.parentNode) {
-          imgEl.parentNode.removeChild(imgEl);
-        }
-        showPlaceholder();
+        // No attribution - final fallback
+        console.debug(`[CORS] Final thumbnail fallback attempt: ${image.url.substring(0, 30)}...`);
+        imgEl.removeAttribute('crossorigin');
+        imgEl.src = image.url;
+        
+        // Set up a third error handler for the last attempt
+        imgEl.onerror = () => {
+          // No logging for complete failure to avoid console spam
+          // Use our helper function to show placeholder
+          if (imgEl.parentNode) {
+            imgEl.parentNode.removeChild(imgEl);
+          }
+          showPlaceholder();
+        };
       };
       return;
     }
     
-    // If we're already in fallback mode or crossOrigin was removed - no logging
-    // Use our helper function to show placeholder
+    // If we've already tried fallbacks - no logging and show placeholder
     if (imgEl.parentNode) {
       imgEl.parentNode.removeChild(imgEl);
     }
@@ -1640,8 +1710,9 @@ function ensureProgressListener() {
     
     console.log('[CONTENT LOG] Registering progress update listener');
     
-    // Listen for progress updates
+    // Listen for progress updates and completion
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      // Handle regular progress updates
       if (message.action === 'uploadProgress') {
         console.log(`[CONTENT LOG] Progress update received: ${message.completed}/${message.total} (success: ${message.successCount})`);
         
@@ -1688,6 +1759,46 @@ function ensureProgressListener() {
           console.warn('[CONTENT ERROR] Error sending response to progress update:', error);
         }
       }
+      // Handle upload completion message (final result after all processing)
+      else if (message.action === 'uploadComplete') {
+        console.log(`[CONTENT LOG] Upload completion message received: success=${message.success}, count=${message.count || 0}/${message.total || '?'}`);
+        
+        // Clear any pending timeout
+        if (uploadTimeoutId) {
+          clearTimeout(uploadTimeoutId);
+          uploadTimeoutId = null;
+          console.log(`[CONTENT LOG] Cleared timeout after receiving completion message`);
+        }
+        
+        // Now we can safely remove the UI
+        const container = document.getElementById('image-selector-container');
+        if (container) {
+          console.log(`[CONTENT LOG] Removing image selector UI after confirmation of completion`);
+          document.body.removeChild(container);
+        }
+        
+        // Capture the final progress state for debugging
+        console.log(`[CONTENT LOG] Final progress state: ${currentProgressInfo.completed}/${currentProgressInfo.total}, ${currentProgressInfo.successCount} successful`);
+        
+        if (message.success) {
+          // Show success notification
+          console.log(`[CONTENT LOG] Showing success notification for ${message.count} images`);
+          showCompletionNotification(message.count, true);
+          console.log(`[CONTENT LOG] Successfully saved ${message.count} images.`);
+        } else {
+          // Show error notification
+          console.log(`[CONTENT ERROR] Showing error notification: ${message.error}`);
+          showCompletionNotification(currentProgressInfo.successCount || 0, false, message.error);
+          console.error(`[CONTENT ERROR] ${message.error || 'Unknown error occurred'}`);
+        }
+        
+        // Always respond to the message
+        try {
+          sendResponse({received: true, timestamp: Date.now()});
+        } catch (error) {
+          console.warn('[CONTENT ERROR] Failed to respond to completion message:', error);
+        }
+      }
       // Do NOT return true here - we're responding synchronously, not async
     });
     
@@ -1701,20 +1812,47 @@ function ensureProgressListener() {
 function saveImagesToStorage(images) {
   console.log(`[CONTENT LOG] Starting save process for ${images.length} images`);
   
+  // Filter out images that have already been uploaded in this session
+  const newImages = images.filter(image => {
+    // Skip if we've already sent this image for upload
+    if (alreadyUploadedUrls.has(image.url)) {
+      console.log(`[CONTENT LOG] Skipping already uploaded image: ${image.url.substring(0, 40)}...`);
+      return false;
+    }
+    return true;
+  });
+  
+  // Add all the current images to the alreadyUploadedUrls set
+  // so we don't upload them again, even if the upload fails
+  images.forEach(image => {
+    if (image && image.url) {
+      alreadyUploadedUrls.add(image.url);
+    }
+  });
+  
+  // If all images have already been uploaded, show a message
+  if (newImages.length === 0) {
+    console.log(`[CONTENT LOG] All ${images.length} images have already been sent for upload in this session`);
+    showStatusMessage(`All ${images.length} selected images have already been sent for upload in this session.`, 'info');
+    return;
+  }
+  
+  console.log(`[CONTENT LOG] After filtering already uploaded images: ${newImages.length} of ${images.length} images are new`);
+  
   // Make sure the progress listener is registered BEFORE we start
   ensureProgressListener();
   
   // Reset progress tracking
   currentProgressInfo = {
     completed: 0,
-    total: images.length,
+    total: newImages.length,
     successCount: 0,
     lastUpdate: Date.now()
   };
   console.log(`[CONTENT LOG] Reset progress tracking`);
   
   // Show progress indicator
-  const progressIndicator = createProgressIndicator(images.length);
+  const progressIndicator = createProgressIndicator(newImages.length);
   console.log(`[CONTENT LOG] Created progress indicator UI`);
   
   // Set a timeout to detect if the upload is taking too long
@@ -1738,31 +1876,48 @@ function saveImagesToStorage(images) {
     }
   }, 10000);
   
-  console.log(`[CONTENT LOG] Sending saveImages message to background script with ${images.length} images`);
+  console.log(`[CONTENT LOG] Sending saveImages message to background script with ${newImages.length} images`);
   
   // This would send the selected images to your background script
   chrome.runtime.sendMessage({
     action: 'saveImages',
-    images: images,
+    images: newImages,
     sourceUrl: window.location.href,
     pageTitle: document.title
   }, response => {
-    console.log(`[CONTENT LOG] Received final response from background script:`, response);
+    console.log(`[CONTENT LOG] Received initial response from background script:`, response);
+    
+    // Check if this is a provisional response
+    if (response && response.provisional) {
+      console.log(`[CONTENT LOG] This is a provisional response, not showing completion notification yet`);
+      
+      // Just hide the selector UI instead of removing it
+      // This will keep the progress indicator visible until the upload finishes
+      const container = document.getElementById('image-selector-container');
+      if (container) {
+        console.log(`[CONTENT LOG] Hiding image selector UI but keeping progress indicator`);
+        container.style.display = 'none';
+      }
+      
+      // Don't show any completion notification yet - wait for the uploadComplete message
+      return;
+    }
+    
+    // If we got here, it's a final response (not provisional)
+    // This might happen with legacy background scripts that don't use the two-phase approach
     
     // Clear any pending timeout
     if (uploadTimeoutId) {
       clearTimeout(uploadTimeoutId);
       uploadTimeoutId = null;
-      console.log(`[CONTENT LOG] Cleared timeout after receiving response`);
+      console.log(`[CONTENT LOG] Cleared timeout after receiving final response`);
     }
     
     // Just hide the selector UI instead of removing it
-    // This will keep the progress indicator visible until the upload finishes
     const container = document.getElementById('image-selector-container');
     if (container) {
       console.log(`[CONTENT LOG] Hiding image selector UI but keeping progress indicator`);
       container.style.display = 'none';
-      // Don't remove it from the DOM yet as that can prematurely hide the progress indicator
     }
     
     // Capture the final progress state for debugging

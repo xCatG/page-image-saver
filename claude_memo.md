@@ -1,54 +1,59 @@
-# Page Image Saver Extension Fix
+# Page Image Saver Extension Fix Summary
 
-## Issue Summary
-The Page Image Saver Chrome extension was encountering errors when attempting to upload images to Cloudflare R2 storage. The specific error was:
+## Recent Bug Fixes and Improvements
 
-```
-TypeError: Failed to execute 'fetch' on 'WorkerGlobalScope': Failed to read the 'headers' property from 'RequestInit': String contains non ISO-8859-1 code point.
-```
+### 1. Fixed Premature Completion Notification Issue
+- Modified the content script to properly handle the two-phase communication approach
+- Added provisional response detection to prevent showing completion notifications too early
+- Made the progress indicator more persistent by storing a global reference
+- Ensured the upload completion notification only appears after all images are processed
+- Added extensive logging to track the message flow between content and background scripts
 
-This error occurred in the `uploadToR2WithToken` function when trying to upload images using the Cloudflare API token method. The error suggests that non-standard characters were present in the headers being sent with the fetch request.
+### 2. Enhanced CORS Handling for Images
+- Implemented a multi-stage fallback approach for loading images with different CORS modes:
+  - Start with null crossOrigin (default credentials mode) to handle preloaded images
+  - Fall back to crossOrigin="anonymous" if the default mode fails
+  - Finally attempt with no crossorigin attribute as a last resort
+- Fixed issues with preloaded images that were causing warnings like:
+  - "A preload for '...' is found, but is not used because the request credentials mode does not match"
+- Added more detailed debugging logs to trace CORS issues
+- Enhanced error handling for image loading in both thumbnail creation and dynamic image handling
 
-## Changes Made
+### 3. Added Duplicate Upload Prevention Across Paginated Pages
+- Created a global `alreadyUploadedUrls` Set to track all URLs sent for upload in the current session
+- Modified `saveImagesToStorage` to filter out previously uploaded images
+- Updated `checkImagesFileSizes` to respect already uploaded images
+- Added visual indicators in the UI to show previously uploaded images:
+  - Green border around uploaded images
+  - "Uploaded" badge in the top-left corner
+- Implemented user feedback messages when selecting previously uploaded images
 
-### 1. Fixed R2 Upload with API Token
-- Modified the `uploadToR2WithToken` function to simplify headers
-- Temporarily disabled metadata headers (X-Amz-Meta-*) which were likely containing non-ASCII characters
-- Added proper fallback mechanisms when API token upload fails
+### 4. Fixed Tracking Pixel Error Flooding
+- Added comprehensive filtering for tracking pixels and problematic images
+- Implemented the `shouldSkipImage` function with pattern matching for known tracking resources
+- Enhanced error handling to reduce console spam from failed image loads
+- Added size-based filters to automatically skip tiny images that are likely tracking pixels
 
-### 2. Added Fallback Mechanisms
-- Implemented a cascading fallback strategy:
-  - If API token method fails, try API keys method if credentials are available
-  - If R2 upload fails completely, fall back to local download if enabled
-  - Automatically enable local download as a last resort if other methods fail
+### 5. Improved Error Handling and Logging
+- Added more context to log messages to make debugging easier
+- Implemented consistent error handling across the extension
+- Added fallback mechanisms for various error conditions
+- Improved user feedback for error states
 
-### 3. Enhanced Error Handling
-- Improved error detection and reporting throughout the upload process
-- Added more detailed logging with the `debugLog` function
-- Made the code more resilient to configuration issues
+### 6. Dynamic Image Discovery Enhancements
+- Enhanced the content script to detect and handle images loaded after the initial page load
+- Improved network request monitoring to capture all image resources
+- Implemented better deduplication of discovered image URLs
 
-### 4. Code Improvements
-- Modified the `uploadToStorage` function to properly handle errors and attempt fallbacks
-- Updated the image processing function to ensure local saving is tried when needed
-- Added sanitization for strings used in headers to prevent encoding issues
-  
-### 5. Dynamic Image Discovery Enhancements
-- Added a `chrome.webRequest.onCompleted` listener in the background service worker to intercept **all** image network requests (including those never inserted into the DOM) and forward each URL to the content script via a `dynamicImageLoaded` message.
-- Introduced `handleDynamicImage(url)` in the content script: uses a JS `Image()` object to load transient images, extract natural dimensions, construct a full metadata object, and feed it into the existing UI if it passes domain size filters.
-- Deployed a `MutationObserver` on `document.documentElement` to watch for newly added `<img>` elements and CSS `background-image` changes (including elements that appear only on hover or via dynamic scripts), routing all discovered URLs to `handleDynamicImage`.
-- Implemented a global `mouseover` listener (with a short debounce) to trigger `findAllImages()` on hover events, catching pop‑up or lazy‑load widgets that inject/remove nodes too quickly for the observer alone.
-- Centralized de‑duplication via a global `discoveredUrls` `Set`, ensuring no URL is processed more than once across the initial static scan, network-level intercepts, and DOM hooks.
-- Wrapped all `chrome.tabs.sendMessage` calls in callback form to handle `chrome.runtime.lastError` and avoid uncaught exceptions when sending to tabs without a listener.
-- Introduced a `dynamicImageObjs` cache to store images discovered *before* the UI is opened and merged this cache into the static initial scan in `findAllImages()`, ensuring pre-UI hover and lazy-loaded images appear when the picker is first displayed.
+## Technical Implementation Highlights
 
-## Testing Results
-The fixes allow images to be saved even if there are issues with the R2 upload process. If R2 upload fails, the extension will attempt to save locally based on the user's settings.
-
-## Technical Notes
-The root cause of the issue was non-standard characters (likely in page titles or URLs) being included in HTTP headers, which are restricted to ISO-8859-1 encoding. By simplifying the headers and adding proper fallback methods, the extension can now handle these cases gracefully.
+- **Two-Phase Upload Communication**: Background script now sends a provisional response immediately, then sends a final `uploadComplete` message when all processing is done
+- **Enhanced CORS Strategy**: Implemented a progressive fallback approach for image loading to handle various cross-origin scenarios
+- **Session-Based Deduplication**: Tracking and visual indication of already uploaded URLs to prevent duplicates
+- **Improved Error Resilience**: Better handling of network errors, CORS issues, and upload failures
 
 ## Future Improvements
-1. Re-enable metadata with proper encoding once the basic functionality is stable
-2. Add user-friendly error messages about storage issues
-3. Consider implementing a queuing system for failed uploads to retry later
-4. Add more detailed reporting on why specific images failed to save
+1. Consider making the duplicate tracking persistent across page refreshes using session storage
+2. Add more detailed statistics about upload success/failure rates
+3. Further enhance CORS handling for problematic sites
+4. Improve visual feedback for various upload states
