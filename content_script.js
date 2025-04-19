@@ -215,14 +215,15 @@ function handleDynamicImage(url) {
   imgEl.onerror = () => {
     // If the image fails with crossOrigin, try without it as a fallback
     if (imgEl.crossOrigin) {
-      console.log(`[CORS] Retrying image without crossOrigin: ${url.substring(0, 50)}...`);
+      // Only use debug-level logging to reduce console noise
+      console.debug(`[CORS] Retrying image without crossOrigin: ${url.substring(0, 40)}...`);
       // Create a new image without crossOrigin
       const fallbackImg = new Image();
       fallbackImg.onload = imgEl.onload; // Reuse the same handler
       fallbackImg.onerror = () => {
         // Mark URL as seen to avoid repeated attempts if both methods fail
         discoveredUrls.add(url);
-        // Suppressed detailed warning to avoid cluttering console
+        // No logging to avoid console spam
       };
       fallbackImg.src = url;
       return;
@@ -230,7 +231,7 @@ function handleDynamicImage(url) {
     
     // Mark URL as seen to avoid repeated attempts
     discoveredUrls.add(url);
-    // Suppressed console warning to avoid cluttering console with tracking pixels
+    // No console warning to avoid cluttering console
   };
   
   // Start loading the image
@@ -265,8 +266,26 @@ function shouldSkipImage(url) {
       '/FilterFlare', // More Bing tracking
     ];
     
+    // Additional patterns for common error-generating resources
+    const problemPatterns = [
+      'sprite.f55edc3f843fb93ad5d4941d30a666e9f3cac204.svg', // TrustedShops sprite
+      'widgets.trustedshops.com/assets/images/sprite', // Any TrustedShops sprites
+      '.svg#', // SVG fragments which often cause CORS issues
+      '/widget/', // Widget resources often have CORS restrictions
+      '/badge/', // Badges/emblems from third parties
+      '/seal/', // Trust/security seals 
+      '/trustmark', // Trust marks
+    ];
+    
     // Check if URL contains any of the tracking patterns
     if (trackingPatterns.some(pattern => url.includes(pattern))) {
+      return true;
+    }
+    
+    // Check if URL contains any of the problem patterns
+    if (problemPatterns.some(pattern => url.includes(pattern))) {
+      // Suppress log for common third-party elements
+      console.debug(`Skipping problematic resource: ${url.substring(0, 50)}...`);
       return true;
     }
     
@@ -597,43 +616,44 @@ async function checkImagesFileSizes(images) {
           
           // Set a timeout in case the image doesn't load
           const imgTimeout = setTimeout(() => {
-            console.log(`[CORS] Image prevalidation timed out: ${image.url}`);
+            // Use debug level for timeouts to reduce console spam
+            console.debug(`[CORS] Image prevalidation timed out`);
             resolve(true); // Continue anyway, let the server handle it
           }, 2000);
           
           // Image loaded successfully with crossOrigin
           img.onload = () => {
             clearTimeout(imgTimeout);
-            console.log(`[CORS] Image prevalidation succeeded with crossOrigin: ${image.url.substring(0, 50)}...`);
+            // Success doesn't need to be logged to avoid console spam
             resolve(true);
           };
           
           // Image failed to load with crossOrigin
           img.onerror = () => {
             clearTimeout(imgTimeout);
-            console.log(`[CORS] Image prevalidation failed with crossOrigin, trying without: ${image.url.substring(0, 50)}...`);
+            // Use debug level for less console spam
+            console.debug(`[CORS] Prevalidation retry: ${image.url.substring(0, 40)}...`);
             
             // Try loading without crossOrigin as a fallback
             const fallbackImg = new Image();
             
             // Set a new timeout for the fallback
             const fallbackTimeout = setTimeout(() => {
-              console.log(`[CORS] Fallback prevalidation timed out: ${image.url}`);
+              // Only log timeouts at debug level
+              console.debug(`[CORS] Fallback prevalidation timed out`);
               resolve(true); // Continue anyway
             }, 2000);
             
-            // Handle fallback success
+            // Handle fallback success - no logging needed
             fallbackImg.onload = () => {
               clearTimeout(fallbackTimeout);
-              console.log(`[CORS] Fallback prevalidation succeeded: ${image.url.substring(0, 50)}...`);
               resolve(true);
             };
             
-            // Handle fallback failure
+            // Handle fallback failure - no logging needed
             fallbackImg.onerror = () => {
               clearTimeout(fallbackTimeout);
-              console.log(`[CORS] Fallback prevalidation also failed: ${image.url.substring(0, 50)}...`);
-              // We'll still proceed to try the fetch, but log it
+              // No logging to reduce console spam
               resolve(true);
             };
             
@@ -1085,13 +1105,14 @@ function _createImageItemElement(image, index) {
   imgEl.onerror = () => {
     // If it fails with crossOrigin, try without it
     if (imgEl.crossOrigin) {
-      console.log(`[CORS] Thumbnail load failed with crossOrigin, retrying without: ${image.url.substring(0, 50)}...`);
+      // Use debug level to reduce console noise
+      console.debug(`[CORS] Thumbnail retry: ${image.url.substring(0, 30)}...`);
       imgEl.crossOrigin = null;
       imgEl.src = image.url;
       
       // Set up a second error handler for the fallback attempt
       imgEl.onerror = () => {
-        console.log(`[CORS] Thumbnail load failed in both modes: ${image.url.substring(0, 50)}...`);
+        // No logging for complete failure to avoid console spam
         // Create a colored placeholder with text if image fails to load
         imgEl.style.display = "none";
         thumbnail.style.backgroundColor = "#f5f5f5";
@@ -1107,8 +1128,7 @@ function _createImageItemElement(image, index) {
       return;
     }
     
-    // If we're already in fallback mode or crossOrigin was removed
-    console.log(`[CORS] Thumbnail load failed: ${image.url.substring(0, 50)}...`);
+    // If we're already in fallback mode or crossOrigin was removed - no logging
     // Create a colored placeholder with text if image fails to load
     imgEl.style.display = "none";
     thumbnail.style.backgroundColor = "#f5f5f5";
