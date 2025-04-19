@@ -467,11 +467,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     // Set a timeout to ensure sendResponse happens even if processing takes too long
     const responseTimeout = setTimeout(() => {
-      console.warn('Processing took too long, sending preliminary response');
+      console.warn('[UPLOAD TIMEOUT] Processing took too long, sending preliminary response');
       sendResponse({
         success: true,
         provisional: true,
-        message: 'Processing started, check notifications for completion'
+        message: 'Processing started, check console for progress logs'
       });
     }, 5000); // 5 second timeout
     
@@ -482,16 +482,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         clearTimeout(responseTimeout);
         
         const successCount = results.filter(r => r.success).length;
+        console.log(`[UPLOAD FINAL] Upload process completed. Preparing final response: ${successCount} successful, ${results.length - successCount} failed`);
         
         try {
+          console.log(`[UPLOAD RESPONSE] Sending final response to content script`);
           sendResponse({
             success: true, 
             count: successCount,
-            failures: results.length - successCount
+            failures: results.length - successCount,
+            timestamp: Date.now()
           });
+          console.log(`[UPLOAD RESPONSE] Final response sent successfully`);
         } catch (responseError) {
           // Message channel might be closed - show notification instead
-          console.warn('Could not send response, channel may be closed:', responseError);
+          console.warn('[UPLOAD ERROR] Could not send response, channel may be closed:', responseError);
           chrome.notifications.create({
             type: 'basic',
             iconUrl: 'icons/48.png',
@@ -499,19 +503,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             message: `Saved ${successCount} of ${results.length} images`,
             priority: 2
           });
+          console.log(`[UPLOAD NOTIFICATION] Created notification since response channel was closed`);
         }
       })
       .catch(error => {
         // Clear the timeout since we're about to send the response
         clearTimeout(responseTimeout);
         
-        console.error('Error saving images:', error);
+        console.error('[UPLOAD ERROR] Error saving images:', error);
         
         try {
-          sendResponse({success: false, error: error.message});
+          console.log(`[UPLOAD ERROR] Sending error response to content script`);
+          sendResponse({
+            success: false, 
+            error: error.message,
+            timestamp: Date.now()
+          });
+          console.log(`[UPLOAD ERROR] Error response sent successfully`);
         } catch (responseError) {
           // Message channel might be closed - show notification instead
-          console.warn('Could not send error response, channel may be closed');
+          console.warn('[UPLOAD ERROR] Could not send error response, channel may be closed');
           chrome.notifications.create({
             type: 'basic',
             iconUrl: 'icons/48.png',
@@ -519,6 +530,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             message: `Error: ${error.message}`,
             priority: 2
           });
+          console.log(`[UPLOAD NOTIFICATION] Created error notification since response channel was closed`);
         }
       });
     
@@ -766,9 +778,15 @@ async function processImagesInBatches(images, sourceInfo, tabId) {
     if (tabId && (forceUpdate || processedInCurrentInterval >= updateInterval)) {
       processedInCurrentInterval = 0; // Reset the counter
       
+      // ALWAYS log progress to console for debugging
+      console.log(`[UPLOAD PROGRESS] ${totalCompleted}/${images.length} images processed (${successCount} successful)`);
+      
       try {
         await new Promise((resolve) => {
           debugLog(`Sending progress update: ${totalCompleted}/${images.length} (${successCount} successful)`);
+          
+          // Also log when we're trying to send a message
+          console.log(`[UPLOAD MSG] Sending progress update to tab ${tabId}: ${totalCompleted}/${images.length}`);
           
           chrome.tabs.sendMessage(
             tabId, 
@@ -776,9 +794,13 @@ async function processImagesInBatches(images, sourceInfo, tabId) {
               action: 'uploadProgress',
               completed: totalCompleted,
               total: images.length,
-              successCount: successCount
+              successCount: successCount,
+              timestamp: Date.now()
             },
             (response) => {
+              // Log the response
+              console.log(`[UPLOAD MSG] Progress update response:`, response || 'No response');
+              
               // Always resolve, even if there's an error
               // We don't want to block processing if updates fail
               resolve(response || {received: false});
@@ -786,26 +808,35 @@ async function processImagesInBatches(images, sourceInfo, tabId) {
           );
           
           // Set a longer timeout for receiving responses
-          setTimeout(() => resolve({received: false, timedOut: true}), 2000);
+          setTimeout(() => {
+            console.log(`[UPLOAD MSG] Progress update timed out after 2 seconds`);
+            resolve({received: false, timedOut: true});
+          }, 2000);
         });
       } catch (error) {
-        console.warn('Failed to send progress update:', error);
+        console.warn('[UPLOAD ERROR] Failed to send progress update:', error);
         // Continue processing even if progress updates fail
       }
     }
   }
   
   try {
+    console.log(`[UPLOAD START] Starting to process ${images.length} images in batches of ${batchSize}`);
+    
     // Initial progress update
     await sendProgressUpdate(true);
     
     // Process in batches
     for (let i = 0; i < images.length; i += batchSize) {
       const batch = images.slice(i, i + batchSize);
+      console.log(`[UPLOAD BATCH] Processing batch ${Math.floor(i/batchSize) + 1} with ${batch.length} images (${i}-${Math.min(i + batchSize, images.length)})`);
       
       // Process each image in the batch with progress tracking
       for (let j = 0; j < batch.length; j++) {
         const image = batch[j];
+        const imageIndex = i + j;
+        
+        console.log(`[UPLOAD IMAGE] Processing image ${imageIndex + 1}/${images.length}: ${image.url.substring(0, 50)}...`);
         
         // Process this single image
         const result = await processImage(image, sourceInfo);
@@ -814,7 +845,12 @@ async function processImagesInBatches(images, sourceInfo, tabId) {
         // Update counters
         totalCompleted++;
         processedInCurrentInterval++;
-        if (result.success) successCount++;
+        if (result.success) {
+          successCount++;
+          console.log(`[UPLOAD SUCCESS] Image ${imageIndex + 1} uploaded successfully`);
+        } else {
+          console.log(`[UPLOAD FAIL] Image ${imageIndex + 1} failed: ${result.error || 'Unknown error'}`);
+        }
         
         // Send progress updates at regular intervals
         await sendProgressUpdate();
@@ -822,10 +858,13 @@ async function processImagesInBatches(images, sourceInfo, tabId) {
       
       // Force a progress update after each batch completes
       await sendProgressUpdate(true);
+      console.log(`[UPLOAD BATCH DONE] Batch ${Math.floor(i/batchSize) + 1} complete. Progress: ${totalCompleted}/${images.length}`);
     }
     
     // Final progress update
     await sendProgressUpdate(true);
+    
+    console.log(`[UPLOAD COMPLETE] Finished processing all ${images.length} images. Results: ${successCount} successful, ${totalCompleted - successCount} failed`);
     
     return results;
   } catch (error) {

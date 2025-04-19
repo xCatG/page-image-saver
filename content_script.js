@@ -1411,10 +1411,12 @@ function ensureProgressListener() {
   if (!progressListenerActive) {
     progressListenerActive = true;
     
+    console.log('[CONTENT LOG] Registering progress update listener');
+    
     // Listen for progress updates
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.action === 'uploadProgress') {
-        console.log(`Progress update received: ${message.completed}/${message.total}`);
+        console.log(`[CONTENT LOG] Progress update received: ${message.completed}/${message.total} (success: ${message.successCount})`);
         
         // Update our tracking object
         currentProgressInfo = {
@@ -1432,7 +1434,10 @@ function ensureProgressListener() {
         // Set a new timeout to detect stalled uploads (30 seconds without updates)
         uploadTimeoutId = setTimeout(() => {
           const timeSinceLastUpdate = Date.now() - currentProgressInfo.lastUpdate;
+          console.log(`[CONTENT LOG] Checking for stalled upload. Time since last update: ${Math.floor(timeSinceLastUpdate/1000)}s`);
+          
           if (timeSinceLastUpdate > 30000) {
+            console.log(`[CONTENT LOG] Upload appears stalled after ${Math.floor(timeSinceLastUpdate/1000)}s without updates`);
             // Show a notification if upload appears to be stalled
             const indicator = document.getElementById('save-progress-indicator');
             if (indicator) {
@@ -1449,20 +1454,26 @@ function ensureProgressListener() {
         
         // Always respond immediately to prevent message channel issues
         try {
-          sendResponse({received: true, timestamp: Date.now()});
+          const response = {received: true, timestamp: Date.now()};
+          sendResponse(response);
+          console.log(`[CONTENT LOG] Sent response to progress update:`, response);
         } catch (error) {
-          console.warn('Error sending response to progress update:', error);
+          console.warn('[CONTENT ERROR] Error sending response to progress update:', error);
         }
       }
       // Do NOT return true here - we're responding synchronously, not async
     });
     
-    console.log('Progress update listener registered');
+    console.log('[CONTENT LOG] Progress update listener registered successfully');
+  } else {
+    console.log('[CONTENT LOG] Progress listener already active, not registering again');
   }
 }
 
 // Function to save images to your storage (S3/R2)
 function saveImagesToStorage(images) {
+  console.log(`[CONTENT LOG] Starting save process for ${images.length} images`);
+  
   // Make sure the progress listener is registered BEFORE we start
   ensureProgressListener();
   
@@ -1473,18 +1484,23 @@ function saveImagesToStorage(images) {
     successCount: 0,
     lastUpdate: Date.now()
   };
+  console.log(`[CONTENT LOG] Reset progress tracking`);
   
   // Show progress indicator
   const progressIndicator = createProgressIndicator(images.length);
+  console.log(`[CONTENT LOG] Created progress indicator UI`);
   
   // Set a timeout to detect if the upload is taking too long
   if (uploadTimeoutId) {
     clearTimeout(uploadTimeoutId);
+    console.log(`[CONTENT LOG] Cleared existing timeout`);
   }
   
   uploadTimeoutId = setTimeout(() => {
+    console.log(`[CONTENT LOG] Initial timeout check (10s) - progress: ${currentProgressInfo.completed}/${currentProgressInfo.total}`);
     // If no progress updates have been received for 10 seconds at the start, show a message
     if (currentProgressInfo.completed === 0) {
+      console.log(`[CONTENT LOG] No progress after 10s, showing waiting message`);
       const indicator = document.getElementById('save-progress-indicator');
       if (indicator) {
         const messageEl = indicator.lastChild;
@@ -1495,6 +1511,8 @@ function saveImagesToStorage(images) {
     }
   }, 10000);
   
+  console.log(`[CONTENT LOG] Sending saveImages message to background script with ${images.length} images`);
+  
   // This would send the selected images to your background script
   chrome.runtime.sendMessage({
     action: 'saveImages',
@@ -1502,30 +1520,41 @@ function saveImagesToStorage(images) {
     sourceUrl: window.location.href,
     pageTitle: document.title
   }, response => {
+    console.log(`[CONTENT LOG] Received final response from background script:`, response);
+    
     // Clear any pending timeout
     if (uploadTimeoutId) {
       clearTimeout(uploadTimeoutId);
       uploadTimeoutId = null;
+      console.log(`[CONTENT LOG] Cleared timeout after receiving response`);
     }
     
     // Remove the UI
     const container = document.getElementById('image-selector-container');
     if (container) {
+      console.log(`[CONTENT LOG] Removing image selector UI`);
       document.body.removeChild(container);
     }
+    
+    // Capture the final progress state for debugging
+    console.log(`[CONTENT LOG] Final progress state: ${currentProgressInfo.completed}/${currentProgressInfo.total}, ${currentProgressInfo.successCount} successful`);
     
     if (response && response.success) {
       // Show success notification
       // Use the higher of response.count or currentProgressInfo.successCount
       const finalCount = Math.max(response.count || 0, currentProgressInfo.successCount || 0);
+      console.log(`[CONTENT LOG] Showing success notification for ${finalCount} images`);
       showCompletionNotification(finalCount, true);
-      console.log(`Successfully saved ${finalCount} images.`);
+      console.log(`[CONTENT LOG] Successfully saved ${finalCount} images.`);
     } else {
       // Show error notification
+      console.log(`[CONTENT ERROR] Showing error notification with ${currentProgressInfo.successCount} successful: ${response?.error}`);
       showCompletionNotification(currentProgressInfo.successCount || 0, false, response?.error);
-      console.error(`Error: ${response?.error || 'Unknown error occurred'}`);
+      console.error(`[CONTENT ERROR] ${response?.error || 'Unknown error occurred'}`);
     }
   });
+  
+  console.log(`[CONTENT LOG] SaveImagesToStorage function completed, waiting for async responses`);
 }
 
 // Initialize when the user clicks the extension icon or uses keyboard shortcut
