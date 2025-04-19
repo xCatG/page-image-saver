@@ -574,13 +574,22 @@ function findAllImages() {
         return true;
     });
 
-    // Remove duplicates by URL
+    // Remove duplicates and problematic URLs
     const uniqueUrls = new Set();
     allImages = allImages.filter(img => {
         if (!img || !img.url) return false;
+        
+        // Skip duplicates
         if (uniqueUrls.has(img.url)) {
             return false;
         }
+        
+        // Check if it's a problematic URL that causes CORS errors
+        if (shouldSkipImage(img.url)) {
+            return false;
+        }
+        
+        // It passed all filters
         uniqueUrls.add(img.url);
         return true;
     });
@@ -1088,7 +1097,100 @@ function _createImageItemElement(image, index) {
     overflow: hidden;
   `;
   
-  // Create actual image element
+  // Function to show placeholder without loading image
+  const showPlaceholder = (message = "Image Preview Unavailable") => {
+    thumbnail.style.backgroundColor = "#f5f5f5";
+    thumbnail.style.color = "#666";
+    thumbnail.style.display = "flex";
+    thumbnail.style.alignItems = "center";
+    thumbnail.style.justifyContent = "center";
+    thumbnail.style.padding = "5px";
+    thumbnail.style.textAlign = "center";
+    thumbnail.style.fontSize = "10px";
+    thumbnail.textContent = message;
+    return; // Return early to prevent image loading
+  };
+  
+  // Check if the image URL is problematic before trying to load it
+  if (image.url && typeof image.url === 'string') {
+    // Known problematic patterns that cause CORS errors
+    const knownProblematicPatterns = [
+      'trustedshops.com/assets/images/sprite',
+      '.svg#',
+      'widgets.trustpilot.com',
+      '/widget/',
+      '/badge/',
+      '/seal/',
+      '/trustmark'
+    ];
+    
+    // Check if URL matches any of the problematic patterns
+    if (knownProblematicPatterns.some(pattern => image.url.includes(pattern))) {
+      // Don't even try to load it - just show placeholder
+      showPlaceholder("Widget image (skipped)");
+      
+      // Continue with the rest of the function to create the container
+      imgContainer.appendChild(checkbox);
+      imgContainer.appendChild(thumbnailContainer);
+      thumbnailContainer.appendChild(thumbnail);
+      
+      // Add info and other elements
+      const info = document.createElement('div');
+      info.style.cssText = `
+        font-size: 12px;
+        max-height: 32px;
+        word-break: break-all;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        margin-bottom: 2px;
+        pointer-events: none;
+      `;
+      
+      // Set description text - only show alt text if it's meaningful
+      const hasAltText = image.alt && image.alt !== 'No description';
+      info.textContent = hasAltText ? image.alt : '';
+      
+      // Add dimensions info
+      const dimensionsInfo = document.createElement('div');
+      dimensionsInfo.style.cssText = `
+        font-size: 11px;
+        color: #666;
+        margin-top: 2px;
+        pointer-events: none;
+      `;
+      
+      const dimensions = (image.naturalWidth && image.naturalHeight) 
+        ? `${image.naturalWidth}x${image.naturalHeight}`
+        : `${image.width}x${image.height}`;
+      
+      let displayText = dimensions;
+      if (!hasAltText && image.filename) {
+        const shortName = `${image.filename.substring(0, 15)}${image.filename.length > 15 ? '...' : ''}`;
+        displayText = `${shortName} | ${dimensions}`;
+      }
+      
+      dimensionsInfo.textContent = displayText;
+      
+      imgContainer.appendChild(info);
+      imgContainer.appendChild(dimensionsInfo);
+      
+      // Add click event
+      imgContainer.addEventListener('click', (event) => {
+        if (event.target !== checkbox) {
+          event.preventDefault();
+          event.stopPropagation();
+          checkbox.checked = !checkbox.checked;
+        }
+      });
+      
+      return imgContainer;
+    }
+  }
+  
+  // If we get here, it's not a known problematic URL, so we can try to load the image
   const imgEl = document.createElement('img');
   
   // Set crossOrigin attribute before setting the src
@@ -1113,33 +1215,21 @@ function _createImageItemElement(image, index) {
       // Set up a second error handler for the fallback attempt
       imgEl.onerror = () => {
         // No logging for complete failure to avoid console spam
-        // Create a colored placeholder with text if image fails to load
-        imgEl.style.display = "none";
-        thumbnail.style.backgroundColor = "#f5f5f5";
-        thumbnail.style.color = "#666";
-        thumbnail.style.display = "flex";
-        thumbnail.style.alignItems = "center";
-        thumbnail.style.justifyContent = "center";
-        thumbnail.style.padding = "5px";
-        thumbnail.style.textAlign = "center";
-        thumbnail.style.fontSize = "10px";
-        thumbnail.textContent = "Image Preview Unavailable";
+        // Use our helper function to show placeholder
+        if (imgEl.parentNode) {
+          imgEl.parentNode.removeChild(imgEl);
+        }
+        showPlaceholder();
       };
       return;
     }
     
     // If we're already in fallback mode or crossOrigin was removed - no logging
-    // Create a colored placeholder with text if image fails to load
-    imgEl.style.display = "none";
-    thumbnail.style.backgroundColor = "#f5f5f5";
-    thumbnail.style.color = "#666";
-    thumbnail.style.display = "flex";
-    thumbnail.style.alignItems = "center";
-    thumbnail.style.justifyContent = "center";
-    thumbnail.style.padding = "5px";
-    thumbnail.style.textAlign = "center";
-    thumbnail.style.fontSize = "10px";
-    thumbnail.textContent = "Image Preview Unavailable";
+    // Use our helper function to show placeholder
+    if (imgEl.parentNode) {
+      imgEl.parentNode.removeChild(imgEl);
+    }
+    showPlaceholder();
   };
   
   // Set the src after setting up error handlers
