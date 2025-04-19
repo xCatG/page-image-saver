@@ -9,6 +9,8 @@ let allImagesCache = [];
 let currentFilteredImages = []; // Add this line to track current filtered images
 // Global set to dedupe URLs across all discovery methods
 let discoveredUrls = new Set();
+// Global set to track URLs that have already been sent for upload in the current session
+let alreadyUploadedUrls = new Set();
 // Cache for dynamic image objects discovered before UI open
 let dynamicImageObjs = [];
 let domainSettings = {
@@ -164,9 +166,25 @@ function handleDynamicImage(url) {
   if (discoveredUrls.has(url)) {
     return;
   }
+  
+  // Skip tracking pixels, analytics URLs, and other non-image resources
+  if (shouldSkipImage(url)) {
+    return;
+  }
+  
   // Load image for metadata
   const imgEl = new Image();
+  
+  // Start with null crossOrigin to match default preload behavior
+  imgEl.crossOrigin = null;
+  
+  // Set up load handler
   imgEl.onload = () => {
+    // Skip tiny images that are likely tracking pixels (less than 10x10)
+    if (imgEl.naturalWidth < 10 || imgEl.naturalHeight < 10) {
+      return;
+    }
+    
     const imageObj = {
       url: url,
       alt: url.split('/').pop() || '',
@@ -194,10 +212,98 @@ function handleDynamicImage(url) {
       }
     }
   };
+  
+  // Set up error handler with multiple fallback attempts
   imgEl.onerror = () => {
-    console.warn('Failed to load dynamic image for metadata:', url);
+    // First attempt: try with anonymous if null failed
+    if (imgEl.crossOrigin === null) {
+      // Only use debug-level logging to reduce console noise
+      console.debug(`[CORS] Retrying image with anonymous crossOrigin: ${url.substring(0, 40)}...`);
+      imgEl.crossOrigin = "anonymous";
+      imgEl.src = url;
+      return;
+    }
+    
+    // Second attempt: try with no crossorigin attribute
+    if (imgEl.crossOrigin === "anonymous") {
+      console.debug(`[CORS] Final fallback attempt with no crossorigin: ${url.substring(0, 40)}...`);
+      imgEl.removeAttribute('crossorigin');
+      imgEl.src = url;
+      return;
+    }
+    
+    // All attempts failed
+    // Mark URL as seen to avoid repeated attempts
+    discoveredUrls.add(url);
+    // No console warning to avoid cluttering console
   };
+  
+  // Start loading the image
   imgEl.src = url;
+}
+
+/**
+ * Helper function to determine if an image URL should be skipped
+ * (tracking pixels, analytics, etc)
+ */
+function shouldSkipImage(url) {
+  try {
+    // Skip URLs with certain patterns that are commonly used for tracking
+    const trackingPatterns = [
+      '/fd/ls/l?', // Bing tracking
+      '/pagead/', // Google ads
+      '/ga-audiences', // Google Analytics
+      '/pixel', // Generic pixel trackers
+      '/beacon', // Beacons
+      '/track', // Generic tracking
+      '/analytics', // Analytics
+      '/collect', // Collection endpoints
+      '/metric', // Metrics
+      '/p.gif', // Tracking pixels with p.gif
+      '/ping', // Ping endpoints
+      '/stats', // Stats collection
+      '/impression', // Ad impressions
+      '/piwik', // Piwik/Matomo analytics
+      '/counter', // Counters
+      '/B?BF=', // Specific Bing format
+      '/ClientInst', // Microsoft client instrumentation
+      '/FilterFlare', // More Bing tracking
+    ];
+    
+    // Additional patterns for common error-generating resources
+    const problemPatterns = [
+      'sprite.f55edc3f843fb93ad5d4941d30a666e9f3cac204.svg', // TrustedShops sprite
+      'widgets.trustedshops.com/assets/images/sprite', // Any TrustedShops sprites
+      '.svg#', // SVG fragments which often cause CORS issues
+      '/widget/', // Widget resources often have CORS restrictions
+      '/badge/', // Badges/emblems from third parties
+      '/seal/', // Trust/security seals 
+      '/trustmark', // Trust marks
+    ];
+    
+    // Check if URL contains any of the tracking patterns
+    if (trackingPatterns.some(pattern => url.includes(pattern))) {
+      return true;
+    }
+    
+    // Check if URL contains any of the problem patterns
+    if (problemPatterns.some(pattern => url.includes(pattern))) {
+      // Suppress log for common third-party elements
+      console.debug(`Skipping problematic resource: ${url.substring(0, 50)}...`);
+      return true;
+    }
+    
+    // Check for small GIF images that end with a 1x1 or have a query string
+    if (url.toLowerCase().endsWith('.gif') && 
+        (url.includes('1x1') || url.includes('?'))) {
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.warn('Error in shouldSkipImage:', error);
+    return false;
+  }
 }
 
 function findAllImages() {
@@ -472,13 +578,22 @@ function findAllImages() {
         return true;
     });
 
-    // Remove duplicates by URL
+    // Remove duplicates and problematic URLs
     const uniqueUrls = new Set();
     allImages = allImages.filter(img => {
         if (!img || !img.url) return false;
+        
+        // Skip duplicates
         if (uniqueUrls.has(img.url)) {
             return false;
         }
+        
+        // Check if it's a problematic URL that causes CORS errors
+        if (shouldSkipImage(img.url)) {
+            return false;
+        }
+        
+        // It passed all filters
         uniqueUrls.add(img.url);
         return true;
     });
@@ -502,6 +617,31 @@ async function checkImagesFileSizes(images) {
   const BATCH_SIZE = 10; // Process 10 images at a time to avoid too many concurrent requests
   let validImages = [];
   
+  // Skip images that have already been sent for upload this session
+  let imagesToCheck = images.filter(image => !alreadyUploadedUrls.has(image.url));
+  
+  // If all images were already uploaded, return the original array for UI feedback
+  if (imagesToCheck.length === 0 && images.length > 0) {
+    console.log(`[CONTENT LOG] All ${images.length} images have already been sent for upload`);
+    
+    // Show a message in the UI if it's open
+    const statusDiv = document.getElementById('status-message');
+    if (statusDiv) {
+      statusDiv.innerHTML = `<div class="alert alert-info">All ${images.length} selected images have already been sent for upload in this session.</div>`;
+    }
+    
+    return images; // Return original images so UI can proceed normally
+  }
+  
+  // Continue checking the new images
+  console.log(`[CONTENT LOG] Checking file sizes for ${imagesToCheck.length} new images (${images.length - imagesToCheck.length} already uploaded)`);
+  
+  // If we filtered any previously uploaded images, update the status message
+  const statusDiv = document.getElementById('status-message');
+  if (statusDiv && imagesToCheck.length < images.length) {
+    statusDiv.innerHTML = `<div class="alert alert-info">Checking ${imagesToCheck.length} new images (${images.length - imagesToCheck.length} were already uploaded)</div>`;
+  }
+  
   // Function to check a single image with timeout
   async function checkImage(image) {
     try {
@@ -514,22 +654,49 @@ async function checkImagesFileSizes(images) {
           
           // Set a timeout in case the image doesn't load
           const imgTimeout = setTimeout(() => {
-            console.log(`Image prevalidation timed out: ${image.url}`);
+            // Use debug level for timeouts to reduce console spam
+            console.debug(`[CORS] Image prevalidation timed out`);
             resolve(true); // Continue anyway, let the server handle it
           }, 2000);
           
-          // Image loaded successfully
+          // Image loaded successfully with crossOrigin
           img.onload = () => {
             clearTimeout(imgTimeout);
+            // Success doesn't need to be logged to avoid console spam
             resolve(true);
           };
           
-          // Image failed to load
+          // Image failed to load with crossOrigin
           img.onerror = () => {
             clearTimeout(imgTimeout);
-            console.log(`Image prevalidation failed: ${image.url}`);
-            // We'll still proceed to try the fetch, but log it
-            resolve(true);
+            // Use debug level for less console spam
+            console.debug(`[CORS] Prevalidation retry: ${image.url.substring(0, 40)}...`);
+            
+            // Try loading without crossOrigin as a fallback
+            const fallbackImg = new Image();
+            
+            // Set a new timeout for the fallback
+            const fallbackTimeout = setTimeout(() => {
+              // Only log timeouts at debug level
+              console.debug(`[CORS] Fallback prevalidation timed out`);
+              resolve(true); // Continue anyway
+            }, 2000);
+            
+            // Handle fallback success - no logging needed
+            fallbackImg.onload = () => {
+              clearTimeout(fallbackTimeout);
+              resolve(true);
+            };
+            
+            // Handle fallback failure - no logging needed
+            fallbackImg.onerror = () => {
+              clearTimeout(fallbackTimeout);
+              // No logging to reduce console spam
+              resolve(true);
+            };
+            
+            // Load without crossOrigin
+            fallbackImg.src = image.url;
           };
           
           // Set crossOrigin to anonymous to avoid tainting the canvas
@@ -618,7 +785,7 @@ async function checkImagesFileSizes(images) {
   
   // Use image dimensions as a quick local filter first before making network requests
   // This can quickly eliminate tiny images
-  const preFilteredImages = images.filter(img => {
+  const preFilteredImages = imagesToCheck.filter(img => {
     // Make sure the image object is valid
     if (!img) return false;
     
@@ -649,6 +816,13 @@ async function checkImagesFileSizes(images) {
     if (statusDiv) {
       statusDiv.innerHTML = `<div class="alert alert-info">Checking images: ${processed}/${preFilteredImages.length} (${validImages.length} valid so far)...</div>`;
     }
+  }
+  
+  // Add any previously uploaded images to the valid images list for UI feedback
+  if (images.length > imagesToCheck.length) {
+    const previouslyUploaded = images.filter(image => alreadyUploadedUrls.has(image.url));
+    console.log(`[CONTENT LOG] Adding ${previouslyUploaded.length} previously uploaded images to UI selection`);
+    validImages = [...previouslyUploaded, ...validImages];
   }
   
   return validImages;
@@ -920,6 +1094,31 @@ function _createImageItemElement(image, index) {
   // Add data attribute for tracking
   imgContainer.dataset.index = index;
   
+  // Check if this image URL has already been uploaded during this session
+  const alreadyUploaded = alreadyUploadedUrls.has(image.url);
+  
+  // If already uploaded, add visual indicator
+  if (alreadyUploaded) {
+    imgContainer.style.borderColor = '#4CAF50'; // Green border for uploaded images
+    imgContainer.style.borderWidth = '2px';
+    
+    // Add an "uploaded" badge
+    const badge = document.createElement('div');
+    badge.style.cssText = `
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      background-color: #4CAF50;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      z-index: 2;
+    `;
+    badge.textContent = 'Uploaded';
+    imgContainer.appendChild(badge);
+  }
+  
   // Create checkbox for selection
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
@@ -959,23 +1158,8 @@ function _createImageItemElement(image, index) {
     overflow: hidden;
   `;
   
-  // Create actual image element
-  const imgEl = document.createElement('img');
-  imgEl.src = image.url;
-  imgEl.style.cssText = `
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-    display: block;
-  `;
-  
-  // Set crossOrigin to anonymous to prevent CORS issues
-  imgEl.crossOrigin = "anonymous";
-  
-  // Add error handling to show placeholder if image fails to load
-  imgEl.onerror = () => {
-    // Create a colored placeholder with text if image fails to load
-    imgEl.style.display = "none";
+  // Function to show placeholder without loading image
+  const showPlaceholder = (message = "Image Preview Unavailable") => {
     thumbnail.style.backgroundColor = "#f5f5f5";
     thumbnail.style.color = "#666";
     thumbnail.style.display = "flex";
@@ -984,8 +1168,142 @@ function _createImageItemElement(image, index) {
     thumbnail.style.padding = "5px";
     thumbnail.style.textAlign = "center";
     thumbnail.style.fontSize = "10px";
-    thumbnail.textContent = "Image Preview Unavailable";
+    thumbnail.textContent = message;
+    return; // Return early to prevent image loading
   };
+  
+  // Check if the image URL is problematic before trying to load it
+  if (image.url && typeof image.url === 'string') {
+    // Known problematic patterns that cause CORS errors
+    const knownProblematicPatterns = [
+      'trustedshops.com/assets/images/sprite',
+      '.svg#',
+      'widgets.trustpilot.com',
+      '/widget/',
+      '/badge/',
+      '/seal/',
+      '/trustmark'
+    ];
+    
+    // Check if URL matches any of the problematic patterns
+    if (knownProblematicPatterns.some(pattern => image.url.includes(pattern))) {
+      // Don't even try to load it - just show placeholder
+      showPlaceholder("Widget image (skipped)");
+      
+      // Continue with the rest of the function to create the container
+      imgContainer.appendChild(checkbox);
+      imgContainer.appendChild(thumbnailContainer);
+      thumbnailContainer.appendChild(thumbnail);
+      
+      // Add info and other elements
+      const info = document.createElement('div');
+      info.style.cssText = `
+        font-size: 12px;
+        max-height: 32px;
+        word-break: break-all;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        margin-bottom: 2px;
+        pointer-events: none;
+      `;
+      
+      // Set description text - only show alt text if it's meaningful
+      const hasAltText = image.alt && image.alt !== 'No description';
+      info.textContent = hasAltText ? image.alt : '';
+      
+      // Add dimensions info
+      const dimensionsInfo = document.createElement('div');
+      dimensionsInfo.style.cssText = `
+        font-size: 11px;
+        color: #666;
+        margin-top: 2px;
+        pointer-events: none;
+      `;
+      
+      const dimensions = (image.naturalWidth && image.naturalHeight) 
+        ? `${image.naturalWidth}x${image.naturalHeight}`
+        : `${image.width}x${image.height}`;
+      
+      let displayText = dimensions;
+      if (!hasAltText && image.filename) {
+        const shortName = `${image.filename.substring(0, 15)}${image.filename.length > 15 ? '...' : ''}`;
+        displayText = `${shortName} | ${dimensions}`;
+      }
+      
+      dimensionsInfo.textContent = displayText;
+      
+      imgContainer.appendChild(info);
+      imgContainer.appendChild(dimensionsInfo);
+      
+      // Add click event
+      imgContainer.addEventListener('click', (event) => {
+        if (event.target !== checkbox) {
+          event.preventDefault();
+          event.stopPropagation();
+          checkbox.checked = !checkbox.checked;
+        }
+      });
+      
+      return imgContainer;
+    }
+  }
+  
+  // If we get here, it's not a known problematic URL, so we can try to load the image
+  const imgEl = document.createElement('img');
+  
+  // Set crossOrigin attribute before setting the src
+  // Use null initially for sites with preloaded images since 
+  // that will match the default credentials mode of 'same-origin'
+  imgEl.crossOrigin = null;
+  
+  imgEl.style.cssText = `
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+  `;
+  
+  // Add error handling to show placeholder if image fails to load
+  imgEl.onerror = () => {
+    // If initial load fails (with null crossOrigin), try with anonymous
+    if (imgEl.crossOrigin === null) {
+      // Use debug level to reduce console noise
+      console.debug(`[CORS] Thumbnail retry with anonymous: ${image.url.substring(0, 30)}...`);
+      imgEl.crossOrigin = "anonymous";
+      imgEl.src = image.url;
+      
+      // Set up a second error handler for the fallback attempt
+      imgEl.onerror = () => {
+        // No attribution - final fallback
+        console.debug(`[CORS] Final thumbnail fallback attempt: ${image.url.substring(0, 30)}...`);
+        imgEl.removeAttribute('crossorigin');
+        imgEl.src = image.url;
+        
+        // Set up a third error handler for the last attempt
+        imgEl.onerror = () => {
+          // No logging for complete failure to avoid console spam
+          // Use our helper function to show placeholder
+          if (imgEl.parentNode) {
+            imgEl.parentNode.removeChild(imgEl);
+          }
+          showPlaceholder();
+        };
+      };
+      return;
+    }
+    
+    // If we've already tried fallbacks - no logging and show placeholder
+    if (imgEl.parentNode) {
+      imgEl.parentNode.removeChild(imgEl);
+    }
+    showPlaceholder();
+  };
+  
+  // Set the src after setting up error handlers
+  imgEl.src = image.url;
   
   // Append the image to the thumbnail container
   thumbnail.appendChild(imgEl);
@@ -1148,10 +1466,14 @@ function showStatusMessage(message, type = 'info') {
 
 // Function to create a progress indicator overlay
 function createProgressIndicator(count) {
-  // Remove any existing indicators
-  removeProgressIndicator();
+  // Check if an indicator already exists
+  const existingIndicator = document.getElementById('save-progress-indicator');
+  if (existingIndicator) {
+    console.log(`[CONTENT LOG] Reusing existing progress indicator`);
+    return existingIndicator;
+  }
   
-  // Create the progress container
+  // Create the progress container - position it directly in the body for maximum independence
   const progressContainer = document.createElement('div');
   progressContainer.id = 'save-progress-indicator';
   progressContainer.style.cssText = `
@@ -1162,13 +1484,17 @@ function createProgressIndicator(count) {
     color: white;
     padding: 15px 20px;
     border-radius: 5px;
-    z-index: 999999;
+    z-index: 9999999; /* Extra high z-index */
     font-family: Arial, sans-serif;
     display: flex;
     align-items: center;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     transition: opacity 0.3s ease-in-out;
+    pointer-events: all; /* Ensure it can receive mouse events */
   `;
+  
+  // This important flag will prevent the indicator from being removed when the main UI is closed
+  progressContainer.setAttribute('data-persistent', 'true');
   
   // Add a spinner
   const spinner = document.createElement('div');
@@ -1199,27 +1525,74 @@ function createProgressIndicator(count) {
   progressContainer.appendChild(spinner);
   progressContainer.appendChild(message);
   
-  // Add to body
+  // Add directly to the document body - independent of any other UI
   document.body.appendChild(progressContainer);
   
+  // Store a reference to the indicator element in a global property
+  window.PageImageSaverProgressIndicator = progressContainer;
+  
+  console.log(`[CONTENT LOG] Created persistent progress indicator with ID: ${progressContainer.id}`);
   return progressContainer;
 }
 
 // Function to update progress indicator
-function updateProgressIndicator(completed, total) {
-  const indicator = document.getElementById('save-progress-indicator');
-  if (!indicator) return;
+function updateProgressIndicator(completed, total, successCount) {
+  // Get the indicator - or recreate it if it doesn't exist
+  let indicator = document.getElementById('save-progress-indicator');
+  if (!indicator) {
+    console.log(`[CONTENT LOG] Progress indicator not found, recreating it`);
+    indicator = createProgressIndicator(total);
+  }
   
   const messageEl = indicator.lastChild;
   if (messageEl) {
-    messageEl.textContent = `Saved ${completed} of ${total} image${total > 1 ? 's' : ''}...`;
+    // If we have a success count and it's different from completed, show both stats
+    if (typeof successCount !== 'undefined' && successCount !== completed) {
+      messageEl.innerHTML = `Processed ${completed} of ${total} image${total > 1 ? 's' : ''}<br>` +
+                            `<span style="color: #98FB98">${successCount} successful</span>, ` +
+                            `<span style="color: #FFA07A">${completed - successCount} failed/skipped</span>`;
+    } else {
+      messageEl.textContent = `Saved ${completed} of ${total} image${total > 1 ? 's' : ''}...`;
+    }
+    
+    // Add a progress percentage
+    if (total > 0) {
+      const percent = Math.round((completed / total) * 100);
+      // Update the title with the percentage for quick glance info
+      document.title = `(${percent}%) Page Image Saver`;
+      
+      // Also update the indicator to show the percentage
+      indicator.setAttribute('data-progress-percent', `${percent}%`);
+    }
   }
+  
+  // Make sure the indicator is visible
+  indicator.style.opacity = '1';
+  
+  return indicator;
 }
 
 // Function to show completion notification
-function showCompletionNotification(count, success = true) {
-  // Remove progress indicator
-  removeProgressIndicator();
+function showCompletionNotification(count, success = true, errorMessage = null) {
+  // Check if we need to keep the progress indicator for partial uploads
+  const keepProgressIndicator = !success && currentProgressInfo && 
+                               (currentProgressInfo.completed < currentProgressInfo.total);
+  
+  if (keepProgressIndicator) {
+    console.log(`[CONTENT LOG] Keeping progress indicator visible because upload is still in progress`);
+    // Update the indicator with the current state
+    if (document.getElementById('save-progress-indicator')) {
+      updateProgressIndicator(currentProgressInfo.completed, currentProgressInfo.total, currentProgressInfo.successCount);
+    }
+  } else {
+    // It's safe to remove the progress indicator
+    removeProgressIndicator();
+  }
+  
+  // Restore original title only when we're done or on success
+  if (success || !keepProgressIndicator) {
+    document.title = document.title.replace(/^\(\d+%\)\s+/, '');
+  }
   
   // Create notification element
   const notification = document.createElement('div');
@@ -1227,9 +1600,7 @@ function showCompletionNotification(count, success = true) {
   
   // Set styles based on success or failure
   const bgColor = success ? '#34A853' : '#EA4335';
-  const icon = success 
-    ? '✓' 
-    : '✗';
+  const icon = success ? '✓' : '✗';
   
   notification.style.cssText = `
     position: fixed;
@@ -1246,6 +1617,8 @@ function showCompletionNotification(count, success = true) {
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     opacity: 0;
     transition: opacity 0.3s ease-in-out;
+    max-width: 90%;
+    overflow: hidden;
   `;
   
   // Add icon
@@ -1254,15 +1627,37 @@ function showCompletionNotification(count, success = true) {
     font-size: 20px;
     margin-right: 15px;
     font-weight: bold;
+    flex-shrink: 0;
   `;
   iconEl.textContent = icon;
   
   // Add message
   const message = document.createElement('div');
+  message.style.cssText = `
+    flex-grow: 1;
+    overflow-wrap: break-word;
+  `;
+  
   if (success) {
-    message.textContent = `Successfully saved ${count} image${count > 1 ? 's' : ''} to your storage`;
+    if (count === 0) {
+      message.textContent = 'No images were saved. Images may have been filtered out due to size or content type.';
+    } else {
+      message.textContent = `Successfully saved ${count} image${count > 1 ? 's' : ''} to your storage`;
+    }
   } else {
-    message.textContent = `Failed to save images. Please check your settings.`;
+    if (count > 0) {
+      // Partial success
+      message.innerHTML = `Partial success: saved ${count} image${count > 1 ? 's' : ''}<br>` +
+                          `Some images failed to upload.`;
+      if (errorMessage) {
+        message.innerHTML += `<br><small>${errorMessage}</small>`;
+      }
+    } else {
+      // Complete failure
+      message.textContent = errorMessage ? 
+        `Failed to save images: ${errorMessage}` :
+        'Failed to save images. Please check your settings.';
+    }
   }
   
   // Add elements to container
@@ -1277,7 +1672,7 @@ function showCompletionNotification(count, success = true) {
     notification.style.opacity = '1';
   }, 10);
   
-  // Remove after a few seconds
+  // Remove after a few seconds - longer for error messages
   setTimeout(() => {
     notification.style.opacity = '0';
     setTimeout(() => {
@@ -1285,7 +1680,7 @@ function showCompletionNotification(count, success = true) {
         document.body.removeChild(notification);
       }
     }, 300);
-  }, 5000);
+  }, success ? 5000 : 8000); // Show errors longer
 }
 
 // Function to remove progress indicator
@@ -1296,48 +1691,254 @@ function removeProgressIndicator() {
   }
 }
 
+// Variable to track if the progress listener is active
+let progressListenerActive = false;
+// Variable to track upload process timeout
+let uploadTimeoutId = null;
+// Variable to store the latest progress information
+let currentProgressInfo = {
+  completed: 0,
+  total: 0,
+  successCount: 0,
+  lastUpdate: 0
+};
+
+// Register the progress update listener only once
+function ensureProgressListener() {
+  if (!progressListenerActive) {
+    progressListenerActive = true;
+    
+    console.log('[CONTENT LOG] Registering progress update listener');
+    
+    // Listen for progress updates and completion
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      // Handle regular progress updates
+      if (message.action === 'uploadProgress') {
+        console.log(`[CONTENT LOG] Progress update received: ${message.completed}/${message.total} (success: ${message.successCount})`);
+        
+        // Update our tracking object
+        currentProgressInfo = {
+          completed: message.completed,
+          total: message.total,
+          successCount: message.successCount || 0,
+          lastUpdate: Date.now()
+        };
+        
+        // Reset timeout if there's an existing one
+        if (uploadTimeoutId) {
+          clearTimeout(uploadTimeoutId);
+        }
+        
+        // Set a new timeout to detect stalled uploads (30 seconds without updates)
+        uploadTimeoutId = setTimeout(() => {
+          const timeSinceLastUpdate = Date.now() - currentProgressInfo.lastUpdate;
+          console.log(`[CONTENT LOG] Checking for stalled upload. Time since last update: ${Math.floor(timeSinceLastUpdate/1000)}s`);
+          
+          if (timeSinceLastUpdate > 30000) {
+            console.log(`[CONTENT LOG] Upload appears stalled after ${Math.floor(timeSinceLastUpdate/1000)}s without updates`);
+            // Show a notification if upload appears to be stalled
+            const indicator = document.getElementById('save-progress-indicator');
+            if (indicator) {
+              const messageEl = indicator.lastChild;
+              if (messageEl) {
+                messageEl.textContent = `Upload may be stalled (${currentProgressInfo.completed}/${currentProgressInfo.total}). Please wait...`;
+              }
+            }
+          }
+        }, 30000);
+        
+        // Update the visual indicator
+        updateProgressIndicator(message.completed, message.total, message.successCount);
+        
+        // Always respond immediately to prevent message channel issues
+        try {
+          const response = {received: true, timestamp: Date.now()};
+          sendResponse(response);
+          console.log(`[CONTENT LOG] Sent response to progress update:`, response);
+        } catch (error) {
+          console.warn('[CONTENT ERROR] Error sending response to progress update:', error);
+        }
+      }
+      // Handle upload completion message (final result after all processing)
+      else if (message.action === 'uploadComplete') {
+        console.log(`[CONTENT LOG] Upload completion message received: success=${message.success}, count=${message.count || 0}/${message.total || '?'}`);
+        
+        // Clear any pending timeout
+        if (uploadTimeoutId) {
+          clearTimeout(uploadTimeoutId);
+          uploadTimeoutId = null;
+          console.log(`[CONTENT LOG] Cleared timeout after receiving completion message`);
+        }
+        
+        // Now we can safely remove the UI
+        const container = document.getElementById('image-selector-container');
+        if (container) {
+          console.log(`[CONTENT LOG] Removing image selector UI after confirmation of completion`);
+          document.body.removeChild(container);
+        }
+        
+        // Capture the final progress state for debugging
+        console.log(`[CONTENT LOG] Final progress state: ${currentProgressInfo.completed}/${currentProgressInfo.total}, ${currentProgressInfo.successCount} successful`);
+        
+        if (message.success) {
+          // Show success notification
+          console.log(`[CONTENT LOG] Showing success notification for ${message.count} images`);
+          showCompletionNotification(message.count, true);
+          console.log(`[CONTENT LOG] Successfully saved ${message.count} images.`);
+        } else {
+          // Show error notification
+          console.log(`[CONTENT ERROR] Showing error notification: ${message.error}`);
+          showCompletionNotification(currentProgressInfo.successCount || 0, false, message.error);
+          console.error(`[CONTENT ERROR] ${message.error || 'Unknown error occurred'}`);
+        }
+        
+        // Always respond to the message
+        try {
+          sendResponse({received: true, timestamp: Date.now()});
+        } catch (error) {
+          console.warn('[CONTENT ERROR] Failed to respond to completion message:', error);
+        }
+      }
+      // Do NOT return true here - we're responding synchronously, not async
+    });
+    
+    console.log('[CONTENT LOG] Progress update listener registered successfully');
+  } else {
+    console.log('[CONTENT LOG] Progress listener already active, not registering again');
+  }
+}
+
 // Function to save images to your storage (S3/R2)
 function saveImagesToStorage(images) {
+  console.log(`[CONTENT LOG] Starting save process for ${images.length} images`);
+  
+  // Filter out images that have already been uploaded in this session
+  const newImages = images.filter(image => {
+    // Skip if we've already sent this image for upload
+    if (alreadyUploadedUrls.has(image.url)) {
+      console.log(`[CONTENT LOG] Skipping already uploaded image: ${image.url.substring(0, 40)}...`);
+      return false;
+    }
+    return true;
+  });
+  
+  // Add all the current images to the alreadyUploadedUrls set
+  // so we don't upload them again, even if the upload fails
+  images.forEach(image => {
+    if (image && image.url) {
+      alreadyUploadedUrls.add(image.url);
+    }
+  });
+  
+  // If all images have already been uploaded, show a message
+  if (newImages.length === 0) {
+    console.log(`[CONTENT LOG] All ${images.length} images have already been sent for upload in this session`);
+    showStatusMessage(`All ${images.length} selected images have already been sent for upload in this session.`, 'info');
+    return;
+  }
+  
+  console.log(`[CONTENT LOG] After filtering already uploaded images: ${newImages.length} of ${images.length} images are new`);
+  
+  // Make sure the progress listener is registered BEFORE we start
+  ensureProgressListener();
+  
+  // Reset progress tracking
+  currentProgressInfo = {
+    completed: 0,
+    total: newImages.length,
+    successCount: 0,
+    lastUpdate: Date.now()
+  };
+  console.log(`[CONTENT LOG] Reset progress tracking`);
+  
   // Show progress indicator
-  const progressIndicator = createProgressIndicator(images.length);
+  const progressIndicator = createProgressIndicator(newImages.length);
+  console.log(`[CONTENT LOG] Created progress indicator UI`);
+  
+  // Set a timeout to detect if the upload is taking too long
+  if (uploadTimeoutId) {
+    clearTimeout(uploadTimeoutId);
+    console.log(`[CONTENT LOG] Cleared existing timeout`);
+  }
+  
+  uploadTimeoutId = setTimeout(() => {
+    console.log(`[CONTENT LOG] Initial timeout check (10s) - progress: ${currentProgressInfo.completed}/${currentProgressInfo.total}`);
+    // If no progress updates have been received for 10 seconds at the start, show a message
+    if (currentProgressInfo.completed === 0) {
+      console.log(`[CONTENT LOG] No progress after 10s, showing waiting message`);
+      const indicator = document.getElementById('save-progress-indicator');
+      if (indicator) {
+        const messageEl = indicator.lastChild;
+        if (messageEl) {
+          messageEl.textContent = 'Starting upload, please wait...';
+        }
+      }
+    }
+  }, 10000);
+  
+  console.log(`[CONTENT LOG] Sending saveImages message to background script with ${newImages.length} images`);
   
   // This would send the selected images to your background script
   chrome.runtime.sendMessage({
     action: 'saveImages',
-    images: images,
+    images: newImages,
     sourceUrl: window.location.href,
     pageTitle: document.title
   }, response => {
-    // Remove the UI
+    console.log(`[CONTENT LOG] Received initial response from background script:`, response);
+    
+    // Check if this is a provisional response
+    if (response && response.provisional) {
+      console.log(`[CONTENT LOG] This is a provisional response, not showing completion notification yet`);
+      
+      // Just hide the selector UI instead of removing it
+      // This will keep the progress indicator visible until the upload finishes
+      const container = document.getElementById('image-selector-container');
+      if (container) {
+        console.log(`[CONTENT LOG] Hiding image selector UI but keeping progress indicator`);
+        container.style.display = 'none';
+      }
+      
+      // Don't show any completion notification yet - wait for the uploadComplete message
+      return;
+    }
+    
+    // If we got here, it's a final response (not provisional)
+    // This might happen with legacy background scripts that don't use the two-phase approach
+    
+    // Clear any pending timeout
+    if (uploadTimeoutId) {
+      clearTimeout(uploadTimeoutId);
+      uploadTimeoutId = null;
+      console.log(`[CONTENT LOG] Cleared timeout after receiving final response`);
+    }
+    
+    // Just hide the selector UI instead of removing it
     const container = document.getElementById('image-selector-container');
     if (container) {
-      document.body.removeChild(container);
+      console.log(`[CONTENT LOG] Hiding image selector UI but keeping progress indicator`);
+      container.style.display = 'none';
     }
+    
+    // Capture the final progress state for debugging
+    console.log(`[CONTENT LOG] Final progress state: ${currentProgressInfo.completed}/${currentProgressInfo.total}, ${currentProgressInfo.successCount} successful`);
     
     if (response && response.success) {
       // Show success notification
-      showCompletionNotification(response.count, true);
-      console.log(`Successfully saved ${response.count} images.`);
+      // Use the higher of response.count or currentProgressInfo.successCount
+      const finalCount = Math.max(response.count || 0, currentProgressInfo.successCount || 0);
+      console.log(`[CONTENT LOG] Showing success notification for ${finalCount} images`);
+      showCompletionNotification(finalCount, true);
+      console.log(`[CONTENT LOG] Successfully saved ${finalCount} images.`);
     } else {
       // Show error notification
-      showCompletionNotification(0, false);
-      console.error(`Error: ${response?.error || 'Unknown error occurred'}`);
+      console.log(`[CONTENT ERROR] Showing error notification with ${currentProgressInfo.successCount} successful: ${response?.error}`);
+      showCompletionNotification(currentProgressInfo.successCount || 0, false, response?.error);
+      console.error(`[CONTENT ERROR] ${response?.error || 'Unknown error occurred'}`);
     }
   });
   
-  // Listen for progress updates
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'uploadProgress') {
-      updateProgressIndicator(message.completed, message.total);
-      // Always respond immediately to prevent message channel issues
-      try {
-        sendResponse({received: true});
-      } catch (error) {
-        console.warn('Error sending response to progress update:', error);
-      }
-    }
-    // Do NOT return true here - we're responding synchronously, not async
-  });
+  console.log(`[CONTENT LOG] SaveImagesToStorage function completed, waiting for async responses`);
 }
 
 // Initialize when the user clicks the extension icon or uses keyboard shortcut
@@ -1428,28 +2029,46 @@ if (document.readyState === 'loading') {
     records.forEach(record => {
       record.addedNodes.forEach(node => {
         if (node.nodeType !== 1) return;
+        
+        // Process IMG elements
         if (node.tagName === 'IMG' && node.src) {
-          handleDynamicImage(node.src);
-        }
-        const style = window.getComputedStyle(node);
-        const bg = style.backgroundImage;
-        if (bg && bg.startsWith('url(')) {
-          const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
-          if (m && m[1]) {
-            handleDynamicImage(m[1]);
+          // Skip tiny images likely to be tracking pixels
+          if (node.width > 10 && node.height > 10 && !shouldSkipImage(node.src)) {
+            handleDynamicImage(node.src);
           }
         }
+        
+        // Process background images
+        try {
+          const style = window.getComputedStyle(node);
+          const bg = style.backgroundImage;
+          if (bg && bg.startsWith('url(')) {
+            const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
+            if (m && m[1] && !shouldSkipImage(m[1])) {
+              handleDynamicImage(m[1]);
+            }
+          }
+        } catch (error) {
+          // Ignore style computation errors on invalid nodes
+        }
       });
+      
+      // Process attribute changes
       if (record.type === 'attributes' && (record.attributeName === 'style' || record.attributeName === 'class')) {
         const node = record.target;
         if (node.nodeType !== 1) return;
-        const style = window.getComputedStyle(node);
-        const bg = style.backgroundImage;
-        if (bg && bg.startsWith('url(')) {
-          const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
-          if (m && m[1]) {
-            handleDynamicImage(m[1]);
+        
+        try {
+          const style = window.getComputedStyle(node);
+          const bg = style.backgroundImage;
+          if (bg && bg.startsWith('url(')) {
+            const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
+            if (m && m[1] && !shouldSkipImage(m[1])) {
+              handleDynamicImage(m[1]);
+            }
           }
+        } catch (error) {
+          // Ignore style computation errors on invalid nodes
         }
       }
     });
