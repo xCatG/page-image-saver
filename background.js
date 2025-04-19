@@ -133,9 +133,10 @@ const DEFAULT_CONFIG = {
   // General settings
   preserveFilenames: true, // Try to preserve original filenames when possible
   addMetadata: true, // Add metadata about the source page
-  maxConcurrentUploads: 3, // Limit concurrent uploads to avoid rate limiting
+  maxConcurrentUploads: 10, // Process more images in parallel (was 3)
   minFileSize: 5 * 1024, // Minimum file size in bytes (5KB default)
-  useDomainFolders: true // Organize images by domain in subfolders
+  useDomainFolders: true, // Organize images by domain in subfolders
+  progressUpdateInterval: 5 // How many images to process before sending progress update
 };
 
 // Store the current configuration (will be loaded from storage)
@@ -755,60 +756,82 @@ async function processImagesInBatches(images, sourceInfo, tabId) {
   const results = [];
   const batchSize = CONFIG.maxConcurrentUploads;
   let totalCompleted = 0;
+  let processedInCurrentInterval = 0;
+  let successCount = 0;
+  const updateInterval = CONFIG.progressUpdateInterval || 5;
+  
+  // Function to send progress updates to content script
+  async function sendProgressUpdate(forceUpdate = false) {
+    // Only send updates if we have a tab ID and either it's forced or we've hit the update interval
+    if (tabId && (forceUpdate || processedInCurrentInterval >= updateInterval)) {
+      processedInCurrentInterval = 0; // Reset the counter
+      
+      try {
+        await new Promise((resolve) => {
+          debugLog(`Sending progress update: ${totalCompleted}/${images.length} (${successCount} successful)`);
+          
+          chrome.tabs.sendMessage(
+            tabId, 
+            {
+              action: 'uploadProgress',
+              completed: totalCompleted,
+              total: images.length,
+              successCount: successCount
+            },
+            (response) => {
+              // Always resolve, even if there's an error
+              // We don't want to block processing if updates fail
+              resolve(response || {received: false});
+            }
+          );
+          
+          // Set a longer timeout for receiving responses
+          setTimeout(() => resolve({received: false, timedOut: true}), 2000);
+        });
+      } catch (error) {
+        console.warn('Failed to send progress update:', error);
+        // Continue processing even if progress updates fail
+      }
+    }
+  }
   
   try {
+    // Initial progress update
+    await sendProgressUpdate(true);
+    
     // Process in batches
     for (let i = 0; i < images.length; i += batchSize) {
       const batch = images.slice(i, i + batchSize);
-      const batchPromises = batch.map(image => processImage(image, sourceInfo));
       
-      // Wait for the current batch to complete
-      const batchResults = await Promise.all(batchPromises);
-      
-      // Filter out unsuccessful results
-      const successfulResults = batchResults.filter(r => r.success);
-      results.push(...batchResults);
-      
-      // Update progress after each batch
-      totalCompleted += batch.length;
-      
-      // Send progress update to the content script
-      if (tabId) {
-        try {
-          await new Promise((resolve, reject) => {
-            chrome.tabs.sendMessage(
-              tabId, 
-              {
-                action: 'uploadProgress',
-                completed: totalCompleted,
-                total: images.length,
-                successCount: successfulResults.length
-              },
-              (response) => {
-                // Check for error
-                const error = chrome.runtime.lastError;
-                if (error) {
-                  console.warn('Error sending progress update:', error);
-                  reject(error);
-                } else {
-                  resolve(response);
-                }
-              }
-            );
-            
-            // Set a timeout to resolve the promise if we don't get a response
-            setTimeout(() => resolve({received: false}), 1000);
-          });
-        } catch (error) {
-          console.warn('Failed to send progress update:', error);
-          // Continue processing even if progress updates fail
-        }
+      // Process each image in the batch with progress tracking
+      for (let j = 0; j < batch.length; j++) {
+        const image = batch[j];
+        
+        // Process this single image
+        const result = await processImage(image, sourceInfo);
+        results.push(result);
+        
+        // Update counters
+        totalCompleted++;
+        processedInCurrentInterval++;
+        if (result.success) successCount++;
+        
+        // Send progress updates at regular intervals
+        await sendProgressUpdate();
       }
+      
+      // Force a progress update after each batch completes
+      await sendProgressUpdate(true);
     }
+    
+    // Final progress update
+    await sendProgressUpdate(true);
     
     return results;
   } catch (error) {
     console.error('Error in batch processing:', error);
+    // Send one final update even on error
+    await sendProgressUpdate(true);
     return results; // Return any results we managed to get
   }
 }

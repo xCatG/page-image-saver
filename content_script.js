@@ -1265,20 +1265,37 @@ function createProgressIndicator(count) {
 }
 
 // Function to update progress indicator
-function updateProgressIndicator(completed, total) {
+function updateProgressIndicator(completed, total, successCount) {
   const indicator = document.getElementById('save-progress-indicator');
   if (!indicator) return;
   
   const messageEl = indicator.lastChild;
   if (messageEl) {
-    messageEl.textContent = `Saved ${completed} of ${total} image${total > 1 ? 's' : ''}...`;
+    // If we have a success count and it's different from completed, show both stats
+    if (typeof successCount !== 'undefined' && successCount !== completed) {
+      messageEl.innerHTML = `Processed ${completed} of ${total} image${total > 1 ? 's' : ''}<br>` +
+                            `<span style="color: #98FB98">${successCount} successful</span>, ` +
+                            `<span style="color: #FFA07A">${completed - successCount} failed/skipped</span>`;
+    } else {
+      messageEl.textContent = `Saved ${completed} of ${total} image${total > 1 ? 's' : ''}...`;
+    }
+    
+    // Add a progress percentage
+    if (total > 0) {
+      const percent = Math.round((completed / total) * 100);
+      // Update the title with the percentage for quick glance info
+      document.title = `(${percent}%) Page Image Saver`;
+    }
   }
 }
 
 // Function to show completion notification
-function showCompletionNotification(count, success = true) {
+function showCompletionNotification(count, success = true, errorMessage = null) {
   // Remove progress indicator
   removeProgressIndicator();
+  
+  // Restore original title
+  document.title = document.title.replace(/^\(\d+%\)\s+/, '');
   
   // Create notification element
   const notification = document.createElement('div');
@@ -1286,9 +1303,7 @@ function showCompletionNotification(count, success = true) {
   
   // Set styles based on success or failure
   const bgColor = success ? '#34A853' : '#EA4335';
-  const icon = success 
-    ? '✓' 
-    : '✗';
+  const icon = success ? '✓' : '✗';
   
   notification.style.cssText = `
     position: fixed;
@@ -1305,6 +1320,8 @@ function showCompletionNotification(count, success = true) {
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     opacity: 0;
     transition: opacity 0.3s ease-in-out;
+    max-width: 90%;
+    overflow: hidden;
   `;
   
   // Add icon
@@ -1313,15 +1330,37 @@ function showCompletionNotification(count, success = true) {
     font-size: 20px;
     margin-right: 15px;
     font-weight: bold;
+    flex-shrink: 0;
   `;
   iconEl.textContent = icon;
   
   // Add message
   const message = document.createElement('div');
+  message.style.cssText = `
+    flex-grow: 1;
+    overflow-wrap: break-word;
+  `;
+  
   if (success) {
-    message.textContent = `Successfully saved ${count} image${count > 1 ? 's' : ''} to your storage`;
+    if (count === 0) {
+      message.textContent = 'No images were saved. Images may have been filtered out due to size or content type.';
+    } else {
+      message.textContent = `Successfully saved ${count} image${count > 1 ? 's' : ''} to your storage`;
+    }
   } else {
-    message.textContent = `Failed to save images. Please check your settings.`;
+    if (count > 0) {
+      // Partial success
+      message.innerHTML = `Partial success: saved ${count} image${count > 1 ? 's' : ''}<br>` +
+                          `Some images failed to upload.`;
+      if (errorMessage) {
+        message.innerHTML += `<br><small>${errorMessage}</small>`;
+      }
+    } else {
+      // Complete failure
+      message.textContent = errorMessage ? 
+        `Failed to save images: ${errorMessage}` :
+        'Failed to save images. Please check your settings.';
+    }
   }
   
   // Add elements to container
@@ -1336,7 +1375,7 @@ function showCompletionNotification(count, success = true) {
     notification.style.opacity = '1';
   }, 10);
   
-  // Remove after a few seconds
+  // Remove after a few seconds - longer for error messages
   setTimeout(() => {
     notification.style.opacity = '0';
     setTimeout(() => {
@@ -1344,7 +1383,7 @@ function showCompletionNotification(count, success = true) {
         document.body.removeChild(notification);
       }
     }, 300);
-  }, 5000);
+  }, success ? 5000 : 8000); // Show errors longer
 }
 
 // Function to remove progress indicator
@@ -1355,10 +1394,106 @@ function removeProgressIndicator() {
   }
 }
 
+// Variable to track if the progress listener is active
+let progressListenerActive = false;
+// Variable to track upload process timeout
+let uploadTimeoutId = null;
+// Variable to store the latest progress information
+let currentProgressInfo = {
+  completed: 0,
+  total: 0,
+  successCount: 0,
+  lastUpdate: 0
+};
+
+// Register the progress update listener only once
+function ensureProgressListener() {
+  if (!progressListenerActive) {
+    progressListenerActive = true;
+    
+    // Listen for progress updates
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.action === 'uploadProgress') {
+        console.log(`Progress update received: ${message.completed}/${message.total}`);
+        
+        // Update our tracking object
+        currentProgressInfo = {
+          completed: message.completed,
+          total: message.total,
+          successCount: message.successCount || 0,
+          lastUpdate: Date.now()
+        };
+        
+        // Reset timeout if there's an existing one
+        if (uploadTimeoutId) {
+          clearTimeout(uploadTimeoutId);
+        }
+        
+        // Set a new timeout to detect stalled uploads (30 seconds without updates)
+        uploadTimeoutId = setTimeout(() => {
+          const timeSinceLastUpdate = Date.now() - currentProgressInfo.lastUpdate;
+          if (timeSinceLastUpdate > 30000) {
+            // Show a notification if upload appears to be stalled
+            const indicator = document.getElementById('save-progress-indicator');
+            if (indicator) {
+              const messageEl = indicator.lastChild;
+              if (messageEl) {
+                messageEl.textContent = `Upload may be stalled (${currentProgressInfo.completed}/${currentProgressInfo.total}). Please wait...`;
+              }
+            }
+          }
+        }, 30000);
+        
+        // Update the visual indicator
+        updateProgressIndicator(message.completed, message.total, message.successCount);
+        
+        // Always respond immediately to prevent message channel issues
+        try {
+          sendResponse({received: true, timestamp: Date.now()});
+        } catch (error) {
+          console.warn('Error sending response to progress update:', error);
+        }
+      }
+      // Do NOT return true here - we're responding synchronously, not async
+    });
+    
+    console.log('Progress update listener registered');
+  }
+}
+
 // Function to save images to your storage (S3/R2)
 function saveImagesToStorage(images) {
+  // Make sure the progress listener is registered BEFORE we start
+  ensureProgressListener();
+  
+  // Reset progress tracking
+  currentProgressInfo = {
+    completed: 0,
+    total: images.length,
+    successCount: 0,
+    lastUpdate: Date.now()
+  };
+  
   // Show progress indicator
   const progressIndicator = createProgressIndicator(images.length);
+  
+  // Set a timeout to detect if the upload is taking too long
+  if (uploadTimeoutId) {
+    clearTimeout(uploadTimeoutId);
+  }
+  
+  uploadTimeoutId = setTimeout(() => {
+    // If no progress updates have been received for 10 seconds at the start, show a message
+    if (currentProgressInfo.completed === 0) {
+      const indicator = document.getElementById('save-progress-indicator');
+      if (indicator) {
+        const messageEl = indicator.lastChild;
+        if (messageEl) {
+          messageEl.textContent = 'Starting upload, please wait...';
+        }
+      }
+    }
+  }, 10000);
   
   // This would send the selected images to your background script
   chrome.runtime.sendMessage({
@@ -1367,6 +1502,12 @@ function saveImagesToStorage(images) {
     sourceUrl: window.location.href,
     pageTitle: document.title
   }, response => {
+    // Clear any pending timeout
+    if (uploadTimeoutId) {
+      clearTimeout(uploadTimeoutId);
+      uploadTimeoutId = null;
+    }
+    
     // Remove the UI
     const container = document.getElementById('image-selector-container');
     if (container) {
@@ -1375,27 +1516,15 @@ function saveImagesToStorage(images) {
     
     if (response && response.success) {
       // Show success notification
-      showCompletionNotification(response.count, true);
-      console.log(`Successfully saved ${response.count} images.`);
+      // Use the higher of response.count or currentProgressInfo.successCount
+      const finalCount = Math.max(response.count || 0, currentProgressInfo.successCount || 0);
+      showCompletionNotification(finalCount, true);
+      console.log(`Successfully saved ${finalCount} images.`);
     } else {
       // Show error notification
-      showCompletionNotification(0, false);
+      showCompletionNotification(currentProgressInfo.successCount || 0, false, response?.error);
       console.error(`Error: ${response?.error || 'Unknown error occurred'}`);
     }
-  });
-  
-  // Listen for progress updates
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'uploadProgress') {
-      updateProgressIndicator(message.completed, message.total);
-      // Always respond immediately to prevent message channel issues
-      try {
-        sendResponse({received: true});
-      } catch (error) {
-        console.warn('Error sending response to progress update:', error);
-      }
-    }
-    // Do NOT return true here - we're responding synchronously, not async
   });
 }
 
