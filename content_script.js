@@ -172,6 +172,11 @@ function handleDynamicImage(url) {
   
   // Load image for metadata
   const imgEl = new Image();
+  
+  // Set crossOrigin to anonymous to handle CORS properly
+  imgEl.crossOrigin = "anonymous";
+  
+  // Set up load handler
   imgEl.onload = () => {
     // Skip tiny images that are likely tracking pixels (less than 10x10)
     if (imgEl.naturalWidth < 10 || imgEl.naturalHeight < 10) {
@@ -205,11 +210,30 @@ function handleDynamicImage(url) {
       }
     }
   };
+  
+  // Set up error handler
   imgEl.onerror = () => {
+    // If the image fails with crossOrigin, try without it as a fallback
+    if (imgEl.crossOrigin) {
+      console.log(`[CORS] Retrying image without crossOrigin: ${url.substring(0, 50)}...`);
+      // Create a new image without crossOrigin
+      const fallbackImg = new Image();
+      fallbackImg.onload = imgEl.onload; // Reuse the same handler
+      fallbackImg.onerror = () => {
+        // Mark URL as seen to avoid repeated attempts if both methods fail
+        discoveredUrls.add(url);
+        // Suppressed detailed warning to avoid cluttering console
+      };
+      fallbackImg.src = url;
+      return;
+    }
+    
     // Mark URL as seen to avoid repeated attempts
     discoveredUrls.add(url);
     // Suppressed console warning to avoid cluttering console with tracking pixels
   };
+  
+  // Start loading the image
   imgEl.src = url;
 }
 
@@ -573,22 +597,48 @@ async function checkImagesFileSizes(images) {
           
           // Set a timeout in case the image doesn't load
           const imgTimeout = setTimeout(() => {
-            console.log(`Image prevalidation timed out: ${image.url}`);
+            console.log(`[CORS] Image prevalidation timed out: ${image.url}`);
             resolve(true); // Continue anyway, let the server handle it
           }, 2000);
           
-          // Image loaded successfully
+          // Image loaded successfully with crossOrigin
           img.onload = () => {
             clearTimeout(imgTimeout);
+            console.log(`[CORS] Image prevalidation succeeded with crossOrigin: ${image.url.substring(0, 50)}...`);
             resolve(true);
           };
           
-          // Image failed to load
+          // Image failed to load with crossOrigin
           img.onerror = () => {
             clearTimeout(imgTimeout);
-            console.log(`Image prevalidation failed: ${image.url}`);
-            // We'll still proceed to try the fetch, but log it
-            resolve(true);
+            console.log(`[CORS] Image prevalidation failed with crossOrigin, trying without: ${image.url.substring(0, 50)}...`);
+            
+            // Try loading without crossOrigin as a fallback
+            const fallbackImg = new Image();
+            
+            // Set a new timeout for the fallback
+            const fallbackTimeout = setTimeout(() => {
+              console.log(`[CORS] Fallback prevalidation timed out: ${image.url}`);
+              resolve(true); // Continue anyway
+            }, 2000);
+            
+            // Handle fallback success
+            fallbackImg.onload = () => {
+              clearTimeout(fallbackTimeout);
+              console.log(`[CORS] Fallback prevalidation succeeded: ${image.url.substring(0, 50)}...`);
+              resolve(true);
+            };
+            
+            // Handle fallback failure
+            fallbackImg.onerror = () => {
+              clearTimeout(fallbackTimeout);
+              console.log(`[CORS] Fallback prevalidation also failed: ${image.url.substring(0, 50)}...`);
+              // We'll still proceed to try the fetch, but log it
+              resolve(true);
+            };
+            
+            // Load without crossOrigin
+            fallbackImg.src = image.url;
           };
           
           // Set crossOrigin to anonymous to avoid tainting the canvas
@@ -1020,7 +1070,10 @@ function _createImageItemElement(image, index) {
   
   // Create actual image element
   const imgEl = document.createElement('img');
-  imgEl.src = image.url;
+  
+  // Set crossOrigin attribute before setting the src
+  imgEl.crossOrigin = "anonymous";
+  
   imgEl.style.cssText = `
     max-width: 100%;
     max-height: 100%;
@@ -1028,11 +1081,34 @@ function _createImageItemElement(image, index) {
     display: block;
   `;
   
-  // Set crossOrigin to anonymous to prevent CORS issues
-  imgEl.crossOrigin = "anonymous";
-  
-  // Add error handling to show placeholder if image fails to load
+  // Add error handling to show placeholder if image fails to load with crossOrigin
   imgEl.onerror = () => {
+    // If it fails with crossOrigin, try without it
+    if (imgEl.crossOrigin) {
+      console.log(`[CORS] Thumbnail load failed with crossOrigin, retrying without: ${image.url.substring(0, 50)}...`);
+      imgEl.crossOrigin = null;
+      imgEl.src = image.url;
+      
+      // Set up a second error handler for the fallback attempt
+      imgEl.onerror = () => {
+        console.log(`[CORS] Thumbnail load failed in both modes: ${image.url.substring(0, 50)}...`);
+        // Create a colored placeholder with text if image fails to load
+        imgEl.style.display = "none";
+        thumbnail.style.backgroundColor = "#f5f5f5";
+        thumbnail.style.color = "#666";
+        thumbnail.style.display = "flex";
+        thumbnail.style.alignItems = "center";
+        thumbnail.style.justifyContent = "center";
+        thumbnail.style.padding = "5px";
+        thumbnail.style.textAlign = "center";
+        thumbnail.style.fontSize = "10px";
+        thumbnail.textContent = "Image Preview Unavailable";
+      };
+      return;
+    }
+    
+    // If we're already in fallback mode or crossOrigin was removed
+    console.log(`[CORS] Thumbnail load failed: ${image.url.substring(0, 50)}...`);
     // Create a colored placeholder with text if image fails to load
     imgEl.style.display = "none";
     thumbnail.style.backgroundColor = "#f5f5f5";
@@ -1045,6 +1121,9 @@ function _createImageItemElement(image, index) {
     thumbnail.style.fontSize = "10px";
     thumbnail.textContent = "Image Preview Unavailable";
   };
+  
+  // Set the src after setting up error handlers
+  imgEl.src = image.url;
   
   // Append the image to the thumbnail container
   thumbnail.appendChild(imgEl);
