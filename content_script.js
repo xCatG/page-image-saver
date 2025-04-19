@@ -1286,10 +1286,14 @@ function showStatusMessage(message, type = 'info') {
 
 // Function to create a progress indicator overlay
 function createProgressIndicator(count) {
-  // Remove any existing indicators
-  removeProgressIndicator();
+  // Check if an indicator already exists
+  const existingIndicator = document.getElementById('save-progress-indicator');
+  if (existingIndicator) {
+    console.log(`[CONTENT LOG] Reusing existing progress indicator`);
+    return existingIndicator;
+  }
   
-  // Create the progress container
+  // Create the progress container - position it directly in the body for maximum independence
   const progressContainer = document.createElement('div');
   progressContainer.id = 'save-progress-indicator';
   progressContainer.style.cssText = `
@@ -1300,13 +1304,17 @@ function createProgressIndicator(count) {
     color: white;
     padding: 15px 20px;
     border-radius: 5px;
-    z-index: 999999;
+    z-index: 9999999; /* Extra high z-index */
     font-family: Arial, sans-serif;
     display: flex;
     align-items: center;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     transition: opacity 0.3s ease-in-out;
+    pointer-events: all; /* Ensure it can receive mouse events */
   `;
+  
+  // This important flag will prevent the indicator from being removed when the main UI is closed
+  progressContainer.setAttribute('data-persistent', 'true');
   
   // Add a spinner
   const spinner = document.createElement('div');
@@ -1337,16 +1345,24 @@ function createProgressIndicator(count) {
   progressContainer.appendChild(spinner);
   progressContainer.appendChild(message);
   
-  // Add to body
+  // Add directly to the document body - independent of any other UI
   document.body.appendChild(progressContainer);
   
+  // Store a reference to the indicator element in a global property
+  window.PageImageSaverProgressIndicator = progressContainer;
+  
+  console.log(`[CONTENT LOG] Created persistent progress indicator with ID: ${progressContainer.id}`);
   return progressContainer;
 }
 
 // Function to update progress indicator
 function updateProgressIndicator(completed, total, successCount) {
-  const indicator = document.getElementById('save-progress-indicator');
-  if (!indicator) return;
+  // Get the indicator - or recreate it if it doesn't exist
+  let indicator = document.getElementById('save-progress-indicator');
+  if (!indicator) {
+    console.log(`[CONTENT LOG] Progress indicator not found, recreating it`);
+    indicator = createProgressIndicator(total);
+  }
   
   const messageEl = indicator.lastChild;
   if (messageEl) {
@@ -1364,17 +1380,39 @@ function updateProgressIndicator(completed, total, successCount) {
       const percent = Math.round((completed / total) * 100);
       // Update the title with the percentage for quick glance info
       document.title = `(${percent}%) Page Image Saver`;
+      
+      // Also update the indicator to show the percentage
+      indicator.setAttribute('data-progress-percent', `${percent}%`);
     }
   }
+  
+  // Make sure the indicator is visible
+  indicator.style.opacity = '1';
+  
+  return indicator;
 }
 
 // Function to show completion notification
 function showCompletionNotification(count, success = true, errorMessage = null) {
-  // Remove progress indicator
-  removeProgressIndicator();
+  // Check if we need to keep the progress indicator for partial uploads
+  const keepProgressIndicator = !success && currentProgressInfo && 
+                               (currentProgressInfo.completed < currentProgressInfo.total);
   
-  // Restore original title
-  document.title = document.title.replace(/^\(\d+%\)\s+/, '');
+  if (keepProgressIndicator) {
+    console.log(`[CONTENT LOG] Keeping progress indicator visible because upload is still in progress`);
+    // Update the indicator with the current state
+    if (document.getElementById('save-progress-indicator')) {
+      updateProgressIndicator(currentProgressInfo.completed, currentProgressInfo.total, currentProgressInfo.successCount);
+    }
+  } else {
+    // It's safe to remove the progress indicator
+    removeProgressIndicator();
+  }
+  
+  // Restore original title only when we're done or on success
+  if (success || !keepProgressIndicator) {
+    document.title = document.title.replace(/^\(\d+%\)\s+/, '');
+  }
   
   // Create notification element
   const notification = document.createElement('div');
@@ -1608,11 +1646,13 @@ function saveImagesToStorage(images) {
       console.log(`[CONTENT LOG] Cleared timeout after receiving response`);
     }
     
-    // Remove the UI
+    // Just hide the selector UI instead of removing it
+    // This will keep the progress indicator visible until the upload finishes
     const container = document.getElementById('image-selector-container');
     if (container) {
-      console.log(`[CONTENT LOG] Removing image selector UI`);
-      document.body.removeChild(container);
+      console.log(`[CONTENT LOG] Hiding image selector UI but keeping progress indicator`);
+      container.style.display = 'none';
+      // Don't remove it from the DOM yet as that can prematurely hide the progress indicator
     }
     
     // Capture the final progress state for debugging
