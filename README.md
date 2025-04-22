@@ -172,13 +172,35 @@ The extension includes a Settings page where you can configure your storage cred
 
 ## 🔄 Development Timeline
 
-- **April 2023**: Initial extension development with basic image extraction
-- **June 2023**: Added S3 integration and screenshot functionality
-- **August 2023**: Implemented R2 support and domain-based organization
-- **October 2023**: Fixed CORS issues and added upload progress tracking
-- **December 2023**: Added duplicate detection across paginated pages
-- **February 2024**: Enhanced error handling and implemented tracking pixel filtering
-- **April 2024**: Refined two-phase communication system for upload tracking
+- **Week 1**: Initial extension development with basic image extraction
+- **Week 1**: Added S3 integration and screenshot functionality
+- **Week 1**: Implemented R2 support and domain-based organization
+- **Week 2**: Fixed CORS issues and added upload progress tracking
+- **Week 2**: Added duplicate detection across paginated pages
+- **Week 2**: Enhanced error handling and implemented tracking pixel filtering
+- **Week 2**: Refined two-phase communication system for upload tracking
+
+The entire project was developed in under two weeks with the assistance of LLM coding agents, demonstrating the efficiency of AI-augmented development.
+
+## 🤖 For LLM Agents Working on This Project
+
+If you're an AI assistant helping to develop or maintain this project:
+
+1. **Start by reviewing the [claude_memo.md](claude_memo.md)** file which contains critical information about recent bug fixes, implementation details, and technical challenges
+
+2. **Key architectural components to understand**:
+   - Two-phase communication between content scripts and background scripts
+   - CORS handling with multi-stage fallback approach
+   - Progress tracking and notification system
+   - Duplicate prevention across page loads
+
+3. **Development principles**:
+   - Prioritize user feedback with clear progress indicators
+   - Implement robust error handling with fallbacks
+   - Ensure consistent logging for debugging
+   - Maintain separation between UI and background processing
+
+For example, when working on CORS-related issues, refer to the multi-stage fallback approach described in claude_memo.md.
 
 ## 🔮 Future Roadmap
 
