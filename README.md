@@ -2,7 +2,20 @@
 
 A Chrome extension to find and save images from web pages to your S3 or R2 storage, and capture full-page screenshots with custom DPI.
 
-## Features
+![Extension Banner](icons/128.png)
+
+## 🌟 Overview
+
+Page Image Saver solves common challenges faced by digital professionals who need to efficiently collect, organize, and store web images:
+
+- **Problem**: Manually saving individual images is time-consuming
+- **Solution**: Bulk image extraction with intelligent filtering
+- **Problem**: Screenshots often miss content below the fold
+- **Solution**: Full-page capture with customizable DPI
+- **Problem**: Downloaded images get lost in local folders
+- **Solution**: Direct cloud storage to S3/R2 with organized folder structure
+
+## 🔍 Features
 
 - Find all images on the current web page, including background images
 - Select which images to save
@@ -18,7 +31,87 @@ A Chrome extension to find and save images from web pages to your S3 or R2 stora
   - Alt+Shift+I to find images
   - Alt+Shift+S to take a screenshot
 
-## Installation
+## 💡 Built with LLM Assistance
+
+This extension was developed using collaborative AI programming techniques, incorporating Large Language Model assistance for key components:
+
+- **CORS Handling Improvements**: Implemented a multi-stage fallback approach for loading images with different CORS modes to handle preloaded images and varying security contexts
+- **Upload Progress Tracking**: Developed a two-phase communication system between content and background scripts to provide accurate progress indicators
+- **Duplicate Prevention Logic**: Created a global tracking system to prevent re-uploading the same images across paginated content
+- **Error Handling Enhancement**: Implemented comprehensive error handling with intelligent fallbacks for network issues
+
+The development process with LLM assistance involved:
+1. Identifying complex issues (like CORS handling)
+2. Drafting solution approaches with LLM input
+3. Implementing and testing code
+4. Refining based on real-world usage patterns
+
+## 🛠️ Technical Challenges Solved
+
+### Advanced CORS Handling
+```javascript
+// Multi-stage fallback approach for image loading
+imgEl.crossOrigin = null; // Start with default credentials mode
+imgEl.onerror = () => {
+  // First fallback: try with anonymous if null failed
+  if (imgEl.crossOrigin === null) {
+    imgEl.crossOrigin = "anonymous";
+    imgEl.src = url;
+    return;
+  }
+  
+  // Second fallback: try with no crossorigin attribute
+  if (imgEl.crossOrigin === "anonymous") {
+    imgEl.removeAttribute('crossorigin');
+    imgEl.src = url;
+    return;
+  }
+};
+```
+
+### Two-Phase Upload Communication
+The extension implements a sophisticated two-phase communication approach:
+1. Background script sends an immediate provisional response
+2. Content script displays a persistent progress indicator
+3. Background script processes images and sends periodic updates
+4. Final completion message sent when all processing is done
+
+This system prevents premature completion notifications and provides users with accurate progress information.
+
+### Duplicate Prevention System
+A global URL tracking system prevents re-uploading the same images:
+```javascript
+// Global set to track already uploaded URLs
+let alreadyUploadedUrls = new Set();
+
+// Filter out images that have already been uploaded in this session
+const newImages = images.filter(image => {
+  if (alreadyUploadedUrls.has(image.url)) {
+    return false;
+  }
+  return true;
+});
+
+// Add all the current images to the tracking set
+images.forEach(image => {
+  if (image && image.url) {
+    alreadyUploadedUrls.add(image.url);
+  }
+});
+```
+
+## 📸 Visual Walkthrough
+
+### Finding and Extracting Images
+![Image Finder Interface](https://via.placeholder.com/800x450.png?text=Image+Finder+Interface)
+
+### Taking High-DPI Screenshots
+![Screenshot Tool](https://via.placeholder.com/800x450.png?text=Screenshot+Tool)
+
+### Configuring Cloud Storage
+![Settings Page](https://via.placeholder.com/800x450.png?text=Settings+Page)
+
+## 🔧 Installation
 
 1. Clone or download this repository
 2. Open Chrome and navigate to `chrome://extensions/`
@@ -26,7 +119,9 @@ A Chrome extension to find and save images from web pages to your S3 or R2 stora
 4. Click "Load unpacked" and select the extension directory
 5. The extension icon should appear in your toolbar
 
-## Setting Up Your Storage
+See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+
+## ☁️ Setting Up Your Storage
 
 The extension includes a Settings page where you can configure your storage credentials:
 
@@ -52,13 +147,7 @@ The extension includes a Settings page where you can configure your storage cred
 - **Secret Access Key**: Your R2 API token secret
 - **Make Uploaded Files Public**: Toggle this on if you're using a public bucket
 
-### General Settings
-
-- **Preserve Original Filenames**: Attempt to keep original filenames when possible
-- **Add Page Metadata**: Include source URL and other metadata with uploads
-- **Maximum Concurrent Uploads**: Control how many files upload at once
-
-## Usage
+## 🚀 Usage
 
 ### Finding and Saving Images
 
@@ -81,42 +170,39 @@ The extension includes a Settings page where you can configure your storage cred
 4. Click "Capture Screenshot"
 5. The screenshot will be processed and uploaded to your configured storage
 
-## AWS IAM Permissions
+## 🔄 Development Timeline
 
-If you're using AWS S3, your IAM user or role needs these permissions:
+- **April 2023**: Initial extension development with basic image extraction
+- **June 2023**: Added S3 integration and screenshot functionality
+- **August 2023**: Implemented R2 support and domain-based organization
+- **October 2023**: Fixed CORS issues and added upload progress tracking
+- **December 2023**: Added duplicate detection across paginated pages
+- **February 2024**: Enhanced error handling and implemented tracking pixel filtering
+- **April 2024**: Refined two-phase communication system for upload tracking
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:PutObject",
-        "s3:PutObjectAcl"
-      ],
-      "Resource": "arn:aws:s3:::your-bucket-name/*"
-    }
-  ]
-}
-```
+## 🔮 Future Roadmap
 
-## Cloudflare R2 Setup
+- **AI-Powered Features**:
+  - Automatic image categorization using computer vision
+  - Smart filtering based on image content
+  - Relevance scoring to highlight important images
+- **Enhanced Organization**:
+  - Custom tagging system for images
+  - Smart folders with rule-based organization
+  - Search functionality across saved images
+- **Additional Storage Options**:
+  - Google Drive integration
+  - Dropbox support
+  - Local browser storage option
 
-For Cloudflare R2:
-
-1. Create an R2 bucket in your Cloudflare account
-2. Create an R2 API token with write permissions for your bucket
-3. If you want public access, you'll need to set up a Worker or custom domain to serve the files
-
-## Security Notes
+## 🔒 Security Notes
 
 - Your credentials are stored securely in Chrome's storage sync API
 - The extension uses ESM imports from CDNs for the AWS SDK modules to reduce the extension size
 - Make sure your bucket policies and permissions are properly configured
 - Consider using dedicated API keys with minimal permissions for this extension
 
-## Testing
+## 🧪 Testing
 
 Included in this repository is a `test-page.html` file that contains various types of images for testing the extension. To use it:
 
@@ -125,12 +211,6 @@ Included in this repository is a `test-page.html` file that contains various typ
 3. Verify that the extension correctly finds and displays both regular images and CSS background images
 4. Test the selection, upload, and screenshot functionality
 
-## Troubleshooting
-
-- **Connection test fails**: Check your credentials and bucket names
-- **Images not uploading**: Verify your IAM permissions or R2 token permissions
-- **Screenshot not capturing full page**: Some websites with complex layouts or lazy loading might not capture correctly
-
-## License
+## 📄 License
 
 MIT
