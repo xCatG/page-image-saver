@@ -118,7 +118,7 @@ const DEFAULT_CONFIG = {
   
   // Local download settings - disabled by default
   local: {
-    enabled: false,
+    enabled: true,
     subfolderPerDomain: false,
     baseFolder: 'PageImageSaver'
   },
@@ -599,24 +599,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('Processing screenshot with current config:', CONFIG);
     
     const promises = [];
-    
-    // Local saving functionality has been removed
+
+    // Get domain for local subfolders if enabled
+    let localDomainForScreenshot = '';
+    if (CONFIG.local.subfolderPerDomain && metadata && metadata.url) {
+      try {
+        const urlObj = new URL(metadata.url);
+        localDomainForScreenshot = urlObj.hostname;
+      } catch (e) { console.warn('Could not parse URL for local domain folder (screenshot):', e); }
+    }
+
+    if (CONFIG.local && CONFIG.local.enabled) {
+      console.log('[processScreenshot] Local saving enabled for screenshot, attempting local save');
+      debugLog('[processScreenshot] Local saving enabled for screenshot, attempting local save. Filename: ' + filename);
+      promises.push(saveLocally(blob, filename, metadata, localDomainForScreenshot));
+    } else {
+      debugLog('[processScreenshot] Local saving for screenshot is disabled');
+    }
     
     // Upload to cloud storage if configured
     if (isConfigValid()) {
-      console.log('Cloud storage is configured, attempting screenshot upload');
+      console.log('[processScreenshot] Cloud storage is configured, attempting screenshot upload');
+      debugLog('[processScreenshot] Cloud storage is configured, attempting screenshot upload. Filename: ' + filename);
       promises.push(uploadToStorage(blob, filename, { type: 'screenshot' }, metadata, domain));
     } else {
-      console.log('Cloud storage not configured or invalid settings');
+      debugLog('[processScreenshot] Cloud storage not configured or invalid settings');
     }
     
     if (promises.length === 0) {
-      console.error('No storage methods enabled. Please configure cloud storage in settings.');
+      // This means !CONFIG.local.enabled && !isConfigValid()
+      console.error('[processScreenshot] No storage methods enabled for screenshot.');
+      debugLog('[processScreenshot] No storage methods enabled for screenshot. Both local and cloud are disabled/misconfigured.');
       sendResponse({
         success: false,
-        error: 'Cloud storage not configured. Please set up S3 or R2 storage in extension settings.'
+        error: 'Storage not configured. Please enable local saving or set up S3 or R2 storage.'
       });
-      return true;
+      return true; 
     }
     
     // Set a timeout to ensure sendResponse happens even if processing takes too long
@@ -639,22 +657,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         
         // Filter successful results
         const successfulResults = results.filter(r => r && r.success);
-        console.log('Successful operations:', successfulResults.length);
+        console.log('Successful screenshot operations:', successfulResults.length);
+        debugLog(`[processScreenshot] Successful operations: ${successfulResults.length} out of ${results.length}`);
+
+        successfulResults.forEach(result => {
+            if (result.type === 'local' && result.path) {
+                debugLog(`[processScreenshot] 📁 SCREENSHOT SAVED TO LOCAL PATH: ${result.path}`);
+            } else if (result.url) {
+                debugLog(`[processScreenshot] 🌐 SCREENSHOT SAVED TO REMOTE URL: ${result.url}`);
+            }
+        });
         
         try {
           if (successfulResults.length > 0) {
             sendResponse({
               success: true,
-              url: successfulResults[0].url || 'File saved'
+              // Return the URL of the first successful save (prefer cloud, then local)
+              url: successfulResults.find(r => r.url)?.url || successfulResults.find(r => r.path)?.path || 'File saved'
             });
           } else {
+             const errorMessages = results.map(r => r.error).filter(e => e).join('; ');
             sendResponse({
               success: false,
-              error: 'Failed to save screenshot'
+              error: errorMessages || 'Failed to save screenshot'
             });
           }
         } catch (responseError) {
-          console.warn('Could not send screenshot response, channel may be closed:', responseError);
+          console.warn('[processScreenshot] Could not send screenshot response, channel may be closed:', responseError);
+          debugLog('[processScreenshot] Could not send screenshot response, channel may be closed. Error: ' + responseError.message);
           
           // Show notification instead
           if (successfulResults.length > 0) {
@@ -662,15 +692,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               type: 'basic',
               iconUrl: 'icons/48.png',
               title: 'Screenshot Saved',
-              message: 'Screenshot was successfully saved to your storage.',
+              message: 'Screenshot was successfully saved.', // Simplified message
               priority: 2
             });
           } else {
+            const errorMessages = results.map(r => r.error).filter(e => e).join('; ');
             chrome.notifications.create({
               type: 'basic',
               iconUrl: 'icons/48.png',
               title: 'Screenshot Error',
-              message: 'Failed to save screenshot. Please check settings.',
+              message: `Failed to save screenshot: ${errorMessages || 'Unknown error'}. Please check settings.`,
               priority: 2
             });
           }
@@ -680,7 +711,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Clear the timeout
         clearTimeout(responseTimeout);
         
-        console.error('Error processing screenshot:', error);
+        console.error('[processScreenshot] Error processing screenshot:', error);
+        debugLog('[processScreenshot] Error processing screenshot: ' + error.message);
         
         try {
           sendResponse({
@@ -688,7 +720,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             error: error.message
           });
         } catch (responseError) {
-          console.warn('Could not send screenshot error response, channel may be closed');
+          console.warn('[processScreenshot] Could not send screenshot error response, channel may be closed:', responseError);
+          debugLog('[processScreenshot] Could not send screenshot error response, channel may be closed. Error: ' + responseError.message);
           
           // Show notification instead
           chrome.notifications.create({
@@ -911,10 +944,10 @@ async function processImage(image, sourceInfo) {
     }
     
     // Generate a filename
-    const filename = getFilename(image.url, imageBlob.type);
+    const filenameForOperations = getFilename(image.url, imageBlob.type);
     
-    // Get domain for organizing in folders if enabled
-    let domain = '';
+    // Get domain for organizing in cloud folders if enabled
+    let domain = ''; // For cloud
     if (CONFIG.useDomainFolders && sourceInfo && sourceInfo.url) {
       try {
         const urlObj = new URL(sourceInfo.url);
@@ -926,25 +959,38 @@ async function processImage(image, sourceInfo) {
       }
     }
     
+    // Get domain for local subfolders if enabled
+    let localDomain = '';
+    if (CONFIG.local.subfolderPerDomain && sourceInfo && sourceInfo.url) {
+      try {
+        const urlObj = new URL(sourceInfo.url);
+        localDomain = urlObj.hostname;
+      } catch (e) { console.warn('Could not parse URL for local domain folder:', e); }
+    }
+    
     console.log('Processing image with current config:', CONFIG);
     
     const promises = [];
     
-    // REMOVED: Local saving option
-    // We're no longer using local saves to avoid incorrect folder save dialogs
+    if (CONFIG.local && CONFIG.local.enabled) {
+      debugLog('[processImage] Local saving is enabled, attempting local save');
+      promises.push(saveLocally(imageBlob, filenameForOperations, sourceInfo, localDomain));
+    } else {
+      debugLog('[processImage] Local saving is disabled');
+    }
     
     // Upload to cloud storage if configured
     if (isConfigValid()) {
-      debugLog('Cloud storage is configured, attempting upload');
-      promises.push(uploadToStorage(imageBlob, filename, image, sourceInfo, domain));
+      debugLog('[processImage] Cloud storage is configured, attempting upload');
+      promises.push(uploadToStorage(imageBlob, filenameForOperations, image, sourceInfo, domain));
     } else {
-      debugLog('Cloud storage not configured or invalid settings');
-      // Local saving functionality has been removed
+      debugLog('[processImage] Cloud storage not configured or invalid settings');
     }
     
     if (promises.length === 0) {
-      debugLog('No storage methods enabled. Please configure cloud storage in settings.');
-      throw new Error('Storage not configured. Please set up S3 or R2 storage in extension settings.');
+      // This means !CONFIG.local.enabled && !isConfigValid()
+      debugLog('[processImage] No storage methods enabled.');
+      throw new Error('Storage not configured. Please enable local saving or set up S3/R2 storage in extension settings.');
     }
     
     // Wait for all operations to complete
@@ -958,12 +1004,12 @@ async function processImage(image, sourceInfo) {
     
     // If at least one operation succeeded, consider the overall process a success
     if (successfulResults.length > 0) {
-      debugLog(`Successfully saved ${filename}`);
+      debugLog(`Successfully saved ${filenameForOperations}`);
       
       // Log more detailed information about where files were saved
       successfulResults.forEach(result => {
-        if (result.type === 'local' && result.fullPath) {
-          debugLog(`📁 IMAGE SAVED TO LOCAL PATH: ${result.fullPath}`);
+        if (result.type === 'local' && result.path) { // Updated to result.path from result.fullPath
+          debugLog(`📁 IMAGE SAVED TO LOCAL PATH: ${result.path}`);
         } else if (result.url) {
           debugLog(`🌐 IMAGE SAVED TO REMOTE URL: ${result.url}`);
         }
@@ -975,7 +1021,9 @@ async function processImage(image, sourceInfo) {
         results: successfulResults 
       };
     } else {
-      throw new Error('All save operations failed');
+      // Collect error messages if all promises failed
+      const errorMessages = results.map(r => r.error).filter(e => e).join('; ');
+      throw new Error(errorMessages || 'All save operations failed');
     };
   } catch (error) {
     console.error(`Error processing ${image.url}:`, error);
@@ -1145,6 +1193,82 @@ function getExtensionFromContentType(contentType) {
   const extension = typeMap[contentType] || '.jpg';
   debugLog(`Using extension: ${extension} for content type: ${contentType}`);
   return extension;
+}
+
+// Save image to local disk via Downloads API
+async function saveLocally(blob, originalFilename, sourceInfo, domain) {
+  let objectURL;
+  const functionName = 'saveLocally'; // For debug logs
+  try {
+    debugLog(`[${functionName}] Starting local save. Original filename: ${originalFilename}, Domain: ${domain}, Blob type: ${blob.type}, Blob size: ${blob.size}`);
+    const baseFolder = CONFIG.local.baseFolder || 'PageImageSaver';
+    let downloadPath = baseFolder;
+
+    if (CONFIG.local.subfolderPerDomain && domain) {
+      if (downloadPath !== '' && !downloadPath.endsWith('/')) {
+        downloadPath += '/';
+      }
+      downloadPath += sanitizeDomain(domain);
+    }
+
+    let filenameToUse;
+    if (CONFIG.preserveFilenames && originalFilename) {
+      filenameToUse = sanitizeFilename(originalFilename);
+    } else {
+      const ext = getExtensionFromContentType(blob.type) || '.png'; // Default to .png if type is unknown
+      filenameToUse = `image_${Date.now()}${ext}`;
+      debugLog(`[${functionName}] preserveFilenames is false or originalFilename not provided. Generated filename: ${filenameToUse}`);
+    }
+    
+    if (downloadPath !== '' && !downloadPath.endsWith('/')) {
+      downloadPath += '/';
+    }
+    // Ensure filenameToUse is not empty, otherwise path might end with just a slash
+    if (filenameToUse) {
+        downloadPath += filenameToUse;
+    } else {
+        // Fallback if filenameToUse ends up empty (should not happen with current logic)
+        const ext = getExtensionFromContentType(blob.type) || '.png';
+        downloadPath += `image_${Date.now()}${ext}`;
+        debugLog(`[${functionName}] filenameToUse was empty, used fallback: ${downloadPath}`);
+    }
+    
+    downloadPath = downloadPath.replace(/\\/g, '/').replace(/\/g, '/'); // Normalize to forward slashes
+
+    debugLog(`[${functionName}] Constructed download path: ${downloadPath}`);
+
+    objectURL = URL.createObjectURL(blob);
+    debugLog(`[${functionName}] Created object URL: ${objectURL}`);
+
+    const downloadId = await new Promise((resolve, reject) => {
+      chrome.downloads.download({
+        url: objectURL,
+        filename: downloadPath,
+        saveAs: false,
+        conflictAction: 'uniquify'
+      }, (id) => {
+        if (id === undefined) {
+          const errorMsg = chrome.runtime.lastError ? chrome.runtime.lastError.message : 'Download failed: ID is undefined. Check path/permissions.';
+          debugLog(`[${functionName}] chrome.downloads.download failed. Error: ${errorMsg}`);
+          reject(new Error(errorMsg));
+        } else {
+          debugLog(`[${functionName}] chrome.downloads.download initiated. Download ID: ${id}`);
+          resolve(id);
+        }
+      });
+    });
+    
+    return { success: true, path: downloadPath, downloadId: downloadId, type: 'local' };
+  } catch (error) {
+    console.error(`[${functionName}] Error:`, error); // Keep console.error for visibility
+    debugLog(`[${functionName}] Local save error: ${error.message}. Blob type: ${blob.type}, Original filename: ${originalFilename}`);
+    return { success: false, error: error.message, type: 'local' };
+  } finally {
+    if (objectURL) {
+      URL.revokeObjectURL(objectURL);
+      debugLog(`[${functionName}] Revoked object URL: ${objectURL}`);
+    }
+  }
 }
 
 // Upload to storage (S3 or R2)

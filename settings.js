@@ -101,8 +101,12 @@ document.addEventListener('DOMContentLoaded', () => {
       
       document.getElementById('r2-public').checked = settings.r2.makePublic || false;
       
-      // Local download settings section has been removed from the UI
-      // Keep the data structure in settings for backward compatibility
+      // Set local download settings
+      if (settings.local) {
+        document.getElementById('local-enabled').checked = settings.local.enabled;
+        document.getElementById('local-base-folder').value = settings.local.baseFolder || 'PageImageSaver';
+        document.getElementById('local-subfolder-per-domain').checked = settings.local.subfolderPerDomain;
+      }
       
       // Set retry settings
       if (settings.retry) {
@@ -158,9 +162,9 @@ document.addEventListener('DOMContentLoaded', () => {
         makePublic: document.getElementById('r2-public').checked
       },
       local: {
-        enabled: false, // Local download functionality has been removed
-        subfolderPerDomain: false,
-        baseFolder: 'PageImageSaver'
+        enabled: document.getElementById('local-enabled').checked,
+        baseFolder: document.getElementById('local-base-folder').value || 'PageImageSaver',
+        subfolderPerDomain: document.getElementById('local-subfolder-per-domain').checked
       },
       retry: {
         enabled: document.getElementById('retry-enabled').checked,
@@ -403,7 +407,7 @@ document.addEventListener('DOMContentLoaded', () => {
         makePublic: false
       },
       local: {
-        enabled: false, // Local download functionality has been removed
+        enabled: true, 
         subfolderPerDomain: false,
         baseFolder: 'PageImageSaver'
       },
