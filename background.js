@@ -91,18 +91,6 @@ chrome.webRequest.onCompleted.addListener((details) => {
 
 // Default configuration (will be overridden by user settings)
 
-// Map to track intended paths for local downloads
-const downloadPaths = new Map();
-
-chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  if (downloadPaths.has(item.url)) {
-    const intendedPath = downloadPaths.get(item.url);
-    suggest({ filename: intendedPath, conflictAction: 'uniquify' });
-    downloadPaths.delete(item.url);
-  } else {
-    suggest();
-  }
-});
 
 const DEFAULT_CONFIG = {
   // Set to true to use S3, false to use R2
@@ -134,6 +122,7 @@ const DEFAULT_CONFIG = {
   local: {
     enabled: false,
     subfolderPerDomain: false,
+    saveJson: false,
     baseFolder: 'PageImageSaver'
   },
   
@@ -500,17 +489,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         processingComplete = true;
         
         const successCount = results.filter(r => r.success).length;
-        console.log(`[UPLOAD FINAL] Upload process completed. Final stats: ${successCount} successful, ${results.length - successCount} failed`);
-        
+        const skippedCount = results.filter(r => !r.success && r.skipped).length;
+        const failedCount = results.length - successCount - skippedCount;
+        console.log(`[UPLOAD FINAL] Upload process completed. Final stats: ${successCount} successful, ${skippedCount} skipped, ${failedCount} failed`);
+
+        // Collect URLs that failed (not just skipped) so the content script can
+        // remove them from alreadyUploadedUrls and allow a retry
+        const failedUrls = results
+          .filter(r => !r.success && !r.skipped && r.image && r.image.url)
+          .map(r => r.image.url);
+
+        // Collect skip reasons for better user messaging
+        const skipReasons = [...new Set(
+          results.filter(r => !r.success && r.skipped).map(r => r.error)
+        )];
+
+        // Extract the local folder path from the first successful local save, if any
+        const firstLocalResult = results.flatMap(r => r.results || []).find(r => r && r.type === 'local' && r.fullPath);
+        const localFolder = firstLocalResult ? firstLocalResult.fullPath.substring(0, firstLocalResult.fullPath.lastIndexOf('/') + 1) : null;
+
         // Send a final completion message to the tab
         try {
           console.log(`[UPLOAD COMPLETE] Sending completion message to tab ${sender.tab.id}`);
           chrome.tabs.sendMessage(sender.tab.id, {
             action: 'uploadComplete',
-            success: true, 
+            success: true,
             count: successCount,
-            failures: results.length - successCount,
+            skipped: skippedCount,
+            skipReasons,
+            failures: failedCount,
+            failedUrls,
             total: results.length,
+            localFolder,
             timestamp: Date.now()
           }, response => {
             console.log(`[UPLOAD COMPLETE] Completion message response:`, response || 'No response');
@@ -618,7 +628,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (CONFIG.local && CONFIG.local.enabled) {
       console.log('Local saving is configured, attempting screenshot download');
       const localFolder = CONFIG.local.subfolderPerDomain ? domain : '';
-      promises.push(uploadToLocal(blob, filename, localFolder));
+      promises.push(saveToDownloads(blob, filename, localFolder));
     }
     
     // Upload to cloud storage if configured
@@ -874,6 +884,8 @@ async function processImagesInBatches(images, sourceInfo, tabId) {
         if (result.success) {
           successCount++;
           console.log(`[UPLOAD SUCCESS] Image ${imageIndex + 1} uploaded successfully`);
+        } else if (result.skipped) {
+          console.log(`[UPLOAD SKIP] Image ${imageIndex + 1} skipped: ${result.error || 'filtered'}`);
         } else {
           console.log(`[UPLOAD FAIL] Image ${imageIndex + 1} failed: ${result.error || 'Unknown error'}`);
         }
@@ -909,22 +921,22 @@ async function processImage(image, sourceInfo) {
     
     // Check file size
     if (imageBlob.size < CONFIG.minFileSize) {
-      console.log(`Skipping small image (${imageBlob.size} bytes): ${image.url}`);
-      return { 
-        success: false, 
-        image, 
-        error: 'Image too small',
+      console.log(`Skipping small image (${imageBlob.size} bytes, min ${CONFIG.minFileSize} bytes): ${image.url}`);
+      return {
+        success: false,
+        image,
+        error: `Image too small (${Math.round(imageBlob.size / 1024 * 10) / 10} KB, min ${Math.round(CONFIG.minFileSize / 1024)} KB)`,
         skipped: true
       };
     }
-    
+
     // Check if it's a valid image file (based on content type)
     if (!imageBlob.type.startsWith('image/')) {
       console.log(`Skipping non-image content type (${imageBlob.type}): ${image.url}`);
-      return { 
-        success: false, 
-        image, 
-        error: 'Not a valid image',
+      return {
+        success: false,
+        image,
+        error: `Not a valid image (got ${imageBlob.type || 'unknown type'})`,
         skipped: true
       };
     }
@@ -961,7 +973,34 @@ async function processImage(image, sourceInfo) {
     if (CONFIG.local && CONFIG.local.enabled) {
       debugLog('Local saving is configured, attempting download');
       const localFolder = (CONFIG.local.subfolderPerDomain || isCustomFolder) ? domain : '';
-      promises.push(uploadToLocal(imageBlob, filename, localFolder));
+      promises.push(saveToDownloads(imageBlob, filename, localFolder));
+      
+      if (CONFIG.local.saveJson) {
+        debugLog('JSON sidecar saving is configured, attempting download');
+        const jsonFilename = filename.includes('.') ? filename.substring(0, filename.lastIndexOf('.')) + '.json' : filename + '.json';
+        const metadata = {
+          url: image.url,
+          sourceUrl: sourceInfo ? sourceInfo.url : null,
+          sourceTitle: sourceInfo ? sourceInfo.title : null,
+          altText: image.alt || null,
+          width: image.width ?? null,
+          height: image.height ?? null,
+          naturalWidth: image.naturalWidth ?? null,
+          naturalHeight: image.naturalHeight ?? null,
+          contentType: imageBlob.type || null,
+          fileSizeBytes: imageBlob.size,
+          savedAt: new Date().toISOString()
+        };
+        const jsonStr = JSON.stringify(metadata, null, 2);
+        const jsonBlob = new Blob([jsonStr], { type: 'application/json' });
+        // Run separately so a JSON write failure doesn't block the image save
+        promises.push(
+          saveToDownloads(jsonBlob, jsonFilename, localFolder).catch(err => {
+            debugLog(`JSON sidecar write failed for ${filename}: ${err.message}`);
+            return { success: false, type: 'local-json', error: err.message };
+          })
+        );
+      }
     }
     
     // Upload to cloud storage if configured
@@ -1017,8 +1056,33 @@ async function processImage(image, sourceInfo) {
   }
 }
 
+// Normalize Shopify CDN URLs to fetch the original full-size image.
+// Shopify serves resized variants via query params (?width=N) and filename
+// suffixes (_NxN.ext). Stripping these yields the original file.
+function normalizeShopifyUrl(url) {
+  try {
+    const u = new URL(url);
+    const isShopify = u.hostname.endsWith('.myshopify.com') ||
+                      u.pathname.includes('/cdn/shop/') ||
+                      u.pathname.includes('/cdn/s/files/');
+    if (!isShopify) return url;
+
+    // Strip width/height query params used for server-side resizing
+    u.searchParams.delete('width');
+    u.searchParams.delete('height');
+
+    // Strip _NxM or _Nx size suffixes from the filename, e.g. image_300x400.jpg → image.jpg
+    u.pathname = u.pathname.replace(/_\d+x(\d+)?(\.[a-zA-Z]+)$/, '$2');
+
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 // Download an image as a blob
 async function downloadImage(url) {
+  url = normalizeShopifyUrl(url);
   const response = await fetch(url, {
     // Include credentials to handle images that require cookies
     credentials: 'include',
@@ -1148,6 +1212,16 @@ function extractBaseDomain(domain) {
   }
 }
 
+// Sanitize a user-supplied folder name to prevent path traversal
+function sanitizeFolderName(name) {
+  return (name || '')
+    .replace(/\.\./g, '')          // strip traversal sequences
+    .replace(/[/\\]/g, '_')        // replace path separators
+    .replace(/[^a-zA-Z0-9._\-]/g, '_') // keep safe chars only
+    .replace(/^[._]+/, '')         // no leading dots/underscores
+    .substring(0, 100);
+}
+
 // Sanitize domain name for folder use
 function sanitizeDomain(domain) {
   // Extract the base domain first
@@ -1177,40 +1251,46 @@ function getExtensionFromContentType(contentType) {
   return extension;
 }
 
-// Download image to local disk via chrome.downloads
-async function uploadToLocal(blob, filename, domain) {
+// Convert a Blob to a base64 data URL without FileReader or createObjectURL,
+// both of which are unavailable in MV3 service workers.
+async function blobToDataUrl(blob) {
+  const arrayBuffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = '';
+  const chunkSize = 0x8000; // 32 KB chunks to avoid call stack limits in btoa
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return `data:${blob.type || 'application/octet-stream'};base64,${btoa(binary)}`;
+}
+
+// Download image to local disk via chrome.downloads.
+// Uses a data URL (not a blob URL) because URL.createObjectURL is unavailable
+// in MV3 service workers. The filename field sets the full subpath inside
+// Downloads/ directly, so no onDeterminingFilename indirection is needed.
+async function saveToDownloads(blob, filename, domain) {
+  let localPath = sanitizeFolderName(CONFIG.local.baseFolder) || 'PageImageSaver';
+  if (domain) {
+    localPath += '/' + sanitizeFolderName(domain);
+  }
+  localPath += '/' + filename;
+  localPath = localPath.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+
+  const dataUrl = await blobToDataUrl(blob);
+
   return new Promise((resolve, reject) => {
-    try {
-      const blobUrl = URL.createObjectURL(blob);
-      let localPath = CONFIG.local.baseFolder || 'PageImageSaver';
-      if (domain) {
-        localPath += '/' + domain;
+    chrome.downloads.download({
+      url: dataUrl,
+      filename: localPath,
+      saveAs: false,
+      conflictAction: 'uniquify'
+    }, (downloadId) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve({ success: true, type: 'local', fullPath: localPath });
       }
-      localPath += '/' + filename;
-
-      // Normalize slashes
-      localPath = localPath.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
-
-      // Store the mapping for onDeterminingFilename
-      downloadPaths.set(blobUrl, localPath);
-
-      chrome.downloads.download({
-        url: blobUrl,
-        saveAs: false
-      }, (downloadId) => {
-        if (chrome.runtime.lastError) {
-          downloadPaths.delete(blobUrl);
-          URL.revokeObjectURL(blobUrl);
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          // Clean up the object URL after a delay to ensure download starts
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-          resolve({ success: true, type: 'local', fullPath: localPath });
-        }
-      });
-    } catch (e) {
-      reject(e);
-    }
+    });
   });
 }
 

@@ -5,6 +5,7 @@ window.PageImageSaverLoaded = true;
 
 // Global variables for domain-specific settings
 let currentDomain = '';
+let originalPageTitle = document.title; // Captured before any extension modifications
 let allImagesCache = [];
 let currentFilteredImages = []; // Add this line to track current filtered images
 // Global set to dedupe URLs across all discovery methods
@@ -890,7 +891,7 @@ function createImageSelectionUI(images) {
     </div>
     <div id="size-filter" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
       <div style="font-weight: bold; margin-bottom: 5px;">Settings for ${currentDomain}</div>
-      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+      <div id="folder-name-row" style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
         <div style="flex-grow: 1;">
           <label for="folder-name" style="display: block; font-size: 12px; margin-bottom: 2px;">Local Folder Name</label>
           <input type="text" id="folder-name" value="${domainSettings.folderName || currentDomain}" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
@@ -936,7 +937,16 @@ images.forEach((image, index) => {
 
 container.appendChild(imageList);
 document.body.appendChild(container);
-  
+
+  // Hide the local folder row if local saving is disabled in settings
+  chrome.storage.sync.get('imageUploaderSettings', (result) => {
+    const localEnabled = result.imageUploaderSettings?.local?.enabled;
+    if (!localEnabled) {
+      const row = document.getElementById('folder-name-row');
+      if (row) row.style.display = 'none';
+    }
+  });
+
   // Add event listeners
   document.getElementById('select-all-btn').addEventListener('click', () => {
     const checkboxes = document.querySelectorAll('#image-selector-container input[type="checkbox"]');
@@ -1568,7 +1578,7 @@ function updateProgressIndicator(completed, total, successCount) {
     if (total > 0) {
       const percent = Math.round((completed / total) * 100);
       // Update the title with the percentage for quick glance info
-      document.title = `(${percent}%) Page Image Saver`;
+      document.title = `(${percent}%) ${originalPageTitle}`;
       
       // Also update the indicator to show the percentage
       indicator.setAttribute('data-progress-percent', `${percent}%`);
@@ -1582,7 +1592,7 @@ function updateProgressIndicator(completed, total, successCount) {
 }
 
 // Function to show completion notification
-function showCompletionNotification(count, success = true, errorMessage = null) {
+function showCompletionNotification(count, success = true, errorMessage = null, localFolder = null, skipped = 0, skipReasons = []) {
   // Check if we need to keep the progress indicator for partial uploads
   const keepProgressIndicator = !success && currentProgressInfo && 
                                (currentProgressInfo.completed < currentProgressInfo.total);
@@ -1600,7 +1610,7 @@ function showCompletionNotification(count, success = true, errorMessage = null) 
   
   // Restore original title only when we're done or on success
   if (success || !keepProgressIndicator) {
-    document.title = document.title.replace(/^\(\d+%\)\s+/, '');
+    document.title = originalPageTitle;
   }
   
   // Create notification element
@@ -1649,9 +1659,15 @@ function showCompletionNotification(count, success = true, errorMessage = null) 
   
   if (success) {
     if (count === 0) {
-      message.textContent = 'No images were saved. Images may have been filtered out due to size or content type.';
+      if (skipped > 0) {
+        const reasonText = skipReasons.length > 0 ? skipReasons.join('; ') : 'file too small or not a valid image type';
+        message.textContent = `No images were saved — ${skipped} image${skipped > 1 ? 's were' : ' was'} filtered out: ${reasonText}.`;
+      } else {
+        message.textContent = 'No images were saved. Images may have been filtered out due to size or content type.';
+      }
     } else {
-      message.textContent = `Successfully saved ${count} image${count > 1 ? 's' : ''} to your storage`;
+      const base = `Successfully saved ${count} image${count > 1 ? 's' : ''} to your storage`;
+      message.textContent = localFolder ? `${base} · Local: Downloads/${localFolder}` : base;
     }
   } else {
     if (count > 0) {
@@ -1789,10 +1805,16 @@ function ensureProgressListener() {
         // Capture the final progress state for debugging
         console.log(`[CONTENT LOG] Final progress state: ${currentProgressInfo.completed}/${currentProgressInfo.total}, ${currentProgressInfo.successCount} successful`);
         
+        // Remove failed (non-skipped) URLs from the dedup set so they can be retried
+        if (message.failedUrls && message.failedUrls.length > 0) {
+          message.failedUrls.forEach(url => alreadyUploadedUrls.delete(url));
+          console.log(`[CONTENT LOG] Removed ${message.failedUrls.length} failed URLs from dedup set (retryable)`);
+        }
+
         if (message.success) {
           // Show success notification
           console.log(`[CONTENT LOG] Showing success notification for ${message.count} images`);
-          showCompletionNotification(message.count, true);
+          showCompletionNotification(message.count, true, null, message.localFolder, message.skipped || 0, message.skipReasons || []);
           console.log(`[CONTENT LOG] Successfully saved ${message.count} images.`);
         } else {
           // Show error notification
@@ -1896,7 +1918,7 @@ function saveImagesToStorage(images) {
     action: 'saveImages',
     images: newImages,
     sourceUrl: window.location.href,
-    pageTitle: document.title,
+    pageTitle: originalPageTitle,
     folderName: folderName || currentDomain
   }, response => {
     console.log(`[CONTENT LOG] Received initial response from background script:`, response);

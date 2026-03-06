@@ -105,6 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('local-enabled').checked = settings.local.enabled || false;
         document.getElementById('local-base-folder').value = settings.local.baseFolder || 'PageImageSaver';
         document.getElementById('local-subfolder').checked = settings.local.subfolderPerDomain || false;
+        document.getElementById('local-save-json').checked = settings.local.saveJson || false;
       }
       
       // Set retry settings
@@ -160,6 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
       local: {
         enabled: document.getElementById('local-enabled').checked,
         subfolderPerDomain: document.getElementById('local-subfolder').checked,
+        saveJson: document.getElementById('local-save-json').checked,
         baseFolder: document.getElementById('local-base-folder').value || 'PageImageSaver'
       },
       retry: {
@@ -379,6 +381,7 @@ document.addEventListener('DOMContentLoaded', () => {
       local: {
         enabled: false,
         subfolderPerDomain: false,
+        saveJson: false,
         baseFolder: 'PageImageSaver'
       },
       retry: {
