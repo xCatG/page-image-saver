@@ -58,10 +58,14 @@ document.addEventListener('DOMContentLoaded', () => {
   clearDomainFiltersBtn.addEventListener('click', () => {
     clearDomainFilters();
   });
+
+  document.getElementById('clear-ignored-urls').addEventListener('click', () => {
+    clearIgnoredUrls();
+  });
   
   // Function to load saved settings
   function loadSettings() {
-    chrome.storage.sync.get(['imageUploaderSettings', 'domainSizeFilters'], (result) => {
+    chrome.storage.sync.get(['imageUploaderSettings', 'domainSizeFilters', 'ignoredImageUrls'], (result) => {
       const settings = result.imageUploaderSettings || getDefaultSettings();
       
       // Set storage type
@@ -127,6 +131,9 @@ document.addEventListener('DOMContentLoaded', () => {
       // Load domain filters
       const domainFilters = result.domainSizeFilters || {};
       loadDomainFiltersTable(domainFilters);
+
+      // Load ignored URLs
+      loadIgnoredUrlsTable(result.ignoredImageUrls || []);
     });
   }
   
@@ -344,6 +351,58 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   
+  // Load ignored URLs table
+  function loadIgnoredUrlsTable(urls) {
+    const tbody = document.getElementById('ignored-urls-body');
+    tbody.innerHTML = '';
+
+    if (urls.length === 0) {
+      const row = document.createElement('tr');
+      row.innerHTML = `<td colspan="2" style="text-align: center;">No ignored images</td>`;
+      tbody.appendChild(row);
+      return;
+    }
+
+    urls.forEach(url => {
+      const row = document.createElement('tr');
+      const displayUrl = url.length > 70 ? url.substring(0, 70) + '...' : url;
+      row.innerHTML = `
+        <td title="${url}">${displayUrl}</td>
+        <td class="filter-actions">
+          <button class="danger-button remove-ignored-url" data-url="${url}">Remove</button>
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+
+    tbody.querySelectorAll('.remove-ignored-url').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        removeIgnoredUrl(e.target.dataset.url);
+      });
+    });
+  }
+
+  // Remove a single ignored URL
+  function removeIgnoredUrl(url) {
+    chrome.storage.sync.get('ignoredImageUrls', (result) => {
+      const list = (result.ignoredImageUrls || []).filter(u => u !== url);
+      chrome.storage.sync.set({ ignoredImageUrls: list }, () => {
+        showStatusMessage(`Removed ignored URL`, 'success');
+        loadIgnoredUrlsTable(list);
+      });
+    });
+  }
+
+  // Clear all ignored URLs
+  function clearIgnoredUrls() {
+    if (confirm('Are you sure you want to clear all ignored images?')) {
+      chrome.storage.sync.set({ ignoredImageUrls: [] }, () => {
+        showStatusMessage('All ignored images cleared', 'success');
+        loadIgnoredUrlsTable([]);
+      });
+    }
+  }
+
   // Show status message
   function showStatusMessage(message, type = 'info') {
     statusMessageDiv.innerHTML = `<div class="alert alert-${type}">${message}</div>`;

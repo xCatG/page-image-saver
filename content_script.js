@@ -18,6 +18,11 @@ let domainSettings = {
   minWidth: 50,
   minHeight: 50
 };
+let ignoredImageUrls = new Set();
+
+function normalizeImageUrl(url) {
+  try { return url.split('?')[0].split('#')[0]; } catch { return url; }
+}
 
 // Function to get the current domain
 function getCurrentDomain() {
@@ -44,6 +49,11 @@ function loadDomainSettings(domain, callback) {
     callback(settings);
   });
 }
+
+// Load ignored image URLs from storage at startup
+chrome.storage.sync.get('ignoredImageUrls', (result) => {
+  ignoredImageUrls = new Set((result.ignoredImageUrls || []).map(normalizeImageUrl));
+});
 
 // Filter images by size
 function filterImagesBySize(images, minWidth, minHeight) {
@@ -985,7 +995,11 @@ document.body.appendChild(container);
   // Add event listeners
   document.getElementById('select-all-btn').addEventListener('click', () => {
     const checkboxes = document.querySelectorAll('#image-selector-container input[type="checkbox"]');
-    checkboxes.forEach(cb => cb.checked = true);
+    checkboxes.forEach(cb => {
+      const idx = parseInt(cb.dataset.index);
+      const img = currentFilteredImages[idx];
+      if (img && !ignoredImageUrls.has(normalizeImageUrl(img.url))) cb.checked = true;
+    });
   });
   
   document.getElementById('deselect-all-btn').addEventListener('click', () => {
@@ -1155,7 +1169,7 @@ function _createImageItemElement(image, index) {
   if (alreadyUploaded) {
     imgContainer.style.borderColor = '#4CAF50'; // Green border for uploaded images
     imgContainer.style.borderWidth = '2px';
-    
+
     // Add an "uploaded" badge
     const badge = document.createElement('div');
     badge.style.cssText = `
@@ -1172,13 +1186,35 @@ function _createImageItemElement(image, index) {
     badge.textContent = 'Uploaded';
     imgContainer.appendChild(badge);
   }
-  
+
+  // Check if this image URL is ignored
+  const isIgnored = ignoredImageUrls.has(normalizeImageUrl(image.url));
+
+  if (isIgnored) {
+    imgContainer.style.opacity = '0.45';
+
+    const ignoredBadge = document.createElement('div');
+    ignoredBadge.style.cssText = `
+      position: absolute;
+      top: ${alreadyUploaded ? '26px' : '5px'};
+      left: 5px;
+      background-color: #888;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      z-index: 2;
+    `;
+    ignoredBadge.textContent = 'Ignored';
+    imgContainer.appendChild(ignoredBadge);
+  }
+
   // Create checkbox for selection
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.id = `img-${index}`;
   checkbox.dataset.index = index;
-  checkbox.checked = true;
+  checkbox.checked = !isIgnored;
   checkbox.style.cssText = `
     position: absolute;
     top: 5px;
@@ -1486,20 +1522,46 @@ function _createImageItemElement(image, index) {
   imgContainer.appendChild(thumbnailContainer);
   imgContainer.appendChild(info);
   imgContainer.appendChild(dimensionsInfo);
-  
+
+  // Ignore/Unignore button
+  const ignoreBtn = document.createElement('button');
+  ignoreBtn.textContent = isIgnored ? '↩ Unignore' : '✕ Ignore';
+  ignoreBtn.style.cssText = `
+    font-size: 10px; color: #999; background: none; border: none;
+    cursor: pointer; padding: 2px 0; text-align: left;
+    display: block !important; visibility: visible !important; width: 100%;
+  `;
+  ignoreBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const normalized = normalizeImageUrl(image.url);
+    chrome.storage.sync.get('ignoredImageUrls', (result) => {
+      let list = result.ignoredImageUrls || [];
+      if (ignoredImageUrls.has(normalized)) {
+        list = list.filter(u => u !== normalized);
+        ignoredImageUrls.delete(normalized);
+      } else {
+        if (!list.includes(normalized)) list.push(normalized);
+        ignoredImageUrls.add(normalized);
+      }
+      chrome.storage.sync.set({ ignoredImageUrls: list });
+      updateImageList(currentFilteredImages);
+    });
+  });
+  imgContainer.appendChild(ignoreBtn);
+
   // Add click event to the container - toggle checkbox when clicking anywhere on the item
   imgContainer.addEventListener('click', (event) => {
     // Don't toggle if clicking directly on the checkbox (let the checkbox handle itself)
-    if (event.target !== checkbox) {
+    if (event.target !== checkbox && event.target !== ignoreBtn) {
       // Prevent event bubbling
       event.preventDefault();
       event.stopPropagation();
-      
+
       // Toggle the checkbox
       checkbox.checked = !checkbox.checked;
     }
   });
-  
+
   return imgContainer;
 }
 
