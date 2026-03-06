@@ -914,7 +914,7 @@ function createImageSelectionUI(images) {
     height: 100vh;
     background: white;
     box-shadow: -2px 0 5px rgba(0,0,0,0.2);
-    z-index: 999999;
+    z-index: 2147483647;
     display: flex;
     flex-direction: column;
     padding: 15px;
