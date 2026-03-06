@@ -90,6 +90,20 @@ chrome.webRequest.onCompleted.addListener((details) => {
 }, ['responseHeaders']);
 
 // Default configuration (will be overridden by user settings)
+
+// Map to track intended paths for local downloads
+const downloadPaths = new Map();
+
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  if (downloadPaths.has(item.url)) {
+    const intendedPath = downloadPaths.get(item.url);
+    suggest({ filename: intendedPath, conflictAction: 'uniquify' });
+    downloadPaths.delete(item.url);
+  } else {
+    suggest();
+  }
+});
+
 const DEFAULT_CONFIG = {
   // Set to true to use S3, false to use R2
   useS3: true,
@@ -448,7 +462,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const sourceInfo = {
       url: message.sourceUrl,
       title: message.pageTitle,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      folderName: message.folderName
     };
     
     console.log(`Processing ${images.length} images from ${sourceInfo.url}`);
@@ -600,7 +615,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     const promises = [];
     
-    // Local saving functionality has been removed
+    if (CONFIG.local && CONFIG.local.enabled) {
+      console.log('Local saving is configured, attempting screenshot download');
+      const localFolder = CONFIG.local.subfolderPerDomain ? domain : '';
+      promises.push(uploadToLocal(blob, filename, localFolder));
+    }
     
     // Upload to cloud storage if configured
     if (isConfigValid()) {
@@ -915,7 +934,16 @@ async function processImage(image, sourceInfo) {
     
     // Get domain for organizing in folders if enabled
     let domain = '';
-    if (CONFIG.useDomainFolders && sourceInfo && sourceInfo.url) {
+    let isCustomFolder = false;
+    if (sourceInfo && sourceInfo.folderName) {
+      domain = sourceInfo.folderName;
+      try {
+        const urlObj = new URL(sourceInfo.url);
+        if (domain !== urlObj.hostname) {
+          isCustomFolder = true;
+        }
+      } catch (e) {}
+    } else if (CONFIG.useDomainFolders && sourceInfo && sourceInfo.url) {
       try {
         const urlObj = new URL(sourceInfo.url);
         // Get domain from the source page URL, not the image URL
@@ -930,8 +958,11 @@ async function processImage(image, sourceInfo) {
     
     const promises = [];
     
-    // REMOVED: Local saving option
-    // We're no longer using local saves to avoid incorrect folder save dialogs
+    if (CONFIG.local && CONFIG.local.enabled) {
+      debugLog('Local saving is configured, attempting download');
+      const localFolder = (CONFIG.local.subfolderPerDomain || isCustomFolder) ? domain : '';
+      promises.push(uploadToLocal(imageBlob, filename, localFolder));
+    }
     
     // Upload to cloud storage if configured
     if (isConfigValid()) {
@@ -939,7 +970,6 @@ async function processImage(image, sourceInfo) {
       promises.push(uploadToStorage(imageBlob, filename, image, sourceInfo, domain));
     } else {
       debugLog('Cloud storage not configured or invalid settings');
-      // Local saving functionality has been removed
     }
     
     if (promises.length === 0) {
@@ -1147,6 +1177,54 @@ function getExtensionFromContentType(contentType) {
   return extension;
 }
 
+// Download image to local disk via chrome.downloads
+async function uploadToLocal(blob, filename, domain) {
+  return new Promise((resolve, reject) => {
+    try {
+      const blobUrl = URL.createObjectURL(blob);
+      let localPath = CONFIG.local.baseFolder || 'PageImageSaver';
+      if (domain) {
+        localPath += '/' + domain;
+      }
+      localPath += '/' + filename;
+
+      // Normalize slashes
+      localPath = localPath.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+
+      // Store the mapping for onDeterminingFilename
+      downloadPaths.set(blobUrl, localPath);
+
+      chrome.downloads.download({
+        url: blobUrl,
+        saveAs: false
+      }, (downloadId) => {
+        if (chrome.runtime.lastError) {
+          downloadPaths.delete(blobUrl);
+          URL.revokeObjectURL(blobUrl);
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          // Clean up the object URL after a delay to ensure download starts
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+          resolve({ success: true, type: 'local', fullPath: localPath });
+        }
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+// Build the full storage path with optional domain subfolder
+function buildStoragePath(baseFolderPath, filename, domain, useDomainFolders) {
+  let folderPath = baseFolderPath || '';
+  if (useDomainFolders && domain) {
+    const sanitizedDomain = sanitizeDomain(domain);
+    if (!folderPath.endsWith('/')) folderPath += '/';
+    folderPath += sanitizedDomain + '/';
+  }
+  return folderPath + filename;
+}
+
 // Upload to storage (S3 or R2)
 async function uploadToStorage(blob, filename, imageInfo, sourceInfo, domain = '') {
   // Choose the upload method based on config
@@ -1157,7 +1235,7 @@ async function uploadToStorage(blob, filename, imageInfo, sourceInfo, domain = '
       debugLog('Attempting to upload to R2...');
       return await uploadToR2(blob, filename, imageInfo, sourceInfo, CONFIG, domain);
     } catch (error) {
-      // Local saving functionality has been removed, just re-throw the error
+      // Local saving fallback removed, just re-throw the error
       debugLog('R2 upload failed, no fallback available');
       throw error;
     }
@@ -1189,21 +1267,7 @@ async function uploadToS3(blob, filename, imageInfo, sourceInfo, settings, domai
     throw new Error('Missing S3 credentials or bucket name');
   }
   
-  // Construct the full path with optional folder
-  let folderPath = s3Config.folderPath || '';
-  
-  // Add domain as subfolder if enabled and domain is provided
-  if (useDomainFolders && domain) {
-    // Sanitize domain for use as folder name
-    const sanitizedDomain = sanitizeDomain(domain);
-    // Make sure the folder path ends with a slash
-    if (!folderPath.endsWith('/')) {
-      folderPath += '/';
-    }
-    folderPath += sanitizedDomain + '/';
-  }
-  
-  const fullPath = folderPath + filename;
+  const fullPath = buildStoragePath(s3Config.folderPath, filename, domain, useDomainFolders);
 
   try {
     // Import AWS SDK modules dynamically
@@ -1294,21 +1358,7 @@ async function uploadToR2(blob, filename, imageInfo, sourceInfo, settings, domai
   // Max number of retries
   const MAX_RETRIES = 3;
   
-  // Construct the full path with optional folder
-  let folderPath = r2Config.folderPath || '';
-  
-  // Add domain as subfolder if enabled and domain is provided
-  if (useDomainFolders && domain) {
-    // Sanitize domain for use as folder name
-    const sanitizedDomain = sanitizeDomain(domain);
-    // Make sure the folder path ends with a slash
-    if (!folderPath.endsWith('/')) {
-      folderPath += '/';
-    }
-    folderPath += sanitizedDomain + '/';
-  }
-  
-  const fullPath = folderPath + filename;
+  const fullPath = buildStoragePath(r2Config.folderPath, filename, domain, useDomainFolders);
 
   try {
     let result;
@@ -1561,20 +1611,13 @@ function debugLog(message, data) {
   
   if (data) {
     console.log(prefix, timestamp, message, data);
-    // Force an error to make the log more visible in the console
-    console.trace(prefix + ' ' + timestamp + ' ' + message);
   } else {
     console.log(prefix, timestamp, message);
-    console.trace(prefix + ' ' + timestamp + ' ' + message);
   }
 }
 
-// Local disk saving functionality has been removed
-
 // Check if the configuration is valid for cloud storage operations
 function isConfigValid() {
-  // Local saving functionality has been removed
-  
   if (CONFIG.useS3) {
     return !!(CONFIG.s3.accessKeyId && CONFIG.s3.secretAccessKey && CONFIG.s3.bucketName);
   } else {
@@ -1838,3 +1881,4 @@ const browserType = detectBrowser();
 console.log(`Page Image Saver background script loaded in ${browserType} browser.`);
 debugLog(`🌐 Browser detected: ${browserType}`);
 debugLog(`🔍 Full User Agent: ${navigator.userAgent}`);
+

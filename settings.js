@@ -101,8 +101,11 @@ document.addEventListener('DOMContentLoaded', () => {
       
       document.getElementById('r2-public').checked = settings.r2.makePublic || false;
       
-      // Local download settings section has been removed from the UI
-      // Keep the data structure in settings for backward compatibility
+      if (settings.local) {
+        document.getElementById('local-enabled').checked = settings.local.enabled || false;
+        document.getElementById('local-base-folder').value = settings.local.baseFolder || 'PageImageSaver';
+        document.getElementById('local-subfolder').checked = settings.local.subfolderPerDomain || false;
+      }
       
       // Set retry settings
       if (settings.retry) {
@@ -126,18 +129,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   
-  // Function to save settings
-  function saveSettings() {
+  // Build settings object from current form values
+  function buildSettingsFromForm() {
     const useS3 = storageTypeSelect.value === 's3';
     const useR2ApiToken = document.getElementById('r2-auth-token').checked;
-    
-    // Get and validate the minimum file size
     let minFileSizeKB = parseInt(document.getElementById('min-file-size').value, 10);
     if (isNaN(minFileSizeKB) || minFileSizeKB < 0) {
-      minFileSizeKB = 5; // Default to 5KB if invalid
+      minFileSizeKB = 5;
     }
-    
-    const settings = {
+    return {
       useS3: useS3,
       s3: {
         region: document.getElementById('s3-region').value,
@@ -158,68 +158,42 @@ document.addEventListener('DOMContentLoaded', () => {
         makePublic: document.getElementById('r2-public').checked
       },
       local: {
-        enabled: false, // Local download functionality has been removed
-        subfolderPerDomain: false,
-        baseFolder: 'PageImageSaver'
+        enabled: document.getElementById('local-enabled').checked,
+        subfolderPerDomain: document.getElementById('local-subfolder').checked,
+        baseFolder: document.getElementById('local-base-folder').value || 'PageImageSaver'
       },
       retry: {
         enabled: document.getElementById('retry-enabled').checked,
         showNotification: document.getElementById('retry-notifications').checked,
-        maxRetries: 3 // Fixed value for now
+        maxRetries: 3
       },
       preserveFilenames: document.getElementById('preserve-filenames').checked,
       addMetadata: document.getElementById('add-metadata').checked,
       useDomainFolders: document.getElementById('use-domain-folders').checked,
       maxConcurrentUploads: parseInt(document.getElementById('concurrent-uploads').value, 10),
-      minFileSize: minFileSizeKB * 1024 // Convert KB to bytes
+      minFileSize: minFileSizeKB * 1024
     };
-    
+  }
+
+  // Function to save settings
+  function saveSettings() {
+    const settings = buildSettingsFromForm();
     chrome.storage.sync.set({ imageUploaderSettings: settings }, () => {
       showStatusMessage('Settings saved successfully!', 'success');
     });
   }
-  
+
   // Test connection to storage service
   function testConnection() {
-    const useS3 = storageTypeSelect.value === 's3';
-    const useR2ApiToken = document.getElementById('r2-auth-token').checked;
-    
     showStatusMessage('Testing connection...', 'info');
-    
+
     // Create a temporary test file
     const testBlob = new Blob(['test file content'], { type: 'text/plain' });
     const testFilename = `test-${Date.now()}.txt`;
-    
-    // Get and validate the minimum file size
-    let minFileSizeKB = parseInt(document.getElementById('min-file-size').value, 10);
-    if (isNaN(minFileSizeKB) || minFileSizeKB < 0) {
-      minFileSizeKB = 5; // Default to 5KB if invalid
-    }
-    
-    // Get current settings from form
-    const settings = {
-      useS3: useS3,
-      s3: {
-        region: document.getElementById('s3-region').value,
-        bucketName: document.getElementById('s3-bucket').value,
-        folderPath: document.getElementById('s3-folder').value,
-        accessKeyId: document.getElementById('s3-access-key').value,
-        secretAccessKey: document.getElementById('s3-secret-key').value,
-        makePublic: document.getElementById('s3-public').checked
-      },
-      r2: {
-        accountId: document.getElementById('r2-account-id').value,
-        bucketName: document.getElementById('r2-bucket').value,
-        folderPath: document.getElementById('r2-folder').value,
-        useApiToken: useR2ApiToken,
-        accessKeyId: useR2ApiToken ? '' : document.getElementById('r2-access-key').value,
-        secretAccessKey: useR2ApiToken ? '' : document.getElementById('r2-secret-key').value,
-        apiToken: useR2ApiToken ? document.getElementById('r2-api-token').value : '',
-        makePublic: document.getElementById('r2-public').checked
-      },
-      useDomainFolders: document.getElementById('use-domain-folders').checked,
-      minFileSize: minFileSizeKB * 1024 // Convert KB to bytes
-    };
+
+    const settings = buildSettingsFromForm();
+    const useS3 = settings.useS3;
+    const useR2ApiToken = settings.r2.useApiToken;
     
     // Validate required fields before testing
     if (useS3) {
@@ -403,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
         makePublic: false
       },
       local: {
-        enabled: false, // Local download functionality has been removed
+        enabled: false,
         subfolderPerDomain: false,
         baseFolder: 'PageImageSaver'
       },

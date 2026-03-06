@@ -39,6 +39,7 @@ function loadDomainSettings(domain, callback) {
   chrome.storage.sync.get('domainSizeFilters', (result) => {
     const domainFilters = result.domainSizeFilters || {};
     const settings = domainFilters[domain] || { minWidth: 50, minHeight: 50 };
+    if (!settings.folderName) settings.folderName = domain;
     callback(settings);
   });
 }
@@ -888,7 +889,13 @@ function createImageSelectionUI(images) {
       <button id="close-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Close</button>
     </div>
     <div id="size-filter" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
-      <div style="font-weight: bold; margin-bottom: 5px;">Image Size Filter for ${currentDomain}</div>
+      <div style="font-weight: bold; margin-bottom: 5px;">Settings for ${currentDomain}</div>
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+        <div style="flex-grow: 1;">
+          <label for="folder-name" style="display: block; font-size: 12px; margin-bottom: 2px;">Local Folder Name</label>
+          <input type="text" id="folder-name" value="${domainSettings.folderName || currentDomain}" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+        </div>
+      </div>
       <div style="display: flex; gap: 10px; align-items: center;">
         <div>
           <label for="min-width" style="display: block; font-size: 12px; margin-bottom: 2px;">Min Width (px)</label>
@@ -899,7 +906,7 @@ function createImageSelectionUI(images) {
           <input type="number" id="min-height" value="${domainSettings.minHeight}" min="0" style="width: 70px; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
         </div>
         <button id="apply-filter-btn" style="padding: 5px 10px; border-radius: 4px; border: none; background: #4285F4; color: white; cursor: pointer; margin-top: 15px;">Apply</button>
-        <button id="save-filter-btn" style="padding: 5px 10px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer; margin-top: 15px;">Save for Domain</button>
+        <button id="save-filter-btn" style="padding: 5px 10px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer; margin-top: 15px;">Save</button>
       </div>
     </div>
     <div id="status-message" style="margin-top: 10px;"></div>
@@ -988,7 +995,7 @@ document.body.appendChild(container);
         showStatusMessage(`Saving ${validImages.length} image${validImages.length > 1 ? 's' : ''}...`, 'info');
         saveBtn.textContent = 'Saving...';
         
-        saveImagesToStorage(validImages);
+        await saveImagesToStorage(validImages);
       } catch (error) {
         console.error("Error during image checking:", error);
         showStatusMessage(`Error checking images: ${error.message}`, 'error');
@@ -1065,16 +1072,18 @@ function saveImageSizeFilter() {
   // Get filter values
   const minWidth = parseInt(document.getElementById('min-width').value) || 0;
   const minHeight = parseInt(document.getElementById('min-height').value) || 0;
+  const folderName = document.getElementById('folder-name') ? document.getElementById('folder-name').value.trim() : currentDomain;
   
   // Update domain settings
   domainSettings.minWidth = minWidth;
   domainSettings.minHeight = minHeight;
+  domainSettings.folderName = folderName || currentDomain;
   
   // Save to storage
   saveDomainSettings(currentDomain, domainSettings);
   
   // Show status message
-  showStatusMessage(`Size filter saved for ${currentDomain}`, 'success');
+  showStatusMessage(`Settings saved for ${currentDomain}`, 'success');
 }
 
 // Helper function to create an image item element
@@ -1878,12 +1887,17 @@ function saveImagesToStorage(images) {
   
   console.log(`[CONTENT LOG] Sending saveImages message to background script with ${newImages.length} images`);
   
+  // Get the current folder name if UI is open, otherwise fall back to settings or domain
+  const folderInput = document.getElementById('folder-name');
+  const folderName = folderInput ? folderInput.value.trim() : (domainSettings.folderName || currentDomain);
+
   // This would send the selected images to your background script
   chrome.runtime.sendMessage({
     action: 'saveImages',
     images: newImages,
     sourceUrl: window.location.href,
-    pageTitle: document.title
+    pageTitle: document.title,
+    folderName: folderName || currentDomain
   }, response => {
     console.log(`[CONTENT LOG] Received initial response from background script:`, response);
     
