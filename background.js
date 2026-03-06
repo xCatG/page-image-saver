@@ -54,36 +54,50 @@ function isTrackingPixel(url) {
   return trackingPatterns.some(pattern => url.includes(pattern));
 }
 
-// Listen to all image network requests and notify content scripts of dynamic loads
+// Listen to all network requests and notify content scripts of dynamic image or video loads
 chrome.webRequest.onCompleted.addListener((details) => {
-  // Only forward image requests from valid tabs
-  if (details.tabId >= 0 && details.type === 'image' && details.url) {
-    // Skip tracking pixels and other tracking related images
-    if (isTrackingPixel(details.url)) {
-      return;
-    }
-    
-    // Skip tiny images (likely tracking pixels) by checking content length if available
-    if (details.responseHeaders) {
-      const contentLengthHeader = details.responseHeaders.find(
-        header => header.name.toLowerCase() === 'content-length'
-      );
-      if (contentLengthHeader && parseInt(contentLengthHeader.value) < 1024) {
-        // Skip images smaller than 1KB (likely tracking pixels)
+  // Only forward requests from valid tabs
+  if (details.tabId >= 0 && details.url) {
+    if (details.type === 'image') {
+      // Skip tracking pixels and other tracking related images
+      if (isTrackingPixel(details.url)) {
         return;
       }
-    }
-    
-    // Fire-and-forget; include callback to swallow errors if no content script is listening
-    chrome.tabs.sendMessage(details.tabId, {
-      action: 'dynamicImageLoaded',
-      url: details.url,
-      timestamp: details.timeStamp
-    }, () => {
-      if (chrome.runtime.lastError) {
-        // No receiver in tab (content script not loaded); ignore
+      
+      // Skip tiny images (likely tracking pixels) by checking content length if available
+      if (details.responseHeaders) {
+        const contentLengthHeader = details.responseHeaders.find(
+          header => header.name.toLowerCase() === 'content-length'
+        );
+        if (contentLengthHeader && parseInt(contentLengthHeader.value) < 1024) {
+          // Skip images smaller than 1KB (likely tracking pixels)
+          return;
+        }
       }
-    });
+      
+      // Fire-and-forget; include callback to swallow errors if no content script is listening
+      chrome.tabs.sendMessage(details.tabId, {
+        action: 'dynamicImageLoaded',
+        url: details.url,
+        timestamp: details.timeStamp
+      }, () => {
+        if (chrome.runtime.lastError) {
+          // No receiver in tab (content script not loaded); ignore
+        }
+      });
+    } else if (details.url.includes('.m3u8')) {
+      // It's an HLS stream
+      chrome.tabs.sendMessage(details.tabId, {
+        action: 'dynamicStreamLoaded',
+        url: details.url,
+        timestamp: details.timeStamp,
+        type: 'm3u8'
+      }, () => {
+        if (chrome.runtime.lastError) {
+          // ignore
+        }
+      });
+    }
   }
 }, {
   urls: ["<all_urls>"]
@@ -930,8 +944,9 @@ async function processImage(image, sourceInfo) {
       };
     }
 
-    // Check if it's a valid image file (based on content type)
-    if (!imageBlob.type.startsWith('image/')) {
+    // Check if it's a valid image file (based on content type) or a video stream
+    const isStream = image.type === 'stream' || image.url.includes('.m3u8') || imageBlob.type.includes('mpegurl');
+    if (!imageBlob.type.startsWith('image/') && !isStream) {
       console.log(`Skipping non-image content type (${imageBlob.type}): ${image.url}`);
       return {
         success: false,
@@ -1148,19 +1163,16 @@ function getFilename(url, contentType) {
 function sanitizeFilename(filename) {
   debugLog(`Sanitizing filename: "${filename}"`);
   
-  // Remove characters that aren't allowed in filenames
-  const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
-    // Ensure the filename isn't too long
-    .substring(0, 100);
-  
+  // Split into base and extension before truncating so we don't chop the extension
+  const lastDot = filename.lastIndexOf('.');
+  const base = lastDot > 0 ? filename.substring(0, lastDot) : filename;
+  const ext = lastDot > 0 ? filename.substring(lastDot) : '';
+
+  const sanitizedBase = base.replace(/[^a-zA-Z0-9._-]/g, '_').substring(0, 90);
+  const sanitizedExt = ext.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const sanitized = sanitizedBase + (sanitizedExt || '.jpg');
+
   debugLog(`Sanitized result: "${sanitized}"`);
-  
-  // Make sure there's an extension
-  if (!sanitized.includes('.')) {
-    debugLog(`Adding .jpg extension to filename without extension`);
-    return sanitized + '.jpg';
-  }
-  
   return sanitized;
 }
 
@@ -1234,6 +1246,12 @@ function sanitizeDomain(domain) {
 // Get file extension from content type
 function getExtensionFromContentType(contentType) {
   debugLog(`Getting file extension for content type: ${contentType}`);
+  
+  if (!contentType) return '.jpg';
+  
+  if (contentType.includes('mpegurl') || contentType.includes('m3u8')) {
+    return '.m3u8';
+  }
   
   const typeMap = {
     'image/jpeg': '.jpg',

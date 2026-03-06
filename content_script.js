@@ -245,6 +245,41 @@ function handleDynamicImage(url) {
 }
 
 /**
+ * Handle a dynamically loaded video stream (.m3u8) from the network
+ */
+function handleDynamicStream(url) {
+  if (discoveredUrls.has(url)) {
+    return;
+  }
+  
+  discoveredUrls.add(url);
+  
+  const streamObj = {
+    url: url,
+    alt: 'HLS Video Stream (.m3u8)',
+    width: 1920, // Dummy high resolution to bypass filters
+    height: 1080,
+    naturalWidth: 1920,
+    naturalHeight: 1080,
+    type: 'stream',
+    filename: url.split('/').pop().split('?')[0].split('#')[0] || 'stream.m3u8',
+    title: 'HLS Video Stream',
+    loading: '',
+    dataAttributes: {},
+    sourceAttribute: 'dynamic',
+    isLoaded: true
+  };
+  
+  dynamicImageObjs.push(streamObj);
+  // Add to current filter list unconditionally
+  currentFilteredImages.push(streamObj);
+  
+  if (document.getElementById('image-selector-container')) {
+    updateImageList(currentFilteredImages);
+  }
+}
+
+/**
  * Helper function to determine if an image URL should be skipped
  * (tracking pixels, analytics, etc)
  */
@@ -754,9 +789,9 @@ async function checkImagesFileSizes(images) {
             console.log(`Skipping small image (${contentLength} bytes): ${image.url}`);
             return null; // Skip this image
           } else {
-            // Check content type to ensure it's actually an image
+            // Check content type to ensure it's actually an image or video stream
             const contentType = response.headers.get('Content-Type');
-            if (contentType && contentType.startsWith('image/')) {
+            if (contentType && (contentType.startsWith('image/') || contentType.includes('mpegurl') || image.type === 'stream')) {
               return image; // Keep this image
             } else {
               console.log(`Skipping non-image content type (${contentType}): ${image.url}`);
@@ -1151,6 +1186,11 @@ function _createImageItemElement(image, index) {
     width: 20px;
     height: 20px;
     z-index: 2;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    appearance: auto !important;
+    -webkit-appearance: checkbox !important;
   `;
   
   // Create thumbnail container with fixed height
@@ -1193,6 +1233,55 @@ function _createImageItemElement(image, index) {
   
   // Check if the image URL is problematic before trying to load it
   if (image.url && typeof image.url === 'string') {
+    // If it's a stream, don't try to load it as an image
+    if (image.type === 'stream' || image.url.includes('.m3u8')) {
+      showPlaceholder("🎥 HLS Video Stream");
+      
+      imgContainer.appendChild(checkbox);
+      imgContainer.appendChild(thumbnailContainer);
+      thumbnailContainer.appendChild(thumbnail);
+      
+      const info = document.createElement('div');
+      info.style.cssText = `
+        font-size: 12px;
+        max-height: 32px;
+        word-break: break-all;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        margin-bottom: 2px;
+        pointer-events: none;
+      `;
+      
+      info.textContent = image.alt || 'Video Stream';
+      
+      const dimensionsInfo = document.createElement('div');
+      dimensionsInfo.style.cssText = `
+        font-size: 11px;
+        color: #666;
+        margin-top: 2px;
+        pointer-events: none;
+      `;
+      
+      let displayText = image.filename ? image.filename.substring(0, 20) + '...' : 'stream.m3u8';
+      dimensionsInfo.textContent = displayText;
+      
+      imgContainer.appendChild(info);
+      imgContainer.appendChild(dimensionsInfo);
+      
+      imgContainer.addEventListener('click', (event) => {
+        if (event.target !== checkbox) {
+          event.preventDefault();
+          event.stopPropagation();
+          checkbox.checked = !checkbox.checked;
+        }
+      });
+      
+      return imgContainer;
+    }
+
     // Known problematic patterns that cause CORS errors
     const knownProblematicPatterns = [
       'trustedshops.com/assets/images/sprite',
@@ -1283,6 +1372,7 @@ function _createImageItemElement(image, index) {
     max-height: 100%;
     object-fit: contain;
     display: block;
+    overflow: hidden;
   `;
   
   // Add error handling to show placeholder if image fails to load
@@ -2010,12 +2100,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     return true; // Keep the message channel open for async response
   } else if (message.action === 'takeScreenshot') {
-    // Initialize screenshot flow
-    window.PageScreenshot.initiateScreenshot();
-    sendResponse({success: true});
+    loadScreenshotModule(() => {
+      window.PageScreenshot.initiateScreenshot();
+      sendResponse({success: true});
+    });
     return true;
   } else if (message.action === 'dynamicImageLoaded') {
     handleDynamicImage(message.url);
+    try { sendResponse({received: true}); } catch (e) {}
+    return true;
+  } else if (message.action === 'dynamicStreamLoaded') {
+    handleDynamicStream(message.url);
     try { sendResponse({received: true}); } catch (e) {}
     return true;
   }
@@ -2023,24 +2118,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-// Load the screenshot functionality
-function loadScreenshotModule() {
-  // Check if it's already loaded
+// Load the screenshot functionality, calling callback when ready.
+function loadScreenshotModule(callback) {
   if (window.PageScreenshot) {
+    if (callback) callback();
     return;
   }
-  
-  // Create script element to load screenshot.js
+
   const script = document.createElement('script');
   script.src = chrome.runtime.getURL('screenshot.js');
   script.onload = function() {
     console.log('Screenshot module loaded successfully');
+    if (callback) callback();
   };
   script.onerror = function(error) {
     console.error('Error loading screenshot module:', error);
   };
-  
-  // Add to document head
+
   (document.head || document.documentElement).appendChild(script);
 }
 
