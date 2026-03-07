@@ -35,7 +35,6 @@ function saveDomainSettings(domain, settings) {
     const domainFilters = result.domainSizeFilters || {};
     domainFilters[domain] = settings;
     chrome.storage.sync.set({ domainSizeFilters: domainFilters }, () => {
-      console.log(`Size filter settings saved for domain: ${domain}`);
     });
   });
 }
@@ -57,25 +56,16 @@ chrome.storage.sync.get('ignoredImageUrls', (result) => {
 
 // Filter images by size
 function filterImagesBySize(images, minWidth, minHeight) {
-  console.log(`Filtering images: ${images.length} images, min dimensions ${minWidth}x${minHeight}`);
-  
   const filtered = images.filter(img => {
     if (img.type === 'img') {
-      // For <img> elements, we can use naturalWidth/Height if available
       const actualWidth = img.naturalWidth || img.width;
       const actualHeight = img.naturalHeight || img.height;
-      const passes = actualWidth >= minWidth && actualHeight >= minHeight;
-      console.log(`Image (${img.url.substring(0, 30)}...): ${actualWidth}x${actualHeight}, passes: ${passes}`);
-      return passes;
+      return actualWidth >= minWidth && actualHeight >= minHeight;
     } else {
-      // For background images, we just use the element dimensions
-      const passes = img.width >= minWidth && img.height >= minHeight;
-      console.log(`Background (${img.url.substring(0, 30)}...): ${img.width}x${img.height}, passes: ${passes}`);
-      return passes;
+      return img.width >= minWidth && img.height >= minHeight;
     }
   });
-  
-  console.log(`Filtering results: ${filtered.length} of ${images.length} images passed the filter`);
+  console.log(`Size filter ${minWidth}x${minHeight}: ${filtered.length}/${images.length} passed`);
   return filtered;
 }
 
@@ -324,8 +314,10 @@ function shouldSkipImage(url) {
       '.svg#', // SVG fragments which often cause CORS issues
       '/widget/', // Widget resources often have CORS restrictions
       '/badge/', // Badges/emblems from third parties
-      '/seal/', // Trust/security seals 
+      '/seal/', // Trust/security seals
       '/trustmark', // Trust marks
+      '/_/set_cookie', // Imperva/Incapsula CDN bot-protection cookie endpoints (not images)
+      '/_/fp/', // Imperva fingerprinting endpoints
     ];
     
     // Check if URL contains any of the tracking patterns
@@ -340,8 +332,13 @@ function shouldSkipImage(url) {
       return true;
     }
     
+    // Skip favicons
+    if (url.toLowerCase().includes('.ico')) {
+      return true;
+    }
+
     // Check for small GIF images that end with a 1x1 or have a query string
-    if (url.toLowerCase().endsWith('.gif') && 
+    if (url.toLowerCase().endsWith('.gif') &&
         (url.includes('1x1') || url.includes('?'))) {
       return true;
     }
@@ -354,13 +351,13 @@ function shouldSkipImage(url) {
 }
 
 function findAllImages() {
-    console.log('findAllImages() called');
     allImagesCache = [];
 
     const imgElements = Array.from(document.querySelectorAll('img'));
-    console.log(`Found ${imgElements.length} img elements`);
 
-    const elementsWithBgImages = Array.from(document.querySelectorAll('*')).filter(el => {
+    const elementsWithBgImages = Array.from(document.querySelectorAll(
+        '*:not(script):not(style):not(input):not(textarea):not(select):not(button):not(link):not(meta)'
+    )).filter(el => {
         const style = window.getComputedStyle(el);
         const bgImage = style.backgroundImage;
         return bgImage && bgImage !== 'none' && bgImage.startsWith('url(');
@@ -496,14 +493,25 @@ function findAllImages() {
             }
         }
 
+        // If the URL came from a srcset 'w' descriptor that is larger than what the browser
+        // loaded (e.g. Glamuse serves 460w in the viewport but has a 1050w original), use
+        // the descriptor width and estimate height proportionally from the loaded aspect ratio.
+        const srcsetDescriptorWidth = bestSrcsetSource && bestSrcsetSource.width > 0
+            ? bestSrcsetSource.width : 0;
+        const loadedW = isLoaded ? img.naturalWidth : img.width;
+        const loadedH = isLoaded ? img.naturalHeight : img.height;
+        const effectiveW = srcsetDescriptorWidth > loadedW ? srcsetDescriptorWidth : loadedW;
+        const effectiveH = srcsetDescriptorWidth > loadedW && loadedW > 0
+            ? Math.round(srcsetDescriptorWidth * (loadedH / loadedW))
+            : loadedH;
+
         return {
             url: resolvedUrl,
             alt: altText,
-            // Use natural dimensions if available AND loaded, otherwise element dimensions
-            width: isLoaded ? img.naturalWidth : img.width,
-            height: isLoaded ? img.naturalHeight : img.height,
-            naturalWidth: img.naturalWidth || 0, // Store natural even if not loaded
-            naturalHeight: img.naturalHeight || 0,
+            width: effectiveW,
+            height: effectiveH,
+            naturalWidth: effectiveW,
+            naturalHeight: effectiveH,
             type: 'img',
             filename: filename,
             title: img.title || '',
@@ -619,7 +627,7 @@ function findAllImages() {
         const isSvg = img.url.toLowerCase().includes('.svg'); // Check extension or mime type if available later
         const isSmall = (img.width || 0) < 100 && (img.height || 0) < 100;
         if (isSvg && isSmall) {
-            console.log(`Filtering out small SVG icon: ${img.url}`);
+            console.debug(`Filtering out small SVG icon: ${img.url}`);
             return false;
         }
         return true;
@@ -645,13 +653,10 @@ function findAllImages() {
         return true;
     });
 
-    console.log(`Found ${allImages.length} unique images after removing duplicates and filtering`);
-    allImagesCache = [...allImages]; // Store unfiltered cache
-    console.log('Cache size:', allImagesCache.length);
+    allImagesCache = [...allImages];
 
     // Filter by size using domain settings
     const filteredImages = filterImagesBySize(allImages, domainSettings.minWidth, domainSettings.minHeight);
-    console.log('Found images after size filtering:', filteredImages.length);
     currentFilteredImages = filteredImages; // Update the currently displayed/filtered list
 
     return filteredImages;
@@ -669,7 +674,7 @@ async function checkImagesFileSizes(images) {
   
   // If all images were already uploaded, return the original array for UI feedback
   if (imagesToCheck.length === 0 && images.length > 0) {
-    console.log(`[CONTENT LOG] All ${images.length} images have already been sent for upload`);
+    console.debug(`[CONTENT LOG] All ${images.length} images have already been sent for upload`);
     
     // Show a message in the UI if it's open
     const statusDiv = document.getElementById('status-message');
@@ -681,7 +686,7 @@ async function checkImagesFileSizes(images) {
   }
   
   // Continue checking the new images
-  console.log(`[CONTENT LOG] Checking file sizes for ${imagesToCheck.length} new images (${images.length - imagesToCheck.length} already uploaded)`);
+  console.debug(`[CONTENT LOG] Checking file sizes for ${imagesToCheck.length} new images (${images.length - imagesToCheck.length} already uploaded)`);
   
   // If we filtered any previously uploaded images, update the status message
   const statusDiv = document.getElementById('status-message');
@@ -777,7 +782,7 @@ async function checkImagesFileSizes(images) {
           return image;
         } catch (corsError) {
           // If no-cors mode failed, try a normal request
-          console.log(`No-cors request failed for ${image.url}, trying regular request`);
+          console.debug(`No-cors request failed for ${image.url}, trying regular request`);
           
           // Create a new AbortController for the second attempt
           const controller2 = new AbortController();
@@ -796,7 +801,7 @@ async function checkImagesFileSizes(images) {
           const contentLength = response.headers.get('Content-Length');
           
           if (contentLength && parseInt(contentLength) < MIN_FILE_SIZE) {
-            console.log(`Skipping small image (${contentLength} bytes): ${image.url}`);
+            console.debug(`Skipping small image (${contentLength} bytes): ${image.url}`);
             return null; // Skip this image
           } else {
             // Check content type to ensure it's actually an image or video stream
@@ -804,7 +809,7 @@ async function checkImagesFileSizes(images) {
             if (contentType && (contentType.startsWith('image/') || contentType.includes('mpegurl') || image.type === 'stream')) {
               return image; // Keep this image
             } else {
-              console.log(`Skipping non-image content type (${contentType}): ${image.url}`);
+              console.debug(`Skipping non-image content type (${contentType}): ${image.url}`);
               return null;
             }
           }
@@ -812,7 +817,7 @@ async function checkImagesFileSizes(images) {
       } catch (fetchError) {
         // If both fetch attempts failed, but the image loaded in the browser,
         // let's trust that it's valid and include it
-        console.log(`All fetch attempts failed for ${image.url}, but proceeding anyway`);
+        console.debug(`All fetch attempts failed for ${image.url}, but proceeding anyway`);
         return image;
       }
     } catch (error) {
@@ -868,7 +873,7 @@ async function checkImagesFileSizes(images) {
   // Add any previously uploaded images to the valid images list for UI feedback
   if (images.length > imagesToCheck.length) {
     const previouslyUploaded = images.filter(image => alreadyUploadedUrls.has(image.url));
-    console.log(`[CONTENT LOG] Adding ${previouslyUploaded.length} previously uploaded images to UI selection`);
+    console.debug(`[CONTENT LOG] Adding ${previouslyUploaded.length} previously uploaded images to UI selection`);
     validImages = [...previouslyUploaded, ...validImages];
   }
   
@@ -884,19 +889,16 @@ function createImageSelectionUI(images) {
   
   // Make sure allImagesCache is properly set if it's empty
   if (allImagesCache.length === 0) {
-    console.log('allImagesCache was empty, initializing from current images');
     allImagesCache = [...images];
   }
   
   // Remove any existing UI to prevent duplicates
   const existingContainer = document.getElementById('image-selector-container');
   if (existingContainer) {
-    console.log('Removing existing UI before creating a new one');
     document.body.removeChild(existingContainer);
     // Return early if there's already a UI open and we're clicking the button again with the same images
     // This prevents duplicate image display when clicking the button multiple times
     if (currentFilteredImages === images && existingContainer.getAttribute('data-images-count') === images.length.toString()) {
-      console.log('UI was already open with the same images, not re-creating');
       return;
     }
   }
@@ -1096,8 +1098,6 @@ function applyImageSizeFilter() {
   const minWidth = parseInt(document.getElementById('min-width').value) || 0;
   const minHeight = parseInt(document.getElementById('min-height').value) || 0;
   
-  console.log('Applying size filter:', { minWidth, minHeight });
-  console.log('All images cache:', allImagesCache.length, 'images');
   
   // Ensure we have images to filter
   if (allImagesCache.length === 0) {
@@ -1112,12 +1112,10 @@ function applyImageSizeFilter() {
   
   // Create a shallow copy of the array to avoid modifying the original
   const imagesToFilter = [...allImagesCache];
-  console.log(`Filtering ${imagesToFilter.length} images with min dimensions ${minWidth}x${minHeight}`);
   
   // Filter images with new values
   const filteredImages = filterImagesBySize(imagesToFilter, minWidth, minHeight);
   
-  console.log('Filtered images:', filteredImages.length, 'images remaining');
   
   // Update the UI to show filtered images
   updateImageList(filteredImages);
@@ -1640,7 +1638,7 @@ function createProgressIndicator(count) {
   // Check if an indicator already exists
   const existingIndicator = document.getElementById('save-progress-indicator');
   if (existingIndicator) {
-    console.log(`[CONTENT LOG] Reusing existing progress indicator`);
+    console.debug(`[CONTENT LOG] Reusing existing progress indicator`);
     return existingIndicator;
   }
   
@@ -1702,7 +1700,7 @@ function createProgressIndicator(count) {
   // Store a reference to the indicator element in a global property
   window.PageImageSaverProgressIndicator = progressContainer;
   
-  console.log(`[CONTENT LOG] Created persistent progress indicator with ID: ${progressContainer.id}`);
+  console.debug(`[CONTENT LOG] Created persistent progress indicator with ID: ${progressContainer.id}`);
   return progressContainer;
 }
 
@@ -1711,7 +1709,7 @@ function updateProgressIndicator(completed, total, successCount) {
   // Get the indicator - or recreate it if it doesn't exist
   let indicator = document.getElementById('save-progress-indicator');
   if (!indicator) {
-    console.log(`[CONTENT LOG] Progress indicator not found, recreating it`);
+    console.debug(`[CONTENT LOG] Progress indicator not found, recreating it`);
     indicator = createProgressIndicator(total);
   }
   
@@ -1750,7 +1748,7 @@ function showCompletionNotification(count, success = true, errorMessage = null, 
                                (currentProgressInfo.completed < currentProgressInfo.total);
   
   if (keepProgressIndicator) {
-    console.log(`[CONTENT LOG] Keeping progress indicator visible because upload is still in progress`);
+    console.debug(`[CONTENT LOG] Keeping progress indicator visible because upload is still in progress`);
     // Update the indicator with the current state
     if (document.getElementById('save-progress-indicator')) {
       updateProgressIndicator(currentProgressInfo.completed, currentProgressInfo.total, currentProgressInfo.successCount);
@@ -1885,13 +1883,13 @@ function ensureProgressListener() {
   if (!progressListenerActive) {
     progressListenerActive = true;
     
-    console.log('[CONTENT LOG] Registering progress update listener');
+    console.debug('[CONTENT LOG] Registering progress update listener');
     
     // Listen for progress updates and completion
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Handle regular progress updates
       if (message.action === 'uploadProgress') {
-        console.log(`[CONTENT LOG] Progress update received: ${message.completed}/${message.total} (success: ${message.successCount})`);
+        console.debug(`[CONTENT LOG] Progress update received: ${message.completed}/${message.total} (success: ${message.successCount})`);
         
         // Update our tracking object
         currentProgressInfo = {
@@ -1909,10 +1907,10 @@ function ensureProgressListener() {
         // Set a new timeout to detect stalled uploads (30 seconds without updates)
         uploadTimeoutId = setTimeout(() => {
           const timeSinceLastUpdate = Date.now() - currentProgressInfo.lastUpdate;
-          console.log(`[CONTENT LOG] Checking for stalled upload. Time since last update: ${Math.floor(timeSinceLastUpdate/1000)}s`);
+          console.debug(`[CONTENT LOG] Checking for stalled upload. Time since last update: ${Math.floor(timeSinceLastUpdate/1000)}s`);
           
           if (timeSinceLastUpdate > 30000) {
-            console.log(`[CONTENT LOG] Upload appears stalled after ${Math.floor(timeSinceLastUpdate/1000)}s without updates`);
+            console.debug(`[CONTENT LOG] Upload appears stalled after ${Math.floor(timeSinceLastUpdate/1000)}s without updates`);
             // Show a notification if upload appears to be stalled
             const indicator = document.getElementById('save-progress-indicator');
             if (indicator) {
@@ -1931,46 +1929,46 @@ function ensureProgressListener() {
         try {
           const response = {received: true, timestamp: Date.now()};
           sendResponse(response);
-          console.log(`[CONTENT LOG] Sent response to progress update:`, response);
+          console.debug(`[CONTENT LOG] Sent response to progress update:`, response);
         } catch (error) {
           console.warn('[CONTENT ERROR] Error sending response to progress update:', error);
         }
       }
       // Handle upload completion message (final result after all processing)
       else if (message.action === 'uploadComplete') {
-        console.log(`[CONTENT LOG] Upload completion message received: success=${message.success}, count=${message.count || 0}/${message.total || '?'}`);
+        console.debug(`[CONTENT LOG] Upload completion message received: success=${message.success}, count=${message.count || 0}/${message.total || '?'}`);
         
         // Clear any pending timeout
         if (uploadTimeoutId) {
           clearTimeout(uploadTimeoutId);
           uploadTimeoutId = null;
-          console.log(`[CONTENT LOG] Cleared timeout after receiving completion message`);
+          console.debug(`[CONTENT LOG] Cleared timeout after receiving completion message`);
         }
         
         // Now we can safely remove the UI
         const container = document.getElementById('image-selector-container');
         if (container) {
-          console.log(`[CONTENT LOG] Removing image selector UI after confirmation of completion`);
+          console.debug(`[CONTENT LOG] Removing image selector UI after confirmation of completion`);
           document.body.removeChild(container);
         }
         
         // Capture the final progress state for debugging
-        console.log(`[CONTENT LOG] Final progress state: ${currentProgressInfo.completed}/${currentProgressInfo.total}, ${currentProgressInfo.successCount} successful`);
+        console.debug(`[CONTENT LOG] Final progress state: ${currentProgressInfo.completed}/${currentProgressInfo.total}, ${currentProgressInfo.successCount} successful`);
         
         // Remove failed (non-skipped) URLs from the dedup set so they can be retried
         if (message.failedUrls && message.failedUrls.length > 0) {
           message.failedUrls.forEach(url => alreadyUploadedUrls.delete(url));
-          console.log(`[CONTENT LOG] Removed ${message.failedUrls.length} failed URLs from dedup set (retryable)`);
+          console.debug(`[CONTENT LOG] Removed ${message.failedUrls.length} failed URLs from dedup set (retryable)`);
         }
 
         if (message.success) {
           // Show success notification
-          console.log(`[CONTENT LOG] Showing success notification for ${message.count} images`);
+          console.debug(`[CONTENT LOG] Showing success notification for ${message.count} images`);
           showCompletionNotification(message.count, true, null, message.localFolder, message.skipped || 0, message.skipReasons || []);
-          console.log(`[CONTENT LOG] Successfully saved ${message.count} images.`);
+          console.debug(`[CONTENT LOG] Successfully saved ${message.count} images.`);
         } else {
           // Show error notification
-          console.log(`[CONTENT ERROR] Showing error notification: ${message.error}`);
+          console.error(`[CONTENT ERROR] Showing error notification: ${message.error}`);
           showCompletionNotification(currentProgressInfo.successCount || 0, false, message.error);
           console.error(`[CONTENT ERROR] ${message.error || 'Unknown error occurred'}`);
         }
@@ -1985,21 +1983,21 @@ function ensureProgressListener() {
       // Do NOT return true here - we're responding synchronously, not async
     });
     
-    console.log('[CONTENT LOG] Progress update listener registered successfully');
+    console.debug('[CONTENT LOG] Progress update listener registered successfully');
   } else {
-    console.log('[CONTENT LOG] Progress listener already active, not registering again');
+    console.debug('[CONTENT LOG] Progress listener already active, not registering again');
   }
 }
 
 // Function to save images to your storage (S3/R2)
 function saveImagesToStorage(images) {
-  console.log(`[CONTENT LOG] Starting save process for ${images.length} images`);
+  console.debug(`[CONTENT LOG] Starting save process for ${images.length} images`);
   
   // Filter out images that have already been uploaded in this session
   const newImages = images.filter(image => {
     // Skip if we've already sent this image for upload
     if (alreadyUploadedUrls.has(image.url)) {
-      console.log(`[CONTENT LOG] Skipping already uploaded image: ${image.url.substring(0, 40)}...`);
+      console.debug(`[CONTENT LOG] Skipping already uploaded image: ${image.url.substring(0, 40)}...`);
       return false;
     }
     return true;
@@ -2015,12 +2013,12 @@ function saveImagesToStorage(images) {
   
   // If all images have already been uploaded, show a message
   if (newImages.length === 0) {
-    console.log(`[CONTENT LOG] All ${images.length} images have already been sent for upload in this session`);
+    console.debug(`[CONTENT LOG] All ${images.length} images have already been sent for upload in this session`);
     showStatusMessage(`All ${images.length} selected images have already been sent for upload in this session.`, 'info');
     return;
   }
   
-  console.log(`[CONTENT LOG] After filtering already uploaded images: ${newImages.length} of ${images.length} images are new`);
+  console.debug(`[CONTENT LOG] After filtering already uploaded images: ${newImages.length} of ${images.length} images are new`);
   
   // Make sure the progress listener is registered BEFORE we start
   ensureProgressListener();
@@ -2032,23 +2030,23 @@ function saveImagesToStorage(images) {
     successCount: 0,
     lastUpdate: Date.now()
   };
-  console.log(`[CONTENT LOG] Reset progress tracking`);
+  console.debug(`[CONTENT LOG] Reset progress tracking`);
   
   // Show progress indicator
   const progressIndicator = createProgressIndicator(newImages.length);
-  console.log(`[CONTENT LOG] Created progress indicator UI`);
+  console.debug(`[CONTENT LOG] Created progress indicator UI`);
   
   // Set a timeout to detect if the upload is taking too long
   if (uploadTimeoutId) {
     clearTimeout(uploadTimeoutId);
-    console.log(`[CONTENT LOG] Cleared existing timeout`);
+    console.debug(`[CONTENT LOG] Cleared existing timeout`);
   }
   
   uploadTimeoutId = setTimeout(() => {
-    console.log(`[CONTENT LOG] Initial timeout check (10s) - progress: ${currentProgressInfo.completed}/${currentProgressInfo.total}`);
+    console.debug(`[CONTENT LOG] Initial timeout check (10s) - progress: ${currentProgressInfo.completed}/${currentProgressInfo.total}`);
     // If no progress updates have been received for 10 seconds at the start, show a message
     if (currentProgressInfo.completed === 0) {
-      console.log(`[CONTENT LOG] No progress after 10s, showing waiting message`);
+      console.debug(`[CONTENT LOG] No progress after 10s, showing waiting message`);
       const indicator = document.getElementById('save-progress-indicator');
       if (indicator) {
         const messageEl = indicator.lastChild;
@@ -2059,7 +2057,7 @@ function saveImagesToStorage(images) {
     }
   }, 10000);
   
-  console.log(`[CONTENT LOG] Sending saveImages message to background script with ${newImages.length} images`);
+  console.debug(`[CONTENT LOG] Sending saveImages message to background script with ${newImages.length} images`);
   
   // Get the current folder name if UI is open, otherwise fall back to settings or domain
   const folderInput = document.getElementById('folder-name');
@@ -2073,17 +2071,17 @@ function saveImagesToStorage(images) {
     pageTitle: originalPageTitle,
     folderName: folderName || currentDomain
   }, response => {
-    console.log(`[CONTENT LOG] Received initial response from background script:`, response);
+    console.debug(`[CONTENT LOG] Received initial response from background script:`, response);
     
     // Check if this is a provisional response
     if (response && response.provisional) {
-      console.log(`[CONTENT LOG] This is a provisional response, not showing completion notification yet`);
+      console.debug(`[CONTENT LOG] This is a provisional response, not showing completion notification yet`);
       
       // Just hide the selector UI instead of removing it
       // This will keep the progress indicator visible until the upload finishes
       const container = document.getElementById('image-selector-container');
       if (container) {
-        console.log(`[CONTENT LOG] Hiding image selector UI but keeping progress indicator`);
+        console.debug(`[CONTENT LOG] Hiding image selector UI but keeping progress indicator`);
         container.style.display = 'none';
       }
       
@@ -2098,35 +2096,35 @@ function saveImagesToStorage(images) {
     if (uploadTimeoutId) {
       clearTimeout(uploadTimeoutId);
       uploadTimeoutId = null;
-      console.log(`[CONTENT LOG] Cleared timeout after receiving final response`);
+      console.debug(`[CONTENT LOG] Cleared timeout after receiving final response`);
     }
     
     // Just hide the selector UI instead of removing it
     const container = document.getElementById('image-selector-container');
     if (container) {
-      console.log(`[CONTENT LOG] Hiding image selector UI but keeping progress indicator`);
+      console.debug(`[CONTENT LOG] Hiding image selector UI but keeping progress indicator`);
       container.style.display = 'none';
     }
     
     // Capture the final progress state for debugging
-    console.log(`[CONTENT LOG] Final progress state: ${currentProgressInfo.completed}/${currentProgressInfo.total}, ${currentProgressInfo.successCount} successful`);
+    console.debug(`[CONTENT LOG] Final progress state: ${currentProgressInfo.completed}/${currentProgressInfo.total}, ${currentProgressInfo.successCount} successful`);
     
     if (response && response.success) {
       // Show success notification
       // Use the higher of response.count or currentProgressInfo.successCount
       const finalCount = Math.max(response.count || 0, currentProgressInfo.successCount || 0);
-      console.log(`[CONTENT LOG] Showing success notification for ${finalCount} images`);
+      console.debug(`[CONTENT LOG] Showing success notification for ${finalCount} images`);
       showCompletionNotification(finalCount, true);
-      console.log(`[CONTENT LOG] Successfully saved ${finalCount} images.`);
+      console.debug(`[CONTENT LOG] Successfully saved ${finalCount} images.`);
     } else {
       // Show error notification
-      console.log(`[CONTENT ERROR] Showing error notification with ${currentProgressInfo.successCount} successful: ${response?.error}`);
+      console.error(`[CONTENT ERROR] Showing error notification with ${currentProgressInfo.successCount} successful: ${response?.error}`);
       showCompletionNotification(currentProgressInfo.successCount || 0, false, response?.error);
       console.error(`[CONTENT ERROR] ${response?.error || 'Unknown error occurred'}`);
     }
   });
   
-  console.log(`[CONTENT LOG] SaveImagesToStorage function completed, waiting for async responses`);
+  console.debug(`[CONTENT LOG] SaveImagesToStorage function completed, waiting for async responses`);
 }
 
 // Initialize when the user clicks the extension icon or uses keyboard shortcut
@@ -2135,23 +2133,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Check if UI is already open, and just return success if it is
     const existingContainer = document.getElementById('image-selector-container');
     if (existingContainer) {
-      console.log('UI already open, not recreating');
       sendResponse({success: true, count: parseInt(existingContainer.getAttribute('data-images-count') || '0')});
       return true;
     }
     
     // Get current domain and load saved settings for it
     currentDomain = getCurrentDomain();
-    console.log('Finding images for domain:', currentDomain);
     
     loadDomainSettings(currentDomain, (settings) => {
       // Update domain settings
       domainSettings = settings;
-      console.log('Domain settings loaded:', domainSettings);
       
       // Find all images with the loaded filter settings
       const images = findAllImages();
-      console.log(`Found ${images.length} images, creating UI`);
       
       // Create the UI with the images
       createImageSelectionUI(images);
@@ -2209,10 +2203,8 @@ console.log('Page Image Saver content script loaded.');
 // Add an event listener to notify when the DOM is fully loaded
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    console.log('Page Image Saver: DOM fully loaded and parsed');
   });
 } else {
-  console.log('Page Image Saver: DOM already loaded when script ran');
 }
 // ================= Dynamic Image Capture (network & DOM & hover) =================
 (function() {
