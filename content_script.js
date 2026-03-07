@@ -208,10 +208,8 @@ function handleDynamicImage(url) {
     // Apply current domain size filters
     if (imageObj.width >= domainSettings.minWidth && imageObj.height >= domainSettings.minHeight) {
       currentFilteredImages.push(imageObj);
-      // Update UI if open
-      if (document.getElementById('image-selector-container')) {
-        updateImageList(currentFilteredImages);
-      }
+      // Debounced UI update — batches rapid dynamic image discoveries into one render
+      scheduleUpdateImageList();
     }
   };
   
@@ -1563,6 +1561,16 @@ function _createImageItemElement(image, index) {
   return imgContainer;
 }
 
+// Debounced UI update for dynamic image discovery — batches rapid additions
+let _updateImageListTimer = null;
+function scheduleUpdateImageList() {
+  if (!document.getElementById('image-selector-container')) return;
+  clearTimeout(_updateImageListTimer);
+  _updateImageListTimer = setTimeout(() => {
+    updateImageList(currentFilteredImages);
+  }, 150);
+}
+
 // Update image list with filtered images
 function updateImageList(filteredImages) {
   try {
@@ -2209,11 +2217,35 @@ if (document.readyState === 'loading') {
 // ================= Dynamic Image Capture (network & DOM & hover) =================
 (function() {
   // 2. MutationObserver to catch transient DOM additions/removals
+  // Attribute changes (style/class) are collected and processed in a debounced batch
+  // to avoid expensive getComputedStyle calls on every CSS transition frame.
+  let _attrMutationTimer = null;
+  const _pendingAttrNodes = new Set();
+
+  function flushAttrMutations() {
+    _attrMutationTimer = null;
+    for (const node of _pendingAttrNodes) {
+      try {
+        const style = window.getComputedStyle(node);
+        const bg = style.backgroundImage;
+        if (bg && bg.startsWith('url(')) {
+          const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
+          if (m && m[1] && !shouldSkipImage(m[1])) {
+            handleDynamicImage(m[1]);
+          }
+        }
+      } catch (error) {
+        // Ignore style computation errors on invalid nodes
+      }
+    }
+    _pendingAttrNodes.clear();
+  }
+
   const mo = new MutationObserver(records => {
     records.forEach(record => {
       record.addedNodes.forEach(node => {
         if (node.nodeType !== 1) return;
-        
+
         // Process IMG elements
         if (node.tagName === 'IMG' && node.src) {
           // Skip tiny images likely to be tracking pixels
@@ -2221,7 +2253,7 @@ if (document.readyState === 'loading') {
             handleDynamicImage(node.src);
           }
         }
-        
+
         // Process background images
         try {
           const style = window.getComputedStyle(node);
@@ -2236,24 +2268,12 @@ if (document.readyState === 'loading') {
           // Ignore style computation errors on invalid nodes
         }
       });
-      
-      // Process attribute changes
-      if (record.type === 'attributes' && (record.attributeName === 'style' || record.attributeName === 'class')) {
-        const node = record.target;
-        if (node.nodeType !== 1) return;
-        
-        try {
-          const style = window.getComputedStyle(node);
-          const bg = style.backgroundImage;
-          if (bg && bg.startsWith('url(')) {
-            const m = bg.match(/url\(['"]?(.*?)['"]?\)/);
-            if (m && m[1] && !shouldSkipImage(m[1])) {
-              handleDynamicImage(m[1]);
-            }
-          }
-        } catch (error) {
-          // Ignore style computation errors on invalid nodes
-        }
+
+      // Collect attribute-changed nodes and flush in a debounced batch (300ms idle)
+      if (record.type === 'attributes' && record.target.nodeType === 1) {
+        _pendingAttrNodes.add(record.target);
+        clearTimeout(_attrMutationTimer);
+        _attrMutationTimer = setTimeout(flushAttrMutations, 300);
       }
     });
   });
@@ -2265,13 +2285,14 @@ if (document.readyState === 'loading') {
   });
 
   // 3. Hover listener to catch pop-up or lazy-loaded content on mouseover
+  // Debounced: only runs if the sidebar is open, and at most once per 500ms of idle
   let hoverTimer;
   document.addEventListener('mouseover', () => {
-    findAllImages();
+    if (!document.getElementById('image-selector-container')) return;
     clearTimeout(hoverTimer);
     hoverTimer = setTimeout(() => {
       findAllImages();
-    }, 200);
+    }, 500);
   }, true);
 })();
 // =======================================================================
