@@ -24,6 +24,19 @@ function normalizeImageUrl(url) {
   try { return url.split('?')[0].split('#')[0]; } catch { return url; }
 }
 
+// Extract a clean filename from a URL (strips query, hash, path prefix)
+function filenameFromUrl(url, fallback) {
+  try {
+    const pathname = new URL(url).pathname;
+    const name = decodeURIComponent(pathname.substring(pathname.lastIndexOf('/') + 1))
+      .split('?')[0].split('#')[0].replace(/[\/\\]/g, '_');
+    if (name) return name;
+  } catch (e) { /* fall through */ }
+  const parts = url.split('/');
+  const name = parts[parts.length - 1].split('?')[0].split('#')[0].replace(/[\/\\]/g, '_');
+  return name || fallback || `image_${Date.now()}.jpg`;
+}
+
 // Function to get the current domain
 function getCurrentDomain() {
   return window.location.hostname;
@@ -34,8 +47,7 @@ function saveDomainSettings(domain, settings) {
   chrome.storage.sync.get('domainSizeFilters', (result) => {
     const domainFilters = result.domainSizeFilters || {};
     domainFilters[domain] = settings;
-    chrome.storage.sync.set({ domainSizeFilters: domainFilters }, () => {
-    });
+    chrome.storage.sync.set({ domainSizeFilters: domainFilters });
   });
 }
 
@@ -56,15 +68,7 @@ chrome.storage.sync.get('ignoredImageUrls', (result) => {
 
 // Filter images by size
 function filterImagesBySize(images, minWidth, minHeight) {
-  const filtered = images.filter(img => {
-    if (img.type === 'img') {
-      const actualWidth = img.naturalWidth || img.width;
-      const actualHeight = img.naturalHeight || img.height;
-      return actualWidth >= minWidth && actualHeight >= minHeight;
-    } else {
-      return img.width >= minWidth && img.height >= minHeight;
-    }
-  });
+  const filtered = images.filter(img => img.width >= minWidth && img.height >= minHeight);
   console.log(`Size filter ${minWidth}x${minHeight}: ${filtered.length}/${images.length} passed`);
   return filtered;
 }
@@ -189,13 +193,13 @@ function handleDynamicImage(url) {
     
     const imageObj = {
       url: url,
-      alt: url.split('/').pop() || '',
+      alt: filenameFromUrl(url) || '',
       width: imgEl.naturalWidth,
       height: imgEl.naturalHeight,
       naturalWidth: imgEl.naturalWidth,
       naturalHeight: imgEl.naturalHeight,
       type: 'dynamic',
-      filename: url.split('/').pop().split('?')[0].split('#')[0],
+      filename: filenameFromUrl(url),
       title: '',
       loading: '',
       dataAttributes: {},
@@ -260,7 +264,7 @@ function handleDynamicStream(url) {
     naturalWidth: 1920,
     naturalHeight: 1080,
     type: 'stream',
-    filename: url.split('/').pop().split('?')[0].split('#')[0] || 'stream.m3u8',
+    filename: filenameFromUrl(url, 'stream.m3u8'),
     title: 'HLS Video Stream',
     loading: '',
     dataAttributes: {},
@@ -459,28 +463,7 @@ function findAllImages() {
 
 
         // --- Filename Extraction Logic (using resolvedUrl) ---
-        let filename = '';
-        try {
-            const urlObj = new URL(resolvedUrl);
-            const pathname = urlObj.pathname;
-            // Decode URI component first to handle encoded chars like %20
-            filename = decodeURIComponent(pathname.substring(pathname.lastIndexOf('/') + 1));
-            filename = filename.split('?')[0].split('#')[0]; // Clean query/hash
-        } catch (e) { /* Fallback below */ }
-
-        // Fallback or if path ends in /
-        if (!filename) {
-             const parts = resolvedUrl.split('/');
-             filename = parts[parts.length - 1].split('?')[0].split('#')[0];
-             // If still no filename, generate one
-             if (!filename) {
-                const ext = getExtensionFromContentType(img.type || 'image/jpeg'); // Guess extension
-                filename = `image_${Date.now()}${ext}`;
-             }
-        }
-        // Basic sanitize just in case
-        filename = filename.replace(/[\/\\]/g, '_'); // Replace slashes just to be safe
-
+        const filename = filenameFromUrl(resolvedUrl, `image_${Date.now()}${getExtensionFromContentType(img.type || 'image/jpeg')}`);
         // --- End Filename ---
 
         // Data Attributes
@@ -549,20 +532,7 @@ function findAllImages() {
         }
 
         // Filename extraction
-        let filename = '';
-        try {
-            const urlObj = new URL(resolvedBgUrl);
-            const pathname = urlObj.pathname;
-            filename = decodeURIComponent(pathname.substring(pathname.lastIndexOf('/') + 1));
-            filename = filename.split('?')[0].split('#')[0];
-        } catch (e) { /* Fallback below */ }
-
-         if (!filename) {
-             const parts = resolvedBgUrl.split('/');
-             filename = parts[parts.length - 1].split('?')[0].split('#')[0];
-              if (!filename) filename = `background_image_${Date.now()}.jpg`;
-         }
-          filename = filename.replace(/[\/\\]/g, '_');
+        const filename = filenameFromUrl(resolvedBgUrl, `background_image_${Date.now()}.jpg`);
 
 
         // Alt text logic (same as before)
@@ -1108,11 +1078,8 @@ function applyImageSizeFilter() {
   domainSettings.minWidth = minWidth;
   domainSettings.minHeight = minHeight;
   
-  // Create a shallow copy of the array to avoid modifying the original
-  const imagesToFilter = [...allImagesCache];
-  
   // Filter images with new values
-  const filteredImages = filterImagesBySize(imagesToFilter, minWidth, minHeight);
+  const filteredImages = filterImagesBySize(allImagesCache, minWidth, minHeight);
   
   
   // Update the UI to show filtered images
@@ -2208,12 +2175,6 @@ loadScreenshotModule();
 // Log that the content script has loaded
 console.log('Page Image Saver content script loaded.');
 
-// Add an event listener to notify when the DOM is fully loaded
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-  });
-} else {
-}
 // ================= Dynamic Image Capture (network & DOM & hover) =================
 (function() {
   // 2. MutationObserver to catch transient DOM additions/removals
