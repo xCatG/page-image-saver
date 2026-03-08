@@ -178,19 +178,23 @@ function handleDynamicImage(url) {
     return;
   }
   
+  // Claim the URL immediately so concurrent MutationObserver/network callbacks
+  // for the same URL don't spawn parallel Image() retry chains.
+  discoveredUrls.add(url);
+
   // Load image for metadata
   const imgEl = new Image();
-  
+
   // Start with null crossOrigin to match default preload behavior
   imgEl.crossOrigin = null;
-  
+
   // Set up load handler
   imgEl.onload = () => {
     // Skip tiny images that are likely tracking pixels (less than 10x10)
     if (imgEl.naturalWidth < 10 || imgEl.naturalHeight < 10) {
       return;
     }
-    
+
     const imageObj = {
       url: url,
       alt: filenameFromUrl(url) || '',
@@ -206,8 +210,6 @@ function handleDynamicImage(url) {
       sourceAttribute: 'dynamic',
       isLoaded: true
     };
-    // Mark URL as seen and add to dynamic cache
-    discoveredUrls.add(url);
     dynamicImageObjs.push(imageObj);
     // Apply current domain size filters
     if (imageObj.width >= domainSettings.minWidth && imageObj.height >= domainSettings.minHeight) {
@@ -236,9 +238,7 @@ function handleDynamicImage(url) {
       return;
     }
     
-    // All attempts failed
-    // Mark URL as seen to avoid repeated attempts
-    discoveredUrls.add(url);
+    // All attempts failed — URL is already in discoveredUrls, nothing more to do
     // No console warning to avoid cluttering console
   };
   
