@@ -182,18 +182,14 @@ function handleDynamicImage(url) {
   // for the same URL don't spawn parallel Image() retry chains.
   discoveredUrls.add(url);
 
-  // Load image for metadata
+  // Load image for metadata. Use an explicit attempt counter so the error
+  // handler doesn't accidentally loop: after removeAttribute('crossorigin'),
+  // imgEl.crossOrigin returns null again, which would restart the cycle.
   const imgEl = new Image();
+  let loadAttempt = 0;
 
-  // Start with null crossOrigin to match default preload behavior
-  imgEl.crossOrigin = null;
-
-  // Set up load handler
   imgEl.onload = () => {
-    // Skip tiny images that are likely tracking pixels (less than 10x10)
-    if (imgEl.naturalWidth < 10 || imgEl.naturalHeight < 10) {
-      return;
-    }
+    if (imgEl.naturalWidth < 10 || imgEl.naturalHeight < 10) return;
 
     const imageObj = {
       url: url,
@@ -211,38 +207,26 @@ function handleDynamicImage(url) {
       isLoaded: true
     };
     dynamicImageObjs.push(imageObj);
-    // Apply current domain size filters
     if (imageObj.width >= domainSettings.minWidth && imageObj.height >= domainSettings.minHeight) {
       currentFilteredImages.push(imageObj);
-      // Debounced UI update — batches rapid dynamic image discoveries into one render
       scheduleUpdateImageList();
     }
   };
-  
-  // Set up error handler with multiple fallback attempts
+
   imgEl.onerror = () => {
-    // First attempt: try with anonymous if null failed
-    if (imgEl.crossOrigin === null) {
-      // Only use debug-level logging to reduce console noise
-      console.debug(`[CORS] Retrying image with anonymous crossOrigin: ${url.substring(0, 40)}...`);
-      imgEl.crossOrigin = "anonymous";
+    loadAttempt++;
+    if (loadAttempt === 1) {
+      // Retry with crossOrigin=anonymous (handles CORS-blocked images)
+      imgEl.crossOrigin = 'anonymous';
       imgEl.src = url;
-      return;
-    }
-    
-    // Second attempt: try with no crossorigin attribute
-    if (imgEl.crossOrigin === "anonymous") {
-      console.debug(`[CORS] Final fallback attempt with no crossorigin: ${url.substring(0, 40)}...`);
+    } else if (loadAttempt === 2) {
+      // Final retry with no crossorigin attribute
       imgEl.removeAttribute('crossorigin');
       imgEl.src = url;
-      return;
     }
-    
-    // All attempts failed — URL is already in discoveredUrls, nothing more to do
-    // No console warning to avoid cluttering console
+    // loadAttempt >= 3: all attempts failed, stop — URL already in discoveredUrls
   };
-  
-  // Start loading the image
+
   imgEl.src = url;
 }
 
