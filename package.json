@@ -17,5 +17,8 @@
     "s3",
     "r2",
     "cloudflare"
-  ]
+  ],
+  "dependencies": {
+    "html2canvas": "^1.4.1"
+  }
 }

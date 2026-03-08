@@ -373,7 +373,7 @@ chrome.action.onClicked.addListener(tab => {
         // Inject content script manually
         chrome.scripting.executeScript({
           target: {tabId: tab.id},
-          files: ['content_script.js']
+          files: ['html2canvas.min.js', 'screenshot.js', 'content_script.js']
         }).then(() => {
           // Wait a moment for the script to initialize
           setTimeout(() => {
@@ -427,7 +427,7 @@ chrome.commands.onCommand.addListener(command => {
             // Inject content script manually
             chrome.scripting.executeScript({
               target: {tabId: tab.id},
-              files: ['content_script.js']
+              files: ['html2canvas.min.js', 'screenshot.js', 'content_script.js']
             }).then(() => {
               // Wait a moment for script to initialize
               setTimeout(() => {

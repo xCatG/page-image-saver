@@ -885,7 +885,8 @@ function createImageSelectionUI(images) {
       <button id="save-selected-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer;">Save Selected</button>
       <button id="select-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #4285F4; color: white; cursor: pointer;">Select All</button>
       <button id="deselect-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Deselect All</button>
-      <button id="take-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot</button>
+      <button id="take-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Visible)</button>
+      <button id="take-full-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Full Page)</button>
       <button id="close-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Close</button>
     </div>
     <div id="size-filter" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
@@ -1027,7 +1028,24 @@ document.body.appendChild(container);
     // Close the current UI
     document.body.removeChild(container);
     // Initialize screenshot flow
-    window.PageScreenshot.initiateScreenshot();
+    if (window.PageScreenshot) {
+      window.PageScreenshot.initiateScreenshot(false); // pass false for visible area
+    } else {
+      console.error('Screenshot module not found');
+      alert('Screenshot module not found. Please try reloading the page.');
+    }
+  });
+
+  document.getElementById('take-full-screenshot-btn').addEventListener('click', () => {
+    // Close the current UI
+    document.body.removeChild(container);
+    // Initialize screenshot flow
+    if (window.PageScreenshot) {
+      window.PageScreenshot.initiateScreenshot(true); // pass true for full page
+    } else {
+      console.error('Screenshot module not found');
+      alert('Screenshot module not found. Please try reloading the page.');
+    }
   });
   
   document.getElementById('close-btn').addEventListener('click', () => {
@@ -2115,10 +2133,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     return true; // Keep the message channel open for async response
   } else if (message.action === 'takeScreenshot') {
-    loadScreenshotModule(() => {
+    if (window.PageScreenshot) {
       window.PageScreenshot.initiateScreenshot();
       sendResponse({success: true});
-    });
+    } else {
+      console.error('Screenshot module not found');
+      sendResponse({success: false, error: 'Screenshot module not found'});
+    }
     return true;
   } else if (message.action === 'dynamicImageLoaded') {
     handleDynamicImage(message.url);
@@ -2132,29 +2153,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Keep the message channel open for async responses
   return true;
 });
-
-// Load the screenshot functionality, calling callback when ready.
-function loadScreenshotModule(callback) {
-  if (window.PageScreenshot) {
-    if (callback) callback();
-    return;
-  }
-
-  const script = document.createElement('script');
-  script.src = chrome.runtime.getURL('screenshot.js');
-  script.onload = function() {
-    console.log('Screenshot module loaded successfully');
-    if (callback) callback();
-  };
-  script.onerror = function(error) {
-    console.error('Error loading screenshot module:', error);
-  };
-
-  (document.head || document.documentElement).appendChild(script);
-}
-
-// Load screenshot module
-loadScreenshotModule();
 
 // Log that the content script has loaded
 console.log('Page Image Saver content script loaded.');
