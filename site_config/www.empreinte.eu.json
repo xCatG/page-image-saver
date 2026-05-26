@@ -1,0 +1,45 @@
+{
+  "domain": "www.empreinte.eu",
+  "platform": "prestashop",
+  "botProtection": ["recaptcha"],
+  "listing": {
+    "productLinkSelector": "article.product-miniature a.thumbnail.product-thumbnail",
+    "pagination": {
+      "type": "numbered",
+      "nextSelector": ".pagination a[rel='next']"
+    }
+  },
+  "imagesVisibleWithoutClicks": true,
+  "colorVariantStrategy": "separate-url",
+  "imageUrlPattern": "/in/\\\\d+-large_default/[^/]+\\\\.jpg",
+  "product": {
+    "variantTriggers": [
+      {
+        "label": "color",
+        "affectsImages": true,
+        "selector": ".product-variants-item.variant-19 ul.group-attribut li a",
+        "action": "click",
+        "waitAfterMs": 2000,
+        "waitForSelector": ".js-qv-product-cover"
+      },
+      {
+        "label": "size",
+        "affectsImages": false,
+        "selector": "select#group_25",
+        "action": "click",
+        "waitAfterMs": 0,
+        "waitForSelector": ""
+      }
+    ],
+    "allImagesSelector": ".images-container .js-qv-product-cover",
+    "imageSelector": ".images-container .js-qv-product-cover:first-of-type",
+    "imageUrlPattern": "/in/\\\\d+-large_default/[^/]+\\\\.jpg",
+    "highResTransform": {
+      "description": "large_default is already the highest resolution available (1300×1768px). No zoom_default exists on this store. To get listing thumbnails instead use listing_category_default (300×408px). No find/replace needed — just use the large_default URL as-is.",
+      "find": "-listing_category_default/",
+      "replace": "-large_default/"
+    },
+    "lazyLoad": false
+  },
+  "notes": "Platform is PrestaShop (confirmed via global `prestashop` JS object and body class structure). Color variant strategy is SEPARATE-URL: each color is a distinct product page with its own URL slug (e.g. -cassiopee-black-5012.html vs -cassiopee-electric-pink-6227.html). Clicking a color swatch triggers a full page navigation — no in-place AJAX image swap. All product images (3–4 per color) are stacked vertically in .images-container and fully loaded on page load — no thumbnails, carousels, or lazy loading needed to expose them. No lightbox opens on image click despite fancybox.js being loaded. No next/prev or zoom buttons are present in the product image area. The size selector is a <select#group_25> dropdown and does NOT affect images. On listing pages, color swatches are rendered as radio inputs inside .plist_attribute_images and link to separate color URLs via <a> tags wrapping the inputs. Pagination is standard numbered with <a rel='next'>. Google reCAPTCHA is present site-wide (mainly for forms, not browsing)."
+}

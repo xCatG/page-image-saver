@@ -993,15 +993,24 @@ async function processImage(image, sourceInfo) {
       if (CONFIG.local.saveJson) {
         debugLog('JSON sidecar saving is configured, attempting download');
         const jsonFilename = filename.includes('.') ? filename.substring(0, filename.lastIndexOf('.')) + '.json' : filename + '.json';
+        let actualWidth = null, actualHeight = null;
+        try {
+          const bmp = await createImageBitmap(imageBlob);
+          actualWidth = bmp.width;
+          actualHeight = bmp.height;
+          bmp.close();
+        } catch (e) {
+          debugLog(`createImageBitmap failed for sidecar dimensions: ${e.message}`);
+        }
         const metadata = {
           url: image.url,
           sourceUrl: sourceInfo ? sourceInfo.url : null,
           sourceTitle: sourceInfo ? sourceInfo.title : null,
           altText: image.alt || null,
-          width: image.width ?? null,
-          height: image.height ?? null,
-          naturalWidth: image.naturalWidth ?? null,
-          naturalHeight: image.naturalHeight ?? null,
+          width: actualWidth ?? image.width ?? null,
+          height: actualHeight ?? image.height ?? null,
+          naturalWidth: actualWidth ?? image.naturalWidth ?? null,
+          naturalHeight: actualHeight ?? image.naturalHeight ?? null,
           contentType: imageBlob.type || null,
           fileSizeBytes: imageBlob.size,
           savedAt: new Date().toISOString()

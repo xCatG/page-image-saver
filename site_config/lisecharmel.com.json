@@ -1,0 +1,54 @@
+ {
+    "domain": "lisecharmel.com",
+    "platform": "magento",
+    "botProtection": [],
+    "listing": {
+      "productLinkSelector": "a.product-item-link",
+      "pagination": {
+        "type": "numbered",
+        "nextSelector": "a.action.next"
+      }
+    },
+    "product": {
+      "variantTriggers": [
+        {
+          "label": "color",
+          "selector": ".colors-container .color-item a",
+          "action": "click",
+          "waitAfterMs": 2000,
+          "waitForSelector": ".fotorama__img"
+        },
+        {
+          "label": "size",
+          "selector": ".swatch-attribute[data-attribute-code='taille'] .swatch-option.text",
+          "action": "click",
+          "waitAfterMs": 300,
+          "waitForSelector": ".swatch-attribute-selected-option"
+        },
+        {
+          "label": "gallery-dot",
+          "selector": ".fotorama__nav__frame--dot",
+          "action": "click",
+          "waitAfterMs": 400,
+          "waitForSelector": ".fotorama__stage__frame.fotorama__active img"
+        },
+        {
+          "label": "gallery-next",
+          "selector": ".fotorama__arr--next",
+          "action": "click",
+          "waitAfterMs": 400,
+          "waitForSelector": ".fotorama__stage__frame.fotorama__active img"
+        }
+      ],
+      "allImagesSelector": ".fotorama__stage__frame .fotorama__img",
+      "imageSelector": ".fotorama__stage__frame.fotorama__active .fotorama__img",
+      "imageUrlPattern": "/media/catalog/product/[a-z]/[a-z]/[^/]+\\.jpg",
+      "highResTransform": {
+        "description": "No resize/cache path used; full-res images served directly. Lightbox opens .fotorama__img--full at native resolution (up to 1875x2500). The full-res src is identical path to the regular img — no transform needed. Zoom in/out is CSS-only within the fotorama lightbox.",
+        "find": "",
+        "replace": ""
+      },
+      "lazyLoad": true
+    },
+    "notes": "Magento 2 with Synolia/lisecharmel theme. Color variants are separate product URLs (full page reload on color click — each color is a distinct configurable product). Size is a Magento swatch attribute (data-attribute-code='taille'); clicking opens a slide-in modal panel, selection closes it and updates the button label with no page reload. Gallery is Fotorama-based with dot nav (.fotorama__nav__frame--dot) and prev/next arrows (.fotorama__arr--prev / .fotorama__arr--next); clicking dots/arrows updates main image in-place with   no reload. Clicking the main image opens a fullscreen Fotorama lightbox; lightbox prev/next use the same .fotorama__arr selectors; zoom in = .fotorama__zoom-in, zoom out = .fotorama__zoom-out, close = .fotorama__fullscreen-icon (or Escape key). Lazy loading uses img[data-src] with a base64 GIF placeholder; 95–111 lazy images observed per product page. No bot protection (Cloudflare, reCAPTCHA, DataDome, etc.) detected. Cookies include Mage session/cache cookies, Google Analytics, Facebook Pixel, and Hotjar."
+  }

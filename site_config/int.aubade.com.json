@@ -1,0 +1,45 @@
+ {
+    "domain": "int.aubade.com",
+    "platform": "shopify",
+    "botProtection": [],
+    "listing": {
+      "productLinkSelector": "product-card a.product-card__figure",
+      "pagination": {
+        "type": "numbered",
+        "nextSelector": ".pagination__link.pagination-next"
+      }
+    },
+    "imagesVisibleWithoutClicks": true,
+    "colorVariantStrategy": "separate-url",
+    "imageUrlPattern": "\\\\/cdn\\\\/shop\\\\/files\\\\/[A-Z0-9]+_[A-Z]+_(?:\\\\d+|gt\\\\d+)\\\\.jpg",
+    "product": {
+      "variantTriggers": [
+        {
+          "label": "color",
+          "affectsImages": true,
+          "selector": ".color-swatch-list .color-swatch",
+          "action": "click",
+          "waitAfterMs": 2000,
+          "waitForSelector": "product-gallery .product-gallery__media img"
+        },
+        {
+          "label": "size",
+          "affectsImages": false,
+          "selector": "variant-picker button.select",
+          "action": "click",
+          "waitAfterMs": 300,
+          "waitForSelector": "[id^='popover-variant-dropdown-'] button"
+        }
+      ],
+      "allImagesSelector": ".product-gallery__media img",
+      "imageSelector": ".product-gallery__media.is-initial img",
+      "imageUrlPattern": "\\\\/cdn\\\\/shop\\\\/files\\\\/[A-Z0-9]+_[A-Z]+_(?:\\\\d+|gt\\\\d+)\\\\.jpg",
+      "highResTransform": {
+        "description": "Shopify CDN: images are served as base files under /cdn/shop/files/. Add ?width=2400 query param to request max resolution. The declared img width/height attributes on the element indicate 2400x2880 original dimensions.",
+        "find": "(\\\\.jpg)(\\\\?.*)?$",
+        "replace": ".jpg?width=2400"
+      },
+      "lazyLoad": true
+    },
+    "notes": "Color swatches on the product page are <a> tags linking to entirely separate product URLs (e.g. /products/...-black-2bf14 vs /products/...-lemonade-2bf14). Each color is a distinct Shopify product handle — clicking triggers a FULL page reload. On the listing page, color radio inputs (.color-option input[type='radio']) do an in-place card image swap without URL change. On the product page, all gallery images are in the DOM on page load in a 2-column CSS grid (.product-gallery__carousel, display:grid, 2 cols). First 2 images are eager-loaded; images 3–8 are lazy (loading='lazy') and revealed by scrolling — no click needed. Thumbnail navigation (product-gallery-navigation button.product-gallery__thumbnail) exists in the DOM but is hidden on desktop (display:none on  .product-gallery__thumbnail-list); it appears on mobile. Clicking any gallery image opens a PhotoSwipe (.pswp) lightbox with prev/close/next buttons (.pswp__button) and click-to-zoom. Pagination uses numbered pages with AJAX: URLs update to ?page=N, href='#' on pagination <a> tags. Platform confirmed as Shopify (myshopify domain: aubade-int.myshopify.com), theme uses custom elements (variant-picker, product-gallery, product-card). No active bot protection observed during browsing session (captcha-bootstrap script present but not triggered)."
+  }

@@ -885,6 +885,7 @@ function createImageSelectionUI(images) {
       <button id="save-selected-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer;">Save Selected</button>
       <button id="select-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #4285F4; color: white; cursor: pointer;">Select All</button>
       <button id="deselect-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Deselect All</button>
+      <button id="save-page-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer;">Save Page Images</button>
       <button id="take-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Visible)</button>
       <button id="take-full-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Full Page)</button>
       <button id="close-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Close</button>
@@ -962,6 +963,69 @@ document.body.appendChild(container);
     checkboxes.forEach(cb => cb.checked = false);
   });
   
+  document.getElementById('save-page-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('save-page-btn');
+    const origText = btn.textContent;
+    const origBg = '#34A853';
+
+    const setStatus = (text, isError = false) => {
+      btn.textContent = text;
+      btn.style.background = isError ? '#EA4335' : origBg;
+    };
+
+    try {
+      btn.disabled = true;
+      setStatus('Scrolling...');
+
+      const MAX_SCROLL_ROUNDS = 20;
+      const MAX_SCROLL_MS = 30_000;
+      const scrollStart = Date.now();
+      let prevH = 0, rounds = 0;
+
+      while (rounds < MAX_SCROLL_ROUNDS && Date.now() - scrollStart < MAX_SCROLL_MS) {
+        const totalH = document.documentElement.scrollHeight;
+        if (totalH === prevH) break;
+        prevH = totalH;
+        for (let y = window.scrollY; y < totalH; y += window.innerHeight) {
+          window.scrollTo(0, y);
+          await new Promise(r => setTimeout(r, 400));
+        }
+        rounds++;
+      }
+      window.scrollTo(0, 0);
+      await new Promise(r => setTimeout(r, 500));
+
+      setStatus('Scanning...');
+      const allImages = findAllImages().filter(
+        img => !ignoredImageUrls.has(normalizeImageUrl(img.url))
+      );
+
+      setStatus('Validating...');
+      const valid = await checkImagesFileSizes(allImages);
+
+      if (!valid || valid.length === 0) {
+        setStatus('No images found', true);
+        setTimeout(() => {
+          btn.textContent = origText;
+          btn.style.background = origBg;
+          btn.disabled = false;
+        }, 3000);
+        return;
+      }
+
+      setStatus(`Saving ${valid.length}...`);
+      saveImagesToStorage(valid);
+      // Button stays disabled to prevent duplicate saves
+    } catch (err) {
+      setStatus(`Error: ${err.message}`, true);
+      setTimeout(() => {
+        btn.textContent = origText;
+        btn.style.background = origBg;
+        btn.disabled = false;
+      }, 5000);
+    }
+  });
+
   document.getElementById('save-selected-btn').addEventListener('click', async () => {
     const saveBtn = document.getElementById('save-selected-btn');
     const selectedImages = [];
@@ -2150,8 +2214,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try { sendResponse({received: true}); } catch (e) {}
     return true;
   }
-  // Keep the message channel open for async responses
-  return true;
 });
 
 // Log that the content script has loaded
