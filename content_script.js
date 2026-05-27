@@ -26,15 +26,7 @@ function normalizeImageUrl(url) {
 
 // Extract a clean filename from a URL (strips query, hash, path prefix)
 function filenameFromUrl(url, fallback) {
-  try {
-    const pathname = new URL(url).pathname;
-    const name = decodeURIComponent(pathname.substring(pathname.lastIndexOf('/') + 1))
-      .split('?')[0].split('#')[0].replace(/[\/\\]/g, '_');
-    if (name) return name;
-  } catch (e) { /* fall through */ }
-  const parts = url.split('/');
-  const name = parts[parts.length - 1].split('?')[0].split('#')[0].replace(/[\/\\]/g, '_');
-  return name || fallback || `image_${Date.now()}.jpg`;
+  return globalThis.PageImageSaverHelpers.filenameFromUrl(url, fallback);
 }
 
 // Function to get the current domain
@@ -986,7 +978,8 @@ document.body.appendChild(container);
         const totalH = document.documentElement.scrollHeight;
         if (totalH === prevH) break;
         prevH = totalH;
-        for (let y = window.scrollY; y < totalH; y += window.innerHeight) {
+        const step = globalThis.PageImageSaverHelpers.getScrollStep(window.innerHeight);
+        for (let y = window.scrollY; y < totalH; y += step) {
           window.scrollTo(0, y);
           await new Promise(r => setTimeout(r, 400));
         }

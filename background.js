@@ -1,3 +1,5 @@
+import './extension_helpers.js';
+
 //background.js
 // Debugging helper - will show a notification with download paths
 function showSavePathNotification(path) {
@@ -587,7 +589,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sender.tab.windowId,
       { format: 'png', quality: 100 },
       dataUrl => {
-        sendResponse({ dataUrl });
+        sendResponse(globalThis.PageImageSaverHelpers.buildCaptureVisibleTabResponse(chrome.runtime.lastError, dataUrl));
       }
     );
     return true; // Keep the message channel open for async response
@@ -1988,4 +1990,3 @@ const browserType = detectBrowser();
 console.log(`Page Image Saver background script loaded in ${browserType} browser.`);
 debugLog(`🌐 Browser detected: ${browserType}`);
 debugLog(`🔍 Full User Agent: ${navigator.userAgent}`);
-

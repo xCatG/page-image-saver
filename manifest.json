@@ -33,7 +33,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["screenshot.js", "content_script.js"],
+      "js": ["extension_helpers.js", "screenshot.js", "content_script.js"],
       "run_at": "document_end"
     }
   ],

@@ -15,11 +15,12 @@
       const attempt = (retriesLeft) => new Promise((resolve, reject) => {
         chrome.runtime.sendMessage({ action: 'captureVisibleTab' }, response => {
           const err = chrome.runtime.lastError;
-          if (err) {
-            if (retriesLeft > 0 && err.message && err.message.includes('quota')) {
+          if (err || (response && response.error)) {
+            const errMsg = err ? err.message : response.error;
+            if (retriesLeft > 0 && errMsg && errMsg.includes('quota')) {
               setTimeout(() => attempt(retriesLeft - 1).then(resolve, reject), 600);
             } else {
-              reject(new Error(err.message || 'captureVisibleTab failed'));
+              reject(new Error(errMsg || 'captureVisibleTab failed'));
             }
             return;
           }
@@ -40,9 +41,10 @@
 
       const dpr = window.devicePixelRatio || 1;
       const viewW = window.innerWidth;
-      const viewH = window.innerHeight;
+      const viewH = globalThis.PageImageSaverHelpers.getScrollStep(window.innerHeight);
       const totalW = document.documentElement.scrollWidth;
       const totalH = document.documentElement.scrollHeight;
+      const maxH = globalThis.PageImageSaverHelpers.getSafeCanvasHeight(totalH, dpr);
       const origScrollX = window.scrollX;
       const origScrollY = window.scrollY;
 
@@ -65,9 +67,7 @@
       const observer = new MutationObserver(mutations => {
         for (const m of mutations) {
           for (const node of m.addedNodes) {
-            if (node.nodeType !== 1) continue;
-            hideFixedEl(node);
-            node.querySelectorAll('*').forEach(hideFixedEl);
+            globalThis.PageImageSaverHelpers.getElementsForFixedCheck(node).forEach(hideFixedEl);
           }
           if (m.type === 'attributes' && m.target.nodeType === 1) {
             hideFixedEl(m.target);
@@ -78,7 +78,7 @@
 
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(totalW * dpr);
-      canvas.height = Math.round(totalH * dpr);
+      canvas.height = Math.round(maxH * dpr);
       const ctx = canvas.getContext('2d');
 
       const loadImage = (dataUrl) => new Promise((resolve, reject) => {
@@ -103,7 +103,7 @@
           // Draw at actual scroll position (overlap on last strip is fine — same pixels)
           ctx.drawImage(img, 0, Math.round(scrollY * dpr));
 
-          if (y + viewH >= totalH) break;
+          if (y + viewH >= maxH) break;
           y += viewH;
         }
       } finally {

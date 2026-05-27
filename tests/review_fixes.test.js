@@ -1,0 +1,96 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const helpers = require('../extension_helpers.js');
+
+test('filenameFromUrl returns fallback for missing or non-string URLs', () => {
+  assert.equal(helpers.filenameFromUrl(null, 'fallback.jpg'), 'fallback.jpg');
+  assert.equal(helpers.filenameFromUrl(undefined, 'fallback.jpg'), 'fallback.jpg');
+  assert.equal(helpers.filenameFromUrl({ url: 'https://example.test/a.jpg' }, 'fallback.jpg'), 'fallback.jpg');
+});
+
+test('filenameFromUrl extracts a clean filename from valid URLs', () => {
+  assert.equal(
+    helpers.filenameFromUrl('https://example.test/images/product%201.jpg?width=1200#hero'),
+    'product 1.jpg'
+  );
+});
+
+test('getScrollStep falls back when viewport height is unavailable', () => {
+  assert.equal(helpers.getScrollStep(0), 500);
+  assert.equal(helpers.getScrollStep(undefined), 500);
+  assert.equal(helpers.getScrollStep(720), 720);
+});
+
+test('getSafeCanvasHeight caps full-page screenshots to browser-safe dimensions', () => {
+  assert.equal(helpers.getSafeCanvasHeight(100000, 1), 16384);
+  assert.equal(helpers.getSafeCanvasHeight(100000, 2), 8192);
+  assert.equal(helpers.getSafeCanvasHeight(900, 2), 900);
+});
+
+test('getElementsForFixedCheck inspects added nodes and immediate children only', () => {
+  const grandchild = { nodeType: 1, children: [] };
+  const child = { nodeType: 1, children: [grandchild] };
+  const node = { nodeType: 1, children: [child] };
+
+  assert.deepEqual(helpers.getElementsForFixedCheck(node), [node, child]);
+});
+
+test('buildCaptureVisibleTabResponse propagates background capture errors', () => {
+  assert.deepEqual(
+    helpers.buildCaptureVisibleTabResponse({ message: 'quota exceeded' }, undefined),
+    { error: 'quota exceeded' }
+  );
+  assert.deepEqual(
+    helpers.buildCaptureVisibleTabResponse(null, 'data:image/png;base64,abc'),
+    { dataUrl: 'data:image/png;base64,abc' }
+  );
+});
+
+test('captureVisiblePart retries quota errors returned by the background script', async () => {
+  const screenshotPath = path.join(__dirname, '..', 'screenshot.js');
+  const source = fs.readFileSync(screenshotPath, 'utf8');
+  let attempts = 0;
+
+  const sandbox = {
+    console,
+    setTimeout: (fn) => fn(),
+    window: {},
+    document: {
+      getElementById: () => null,
+      createElement: () => ({ style: {}, getContext: () => ({}) }),
+      documentElement: { scrollWidth: 100, scrollHeight: 100 },
+      body: {}
+    },
+    chrome: {
+      runtime: {
+        lastError: null,
+        sendMessage: (_message, callback) => {
+          attempts += 1;
+          if (attempts === 1) {
+            callback({ error: 'quota exceeded' });
+          } else {
+            callback({ dataUrl: 'data:image/png;base64,ok' });
+          }
+        }
+      }
+    },
+    Image: function Image() {},
+    MutationObserver: function MutationObserver() {
+      this.observe = () => {};
+      this.disconnect = () => {};
+    },
+    getComputedStyle: () => ({ position: 'static' })
+  };
+  sandbox.PageImageSaverHelpers = helpers;
+  sandbox.globalThis = sandbox;
+
+  vm.runInNewContext(source, sandbox, { filename: screenshotPath });
+
+  const dataUrl = await sandbox.window.PageScreenshot.captureVisiblePart();
+  assert.equal(dataUrl, 'data:image/png;base64,ok');
+  assert.equal(attempts, 2);
+});
