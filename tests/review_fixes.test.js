@@ -50,6 +50,93 @@ test('buildCaptureVisibleTabResponse propagates background capture errors', () =
   );
 });
 
+test('buildGoldCaptureSettings enables local sidecar evidence under the configured base folder', () => {
+  const settings = {
+    useS3: true,
+    s3: {
+      region: 'us-west-2',
+      bucketName: 'private-bucket',
+      folderPath: 'existing/',
+      accessKeyId: 's3-key',
+      secretAccessKey: 's3-secret',
+      makePublic: true
+    },
+    r2: {
+      accountId: 'account-id',
+      bucketName: 'r2-bucket',
+      folderPath: 'existing/',
+      useApiToken: true,
+      accessKeyId: 'r2-key',
+      secretAccessKey: 'r2-secret',
+      apiToken: 'r2-token',
+      makePublic: true
+    },
+    local: {
+      enabled: false,
+      subfolderPerDomain: false,
+      saveJson: false,
+      baseFolder: 'Gold Evidence'
+    },
+    preserveFilenames: false,
+    minFileSize: 1234
+  };
+
+  const result = helpers.buildGoldCaptureSettings(settings);
+
+  assert.deepEqual(result.local, {
+    enabled: true,
+    subfolderPerDomain: true,
+    saveJson: true,
+    baseFolder: 'Gold Evidence'
+  });
+  assert.equal(result.preserveFilenames, false);
+  assert.equal(result.minFileSize, 1234);
+});
+
+test('buildGoldCaptureSettings removes cloud destinations, credentials, and public access', () => {
+  const result = helpers.buildGoldCaptureSettings({
+    useS3: false,
+    s3: {
+      region: 'us-west-2',
+      bucketName: 'private-bucket',
+      folderPath: 'existing/',
+      accessKeyId: 's3-key',
+      secretAccessKey: 's3-secret',
+      makePublic: true
+    },
+    r2: {
+      accountId: 'account-id',
+      bucketName: 'r2-bucket',
+      folderPath: 'existing/',
+      useApiToken: true,
+      accessKeyId: 'r2-key',
+      secretAccessKey: 'r2-secret',
+      apiToken: 'r2-token',
+      makePublic: true
+    },
+    local: { baseFolder: 'PageImageSaver' }
+  });
+
+  assert.deepEqual(result.s3, {
+    region: '',
+    bucketName: '',
+    folderPath: '',
+    accessKeyId: '',
+    secretAccessKey: '',
+    makePublic: false
+  });
+  assert.deepEqual(result.r2, {
+    accountId: '',
+    bucketName: '',
+    folderPath: '',
+    useApiToken: false,
+    accessKeyId: '',
+    secretAccessKey: '',
+    apiToken: '',
+    makePublic: false
+  });
+});
+
 test('captureVisiblePart retries quota errors returned by the background script', async () => {
   const screenshotPath = path.join(__dirname, '..', 'screenshot.js');
   const source = fs.readFileSync(screenshotPath, 'utf8');

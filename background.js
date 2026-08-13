@@ -601,11 +601,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     console.log(`Processing screenshot: ${filename}`);
     
-    // Check if we have valid settings before proceeding
-    if (!isConfigValid()) {
+    // Check if cloud storage is valid or local download is enabled
+    if (!isConfigValid() && (!CONFIG.local || !CONFIG.local.enabled)) {
       sendResponse({
         success: false, 
-        error: 'Storage settings not configured. Please go to extension settings.'
+        error: 'Storage settings not configured and local download is disabled. Please go to extension settings.'
       });
       
       // Open settings page

@@ -45,12 +45,49 @@
     return { error: 'Failed to capture screenshot' };
   }
 
+  function buildGoldCaptureSettings(settings) {
+    const current = settings || {};
+    const local = current.local || {};
+
+    return {
+      ...current,
+      s3: {
+        ...(current.s3 || {}),
+        region: '',
+        bucketName: '',
+        folderPath: '',
+        accessKeyId: '',
+        secretAccessKey: '',
+        makePublic: false
+      },
+      r2: {
+        ...(current.r2 || {}),
+        accountId: '',
+        bucketName: '',
+        folderPath: '',
+        useApiToken: false,
+        accessKeyId: '',
+        secretAccessKey: '',
+        apiToken: '',
+        makePublic: false
+      },
+      local: {
+        ...local,
+        enabled: true,
+        subfolderPerDomain: true,
+        saveJson: true,
+        baseFolder: local.baseFolder || 'PageImageSaver'
+      }
+    };
+  }
+
   const helpers = {
     filenameFromUrl,
     getScrollStep,
     getSafeCanvasHeight,
     getElementsForFixedCheck,
-    buildCaptureVisibleTabResponse
+    buildCaptureVisibleTabResponse,
+    buildGoldCaptureSettings
   };
 
   root.PageImageSaverHelpers = helpers;

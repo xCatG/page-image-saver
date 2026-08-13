@@ -58,6 +58,28 @@ The extension includes a Settings page where you can configure your storage cred
 - **Add Page Metadata**: Include source URL and other metadata with uploads
 - **Maximum Concurrent Uploads**: Control how many files upload at once
 
+### lingerie_trends Gold Capture (local only)
+
+In **Local Download Settings**, first set **Base Folder Name** to the folder you want inside Chrome's Downloads directory, then click **Use lingerie_trends Gold Capture**. The preset is saved immediately and:
+
+- saves each selected image locally;
+- writes a same-basename JSON sidecar containing `sourceUrl`, `url`, dimensions, content type, size, and capture time;
+- groups evidence under `<base-folder>/<source-domain>/`; and
+- clears S3/R2 destinations and credentials and disables public uploads.
+
+The base folder is not a system path: Chrome's Downloads API resolves it relative to the configured Downloads directory. For example, a base folder of `PageImageSaver` produces `Downloads/PageImageSaver/www.example.com/image.jpg` and the matching `image.json`.
+
+From the `lingerie_trends` repository, hand that domain folder to the gold ingester:
+
+```bash
+python3 scripts/ingest_page_image_saver_gold.py \
+  --domain www.example.com \
+  --input-root /path/to/Downloads/PageImageSaver/www.example.com \
+  --output /path/to/gold-run
+```
+
+Gold selection remains manual. This preset does not install or invoke `lingerie_trends`, configure cloud storage, upload publicly, or manage storage credentials.
+
 ## Usage
 
 ### Finding and Saving Images
