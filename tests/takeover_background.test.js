@@ -126,6 +126,30 @@ test('late pause is rechecked when automatic image acquisition begins', async ()
   assert.deepEqual(b.imageRequests, []);
 });
 
+test('late pause prevents Downloads publication after data conversion', async () => {
+  const b = captureBridge();
+  b.sandbox.CONFIG.receiver.enabled = false;
+  b.sandbox.Blob = Blob;
+  let release;
+  const saved = [];
+  b.sandbox.blobToDataUrl = async () => new Promise(resolve => { release = () => resolve('data:example'); });
+  b.sandbox.PageImageSaverHelpers.exportProductCapture = async (_payload, io) => {
+    await io.saveBytes('PageImageSaver/complete.json', new Uint8Array([1]));
+  };
+  b.sandbox.PageImageSaverHelpers.saveCaptureDownload = async (_chrome, _url, filename) => {
+    saved.push(filename);
+  };
+  const pending = b.dispatch({action: 'captureProductLocal', autoPageLoad: true,
+    payload: {identity: {domain: 'shop.example.test', product_url: black}}}, 8);
+  while (!release) await Promise.resolve();
+  b.stored.catalogTakeoverTabId = 8;
+  b.stored.catalogTakeoverRun.status = 'stopped';
+  release();
+  const result = await pending;
+  assert.equal(result.success, false);
+  assert.deepEqual(saved, []);
+});
+
 test('manual capture and unrelated same-site tab retain capture access', async () => {
   const b = captureBridge();
   b.stored.catalogTakeoverRun.status = 'stopped';

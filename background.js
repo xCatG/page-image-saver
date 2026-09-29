@@ -226,6 +226,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     saveBytes: async (filename, bytes) => {
       await assertCaptureAuthority();
       const dataUrl = await blobToDataUrl(new Blob([bytes], {type: 'application/octet-stream'}));
+      await assertCaptureAuthority();
       await helpers.saveCaptureDownload(chrome, dataUrl, filename);
     }
   });
