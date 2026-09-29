@@ -64,10 +64,11 @@ In **Local Download Settings**, first set **Base Folder Name** to the folder you
 
 - saves each selected image locally;
 - writes a same-basename JSON sidecar containing `sourceUrl`, `url`, dimensions, content type, size, and capture time;
-- groups evidence under `<base-folder>/<source-domain>/`; and
+- groups evidence under `<base-folder>/<source-domain>/` by default; and
 - clears S3/R2 destinations and credentials and disables public uploads.
 
 The base folder is not a system path: Chrome's Downloads API resolves it relative to the configured Downloads directory. For example, a base folder of `PageImageSaver` produces `Downloads/PageImageSaver/www.example.com/image.jpg` and the matching `image.json`.
+If a site already has a custom folder name in the sidebar, the preset keeps that name. Point `--input-root` to the folder Chrome actually used.
 
 From the `lingerie_trends` repository, hand that domain folder to the gold ingester:
 

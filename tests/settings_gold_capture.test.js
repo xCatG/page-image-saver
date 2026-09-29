@@ -29,7 +29,7 @@ class FakeElement {
   querySelectorAll() { return []; }
 }
 
-test('gold capture preset saves a local-only sidecar configuration from the settings page', () => {
+function loadSettingsPage({ writeError = null } = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'settings.js'), 'utf8');
   const elements = new Map();
   const getElement = id => {
@@ -86,7 +86,11 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
           }),
           set: (value, callback) => {
             writes.push(value);
-            if (callback) callback();
+            if (callback) {
+              sandbox.chrome.runtime.lastError = writeError ? { message: writeError } : null;
+              callback();
+              sandbox.chrome.runtime.lastError = null;
+            }
           }
         }
       },
@@ -96,6 +100,11 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
 
   vm.runInNewContext(source, sandbox, { filename: 'settings.js' });
   onReady();
+  return { getElement, writes };
+}
+
+test('gold capture preset saves a local-only sidecar configuration from the settings page', () => {
+  const { getElement, writes } = loadSettingsPage();
   getElement('gold-capture-preset').dispatchEvent({ type: 'click' });
 
   assert.equal(writes.length, 1);
@@ -114,4 +123,17 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
   assert.equal(saved.r2.bucketName, '');
   assert.equal(saved.r2.apiToken, '');
   assert.equal(saved.r2.makePublic, false);
+});
+
+test('gold capture preset leaves old cloud fields visible and reports sync write failure', () => {
+  const { getElement, writes } = loadSettingsPage({ writeError: 'QUOTA_BYTES quota exceeded' });
+  getElement('gold-capture-preset').dispatchEvent({ type: 'click' });
+
+  assert.equal(writes.length, 1);
+  assert.equal(getElement('s3-bucket').value, 'bucket');
+  assert.equal(getElement('s3-access-key').value, 'access');
+  assert.equal(getElement('local-enabled').checked, false);
+  assert.match(getElement('status-message').innerHTML, /alert-error/);
+  assert.match(getElement('status-message').innerHTML, /previous storage settings remain active/i);
+  assert.doesNotMatch(getElement('status-message').innerHTML, /applied and saved/i);
 });

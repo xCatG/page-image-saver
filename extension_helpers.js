@@ -24,15 +24,37 @@
     return viewportHeight > 0 ? viewportHeight : 500;
   }
 
-  function getSafeCanvasHeight(totalHeight, dpr, maxCanvasEdge = 16384) {
-    const safeDpr = dpr > 0 ? dpr : 1;
-    return Math.min(totalHeight, Math.floor(maxCanvasEdge / safeDpr));
+  function getSafeCanvasSize(totalWidth, totalHeight, dpr, maxCanvasEdge = 16384, maxCanvasPixels = 67108864) {
+    const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+    const width = Math.round(totalWidth * safeDpr);
+    if (!Number.isFinite(width) || width < 1 || width > maxCanvasEdge) {
+      throw new Error(`Screenshot canvas width exceeds the supported ${maxCanvasEdge}-pixel limit`);
+    }
+    const captureHeight = Math.min(
+      totalHeight,
+      Math.floor(maxCanvasEdge / safeDpr),
+      Math.floor(Math.floor(maxCanvasPixels / width) / safeDpr)
+    );
+    const height = Math.round(captureHeight * safeDpr);
+    if (!Number.isFinite(height) || height < 1) {
+      throw new Error('Screenshot canvas height is too small for this page width and display scale');
+    }
+    return { width, height, captureHeight };
   }
 
-  function getElementsForFixedCheck(node) {
-    if (!node || node.nodeType !== 1) return [];
-    const children = node.children ? Array.from(node.children) : [];
-    return [node, ...children];
+  function* getElementsForFixedCheck(node, seen = new WeakSet()) {
+    const stack = [node];
+    while (stack.length) {
+      const current = stack.pop();
+      if (!current || current.nodeType !== 1 || seen.has(current)) continue;
+      seen.add(current);
+      yield current;
+      if (current.children) {
+        for (let i = current.children.length - 1; i >= 0; i--) {
+          stack.push(current.children[i]);
+        }
+      }
+    }
   }
 
   function buildCaptureVisibleTabResponse(lastError, dataUrl) {
@@ -84,7 +106,7 @@
   const helpers = {
     filenameFromUrl,
     getScrollStep,
-    getSafeCanvasHeight,
+    getSafeCanvasSize,
     getElementsForFixedCheck,
     buildCaptureVisibleTabResponse,
     buildGoldCaptureSettings
