@@ -78,6 +78,13 @@ test('preview stores observations but only explicit take over starts navigation'
   assert.deepEqual(r.visits, [first]);
 });
 
+test('new preview cannot inherit a completed run listing seed', async () => {
+  const r = rig({});
+  r.memory.run = {status: 'complete', domain: site.domain, generation: 1, seedUrl: first};
+  await r.runner().preview(site, {...braPage, imageCount: 2});
+  await assert.rejects(() => r.runner().start(), /preview a listing/);
+});
+
 test('page-count evidence, unique URLs and exclusion accounting complete a run', async () => {
   const r = rig({[first]: listing1, [second]: listing2, [bra]: braPage,
     [red]: redPage, [sleep]: sleepPage});

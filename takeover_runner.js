@@ -85,7 +85,8 @@
         status: 'preview', domain, config, previews: [...previews.filter(x => x.url !== url), entry],
         preview: {endCheckConfigured: !!config.listing.endCheck,
           receiverRequired: 'Verified skip and catalog completion require a configured reachable local receiver.'},
-        seedUrl: page.kind === 'listing' ? url : existing?.seedUrl || null,
+        seedUrl: page.kind === 'listing' ? url :
+          existing?.status === 'preview' && existing.domain === domain ? existing.seedUrl : null,
         listings: {queue: [], visited: [], discoveryComplete: false}, products: [],
         current: null, lastNavigationStarted: null, loadFailures: {}, reason: null};
       return save(run);
