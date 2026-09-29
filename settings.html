@@ -363,6 +363,10 @@
     <!-- Local Download Settings -->
     <div class="form-section">
       <h2>Local Download Settings</h2>
+      <div class="input-group">
+        <button type="button" id="gold-capture-preset" class="primary-button">Use lingerie_trends Gold Capture</button>
+        <div class="help-text">Saves images and JSON sidecars locally by source domain. Clears cloud destinations and credentials, and disables public uploads.</div>
+      </div>
       <div class="checkbox-group">
         <input type="checkbox" id="local-enabled" name="localEnabled">
         <label for="local-enabled">Enable saving to your local Downloads folder</label>
@@ -437,6 +441,7 @@
     </div>
   </form>
 
+  <script src="extension_helpers.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>
