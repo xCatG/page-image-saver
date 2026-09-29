@@ -20,7 +20,7 @@
     const category = String(product?.category || '').trim();
     const evidence = category.toLowerCase();
     const title = name.toLowerCase();
-    const excluded = /\b(swimwear|bikini|maillot de bain|sleepwear|nightwear|pyjamas?|pajamas?|menswear|men's|men’s|ready.to.wear|apparel)\b/i.test(`${evidence} ${title}`);
+    const excluded = /\b(swimwear|bikini|maillot de bain|sleepwear|nightwear|pyjamas?|pajamas?|menswear|mens?|men's|men’s|ready.to.wear|apparel)\b/i.test(`${evidence} ${title}`);
     const intimate = /\b(lingerie|bras?|sports? bras?|panties|briefs|thongs|corsets?|bodies|bodysuits?|culottes?|soutiens?.gorge)\b/i.test(`${evidence} ${title}`);
     if (excluded && !intimate) return {decision: 'exclude', reason: `product/category evidence: ${category || name}`};
     if (excluded) return {decision: 'review', reason: `mixed category and product evidence: ${category}; ${name}`};

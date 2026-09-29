@@ -251,6 +251,10 @@ test('scope uses product evidence and leaves uncertain mixed use as review', () 
   assert.equal(classifyTakeoverScope({name: 'Mystery Set', category: ''}).decision, 'review');
   assert.equal(classifyTakeoverScope({name: 'Swimwear Bikini Bra', category: ''}).decision, 'review');
   assert.equal(classifyTakeoverScope({name: "Men's Briefs", category: ''}).decision, 'review');
+  assert.equal(classifyTakeoverScope({name: 'Men Briefs', category: ''}).decision, 'review');
+  assert.equal(classifyTakeoverScope({name: 'Men Bra', category: ''}).decision, 'review');
+  assert.equal(classifyTakeoverScope({name: 'Mens Briefs', category: ''}).decision, 'review');
+  assert.equal(classifyTakeoverScope({name: 'Lace Bra', category: 'Men'}).decision, 'review');
   assert.equal(classifyTakeoverScope({name: 'Women Briefs', category: ''}).decision, 'include');
 });
 
