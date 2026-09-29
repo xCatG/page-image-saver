@@ -71,6 +71,7 @@ function captureBridge() {
   const acquisitions = [];
   const imageRequests = [];
   b.sandbox.CONFIG = {receiver: {enabled: true}};
+  b.sandbox.requireSettingsReady = async () => {};
   b.sandbox.fetch = async url => {
     imageRequests.push(url);
     return {ok: true, url, arrayBuffer: async () => new Uint8Array([1]).buffer};

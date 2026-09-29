@@ -106,7 +106,7 @@ const takeoverIo = {
     title: 'Catalog take-over paused', message: reason.slice(0, 200), priority: 1}),
   alarm: async when => {
     chrome.alarms.create(TAKEOVER_ALARM, {when, periodInMinutes: 0.5});
-    setTimeout(() => { void takeoverRunner.tick().catch(console.error); }, Math.max(0, when - Date.now()));
+    setTimeout(() => { void tickAfterSettingsReady().catch(console.error); }, Math.max(0, when - Date.now()));
   },
   clearAlarm: async () => chrome.alarms.clear(TAKEOVER_ALARM),
   load: async url => {
@@ -140,19 +140,24 @@ const takeoverIo = {
     return reply.result;
   },
   verify: async identity => {
+    await requireSettingsReady();
     if (CONFIG.receiver?.enabled !== true) throw new Error('local receiver is unavailable for verification');
     return globalThis.PageImageSaverHelpers.captureWithReceiver({identity}, CONFIG.receiver,
       {fetch: (...args) => fetch(...args), verifyOnly: true});
   }
 };
 const takeoverRunner = globalThis.PageImageSaverTakeover.createTakeoverRunner(takeoverIo);
+async function tickAfterSettingsReady() {
+  await requireSettingsReady();
+  return takeoverRunner.tick();
+}
 
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === TAKEOVER_ALARM) void takeoverRunner.tick().catch(console.error);
+  if (alarm.name === TAKEOVER_ALARM) void tickAfterSettingsReady().catch(console.error);
 });
 chrome.runtime.onStartup.addListener(() => {
-  void takeoverRunner.read().then(run => {
-    if (run?.status === 'running') return takeoverRunner.tick();
+  void requireSettingsReady().then(() => takeoverRunner.read()).then(run => {
+    if (run?.status === 'running') return tickAfterSettingsReady();
   }).catch(console.error);
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -184,15 +189,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'takeoverPause') return takeoverRunner.pause();
     if (message.action === 'takeoverStop') return takeoverRunner.stop();
     if (message.action === 'takeoverResume') {
+      await requireSettingsReady();
       const run = await takeoverRunner.resume();
-      void takeoverRunner.tick().catch(console.error);
+      void tickAfterSettingsReady().catch(console.error);
       return run;
     }
+    await requireSettingsReady();
     if (CONFIG.receiver?.enabled !== true) {
       throw new Error('Configure the local receiver before Take over; verified skips require it.');
     }
     const run = await takeoverRunner.start();
-    void takeoverRunner.tick().catch(console.error);
+    void tickAfterSettingsReady().catch(console.error);
     return run;
   })().then(run => sendResponse({success: true, run, summary: globalThis.PageImageSaverTakeover.summarizeTakeover(run)}))
     .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
@@ -219,7 +226,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const response = await fetch(url, {credentials: 'include'});
     if (!response.ok) throw new Error(`image HTTP ${response.status}: ${url}`);
     const bytes = new Uint8Array(await response.arrayBuffer());
-    return {bytes, fetched_url: response.url};
+    return {bytes, contentType: response.headers?.get?.('content-type') || null,
+      fetched_url: response.url};
   };
   const download = () => helpers.exportProductCapture(message.payload, {
     fetchImage,
@@ -231,6 +239,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   });
   const save = (async () => {
+    await requireSettingsReady();
     await assertCaptureAuthority();
     if (message.runBinding) {
       const binding = message.runBinding;
@@ -423,19 +432,33 @@ const DEFAULT_CONFIG = {
 // Store the current configuration (will be loaded from storage)
 let CONFIG = { ...DEFAULT_CONFIG };
 
-// Load settings from storage when the extension starts
-chrome.storage.sync.get('imageUploaderSettings', (result) => {
-  if (result.imageUploaderSettings) {
-    CONFIG = result.imageUploaderSettings;
-    console.log('Settings loaded from storage');
-  } else {
-    console.log('No saved settings found, using defaults');
-  }
+// Receiver decisions must wait for the initial settings read. A storage error
+// settles the gate and leaves persisted capture evidence untouched.
+let settingsLoadError = null;
+let settingsChanged = false;
+const settingsReady = new Promise(resolve => {
+  chrome.storage.sync.get('imageUploaderSettings', result => {
+    if (chrome.runtime.lastError && !settingsChanged) {
+      settingsLoadError = new Error(chrome.runtime.lastError.message || 'settings unavailable');
+    } else if (!settingsChanged && result?.imageUploaderSettings) {
+      CONFIG = result.imageUploaderSettings;
+      console.log('Settings loaded from storage');
+    } else if (!settingsChanged) {
+      console.log('No saved settings found, using defaults');
+    }
+    resolve();
+  });
 });
+async function requireSettingsReady() {
+  await settingsReady;
+  if (settingsLoadError) throw settingsLoadError;
+}
 
 // Listen for settings changes
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'sync' && changes.imageUploaderSettings) {
+    settingsChanged = true;
+    settingsLoadError = null;
     CONFIG = changes.imageUploaderSettings.newValue;
     console.log('Settings updated');
   }

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const helpers = require('../extension_helpers.js');
 
 test('JSON-LD product extraction keeps recorded color, price, and currency', () => {
@@ -188,7 +189,7 @@ test('local export saves all evidence before publishing completion, with no clou
   };
   const record = await helpers.exportProductCapture(payload, {
     attemptId: 'test-attempt',
-    fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71]),
+    fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
       fetched_url: 'https://cdn.example.test/2048.png'}),
     saveBytes: async (path, bytes) => saved.push({path, bytes})
   });
@@ -199,6 +200,45 @@ test('local export saves all evidence before publishing completion, with no clou
   assert.equal(saved[3].path.endsWith('/complete.json'), true);
   assert.equal(JSON.parse(new TextDecoder().decode(saved[3].bytes)).evidence.images[0].sha256,
     record.evidence.images[0].sha256);
+});
+
+async function exportImageFixture(fetchedUrl, bytes, contentType) {
+  const saved = [];
+  const originalUrl = 'https://cdn.example.test/original/w=1024';
+  const record = await helpers.exportProductCapture({
+    identity: {domain: 'shop.example.test', product_url: 'https://shop.example.test/bra',
+      selected_color: 'Black', color_key: 'color'},
+    captured_at: '2026-09-29T12:00:00Z', scope: {decision: 'review', reason: 'fixture'},
+    product: {name: 'Fixture bra'}, html: '<html></html>', jsonld: [],
+    images: [{original_url: originalUrl, fetched_url: fetchedUrl}]
+  }, {attemptId: 'image-type',
+    fetchImage: async () => ({bytes, contentType, fetched_url: fetchedUrl}),
+    saveBytes: async (filename, data) => saved.push({filename, data})});
+  return {record, saved, originalUrl};
+}
+
+test('extensionless JPEG image keeps its actual format in saved filename and manifest', async () => {
+  const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0, 0]);
+  const url = 'https://cdn.example.test/bra/w=2048';
+  const {record, saved, originalUrl} = await exportImageFixture(url, bytes, 'image/jpeg');
+  const image = record.evidence.images[0];
+  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+  assert.equal(image.path, `images/0-${digest}.jpg`);
+  assert.equal(image.original_url, originalUrl);
+  assert.equal(image.fetched_url, url);
+  assert.equal(image.sha256, digest);
+  assert.equal(image.bytes, bytes.byteLength);
+  assert.equal(saved[2].filename.endsWith('/' + image.path), true);
+  assert.deepEqual(saved[2].data, bytes);
+  assert.equal(JSON.parse(new TextDecoder().decode(saved[3].data)).evidence.images[0].path, image.path);
+});
+
+test('misleading PNG URL and MIME cannot rename WebP bytes as PNG', async () => {
+  const bytes = new Uint8Array([82, 73, 70, 70, 4, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 32]);
+  const {record, saved} = await exportImageFixture(
+    'https://cdn.example.test/bra.png', bytes, 'image/png');
+  assert.match(record.evidence.images[0].path, /^images\/0-[a-f0-9]{64}\.webp$/);
+  assert.equal(saved[2].filename.endsWith('/' + record.evidence.images[0].path), true);
 });
 
 test('failed image fetch leaves an uncompleted export', async () => {

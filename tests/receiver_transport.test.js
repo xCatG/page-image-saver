@@ -30,7 +30,7 @@ test('receiver sends authenticated evidence before completion and returns verifi
         bytes: options.body.byteLength, status: 'stored'}, 201);
       return ok({status: 'published', captured_at: payload.captured_at}, 201);
     },
-    fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71])}),
+    fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])}),
     download: async () => { throw new Error('unexpected fallback'); },
     delay: async () => {}
   });
@@ -158,7 +158,7 @@ test('syntactically valid but invalid receiver replies never announce success', 
     await assert.rejects(() => helpers.captureWithReceiver(payload, settings, {
       fetch: async (url, options) => url.endsWith('/already') ? ok({complete: false}) :
         url.endsWith('/evidence') ? ok(badEvidence(options), 201) : ok({status: 'published', captured_at: payload.captured_at}, 201),
-      fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71])}),
+      fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])}),
       download: async () => { throw new Error('unexpected fallback'); }, delay: async () => {}
     }), /invalid receiver evidence response/);
   }
@@ -166,7 +166,7 @@ test('syntactically valid but invalid receiver replies never announce success', 
     fetch: async (url, options) => url.endsWith('/already') ? ok({complete: false}) :
       url.endsWith('/evidence') ? ok({sha256: options.headers['X-Content-SHA256'],
         bytes: options.body.byteLength, status: 'stored'}, 201) : ok({}),
-    fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71])}),
+    fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])}),
     download: async () => { throw new Error('unexpected fallback'); }, delay: async () => {}
   }), /invalid receiver completion response/);
 });

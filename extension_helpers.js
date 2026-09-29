@@ -216,6 +216,24 @@
     return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
   }
 
+  function captureImageExtension(bytes, contentType) {
+    const starts = signature => signature.every((byte, index) => bytes[index] === byte);
+    if (bytes.length >= 8 && starts([137, 80, 78, 71, 13, 10, 26, 10])) return 'png';
+    if (bytes.length >= 3 && starts([255, 216, 255])) return 'jpg';
+    if (bytes.length >= 12 && starts([82, 73, 70, 70]) &&
+        bytes[8] === 87 && bytes[9] === 69 && bytes[10] === 66 && bytes[11] === 80) return 'webp';
+    if (bytes.length >= 6 && starts([71, 73, 70, 56]) &&
+        [55, 57].includes(bytes[4]) && bytes[5] === 97) return 'gif';
+    if (bytes.length >= 12 && bytes[4] === 102 && bytes[5] === 116 &&
+        bytes[6] === 121 && bytes[7] === 112 && bytes[8] === 97 &&
+        bytes[9] === 118 && bytes[10] === 105 && [102, 115].includes(bytes[11])) return 'avif';
+    const type = String(contentType || '').split(';')[0].trim().toLowerCase();
+    const byType = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg',
+      'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif'};
+    if (byType[type]) return byType[type];
+    throw new Error('unsupported fetched image format');
+  }
+
   async function exportProductCapture(payload, io) {
     const encode = value => new TextEncoder().encode(value);
     const identityHash = await captureSha256(encode(JSON.stringify(captureIdentityKey(payload.identity)) + '\n'));
@@ -236,9 +254,7 @@
       const bytes = fetched.bytes instanceof Uint8Array ? fetched.bytes : new Uint8Array(fetched.bytes);
       if (!bytes.byteLength || bytes.byteLength > 25 * 1024 * 1024) throw new Error('invalid image byte count');
       const digest = await captureSha256(bytes);
-      const extension = /\.jpe?g(?:$|\?)/i.test(requested.fetched_url) ? 'jpg' :
-        /\.webp(?:$|\?)/i.test(requested.fetched_url) ? 'webp' :
-        /\.gif(?:$|\?)/i.test(requested.fetched_url) ? 'gif' : 'png';
+      const extension = captureImageExtension(bytes, fetched.contentType);
       const path = `images/${index}-${digest}.${extension}`;
       await io.saveBytes(`${base}/${path}`, bytes);
       images.push({path, sha256: digest, bytes: bytes.byteLength,
