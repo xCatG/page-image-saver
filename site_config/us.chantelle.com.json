@@ -1,0 +1,52 @@
+{
+    "domain": "us.chantelle.com",
+    "platform": "custom",
+    "botProtection": [],
+    "listing": {
+      "productLinkSelector": "a.product-card__link",
+      "pagination": {
+        "type": "numbered",
+        "nextSelector": "a[data-testid='Pagination_next-button']"
+      }
+    },
+    "colorVariantStrategy": "separate-url",
+    "allImagesSelector": ".pdp-product-images__image img.main-pdp-image",
+    "imageUrlPattern": "imagedelivery\\\\.net/[^/]+/prod/production/",
+    "product": {
+      "variantTriggers": [
+        {
+          "label": "color",
+          "affectsImages": true,
+          "selector": "a.variant-picker__variant-link",
+          "action": "click",
+          "waitAfterMs": 1500,
+          "waitForSelector": "img.main-pdp-image"
+        },
+        {
+          "label": "band-size",
+          "affectsImages": false,
+          "selector": ".top-size-picker-wrapper button:not(.size-guide__button-link)",
+          "action": "click",
+          "waitAfterMs": 300,
+          "waitForSelector": ""
+        },
+        {
+          "label": "cup-size",
+          "affectsImages": false,
+          "selector": ".bottom-size-picker-wrapper button",
+          "action": "click",
+          "waitAfterMs": 300,
+          "waitForSelector": ""
+        }
+      ],
+      "imageSelector": ".pdp-product-images__image:first-child img.main-pdp-image",
+      "imageUrlPattern": "imagedelivery\\\\.net/[^/]+/prod/production/[^/]+/[A-Z0-9-]+/[A-Z0-9-]+/w=\\\\d+",
+      "highResTransform": {
+        "description": "Cloudflare imagedelivery.net serves images with a width parameter; swap w=1024 for w=2048 to get double resolution",
+        "find": "/w=1024",
+        "replace": "/w=2048"
+      },
+      "lazyLoad": true
+    },
+    "notes": "Custom Next.js storefront (not Shopify/WooCommerce/Magento). Color swatches are <a> tags with role='option' inside a role='listbox' (.variant-picker__variant-list). Clicking a color navigates to a fully separate URL (e.g. /product/norah-comfort-underwire-bra-black) — full page reload, NOT in-place swap. No lightbox: clicking product images triggers an inline xy-zoom (class 'zoomed' added to .pdp-product-images__image, class 'zoomed-img' added to the img). No thumbnail strip — all images render in a 2-column vertical scroll grid. Lazy loading uses native loading='lazy' plus a .pdp-product-images__image--blurring class on not-yet-loaded frames. Some products have two color groups (Core + Sale), each with its own .variant-picker__variant-list. No bot protection detected."
+  }

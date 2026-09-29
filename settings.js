@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const r2TokenField = document.getElementById('r2-token-field');
   const settingsForm = document.getElementById('settings-form');
   const testConnectionBtn = document.getElementById('test-connection');
+  const goldCapturePresetBtn = document.getElementById('gold-capture-preset');
   const statusMessageDiv = document.getElementById('status-message');
   
   // Domain filter elements
@@ -48,6 +49,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Handle test connection button
   testConnectionBtn.addEventListener('click', () => {
     testConnection();
+  });
+
+  goldCapturePresetBtn.addEventListener('click', () => {
+    applyGoldCapturePreset();
   });
   
   // Handle domain filter actions
@@ -189,6 +194,42 @@ document.addEventListener('DOMContentLoaded', () => {
     const settings = buildSettingsFromForm();
     chrome.storage.sync.set({ imageUploaderSettings: settings }, () => {
       showStatusMessage('Settings saved successfully!', 'success');
+    });
+  }
+
+  function applyGoldCapturePreset() {
+    const settings = PageImageSaverHelpers.buildGoldCaptureSettings(buildSettingsFromForm());
+
+    chrome.storage.sync.set({ imageUploaderSettings: settings }, () => {
+      if (chrome.runtime.lastError) {
+        showStatusMessage('Could not save gold capture preset. Previous storage settings remain active.', 'error');
+        return;
+      }
+
+      document.getElementById('s3-region').value = settings.s3.region;
+      document.getElementById('s3-bucket').value = settings.s3.bucketName;
+      document.getElementById('s3-folder').value = settings.s3.folderPath;
+      document.getElementById('s3-access-key').value = settings.s3.accessKeyId;
+      document.getElementById('s3-secret-key').value = settings.s3.secretAccessKey;
+      document.getElementById('s3-public').checked = settings.s3.makePublic;
+
+      document.getElementById('r2-account-id').value = settings.r2.accountId;
+      document.getElementById('r2-bucket').value = settings.r2.bucketName;
+      document.getElementById('r2-folder').value = settings.r2.folderPath;
+      document.getElementById('r2-auth-api-keys').checked = true;
+      document.getElementById('r2-auth-token').checked = false;
+      document.getElementById('r2-access-key').value = settings.r2.accessKeyId;
+      document.getElementById('r2-secret-key').value = settings.r2.secretAccessKey;
+      document.getElementById('r2-api-token').value = settings.r2.apiToken;
+      document.getElementById('r2-public').checked = settings.r2.makePublic;
+      document.getElementById('r2-auth-api-keys').dispatchEvent(new Event('change'));
+
+      document.getElementById('local-enabled').checked = settings.local.enabled;
+      document.getElementById('local-base-folder').value = settings.local.baseFolder;
+      document.getElementById('local-subfolder').checked = settings.local.subfolderPerDomain;
+      document.getElementById('local-save-json').checked = settings.local.saveJson;
+
+      showStatusMessage('lingerie_trends gold capture preset applied and saved.', 'success');
     });
   }
 

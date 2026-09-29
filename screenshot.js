@@ -10,33 +10,174 @@
     // Store current scroll position
     originalScrollPos: 0,
     
-    // Capture visible part of the page
+    // Capture visible part of the page using Chrome API, with retry on quota error
     captureVisiblePart: function() {
-      return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage({
-          action: 'captureVisibleTab'
-        }, response => {
+      const attempt = (retriesLeft) => new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ action: 'captureVisibleTab' }, response => {
+          const err = chrome.runtime.lastError;
+          if (err || (response && response.error)) {
+            const errMsg = err ? err.message : response.error;
+            if (retriesLeft > 0 && errMsg && errMsg.includes('quota')) {
+              setTimeout(() => attempt(retriesLeft - 1).then(resolve, reject), 600);
+            } else {
+              reject(new Error(errMsg || 'captureVisibleTab failed'));
+            }
+            return;
+          }
           if (response && response.dataUrl) {
             resolve(response.dataUrl);
           } else {
-            reject(new Error('Failed to capture screenshot'));
+            reject(new Error(response?.error || 'Failed to capture screenshot'));
           }
         });
       });
+      return attempt(3);
+    },
+
+    // Capture the full page using scroll-and-stitch
+    captureFullPage: async function() {
+      const container = document.getElementById('image-selector-container');
+      if (container) container.style.display = 'none';
+
+      const dpr = window.devicePixelRatio || 1;
+      const viewW = window.innerWidth;
+      const viewH = globalThis.PageImageSaverHelpers.getScrollStep(window.innerHeight);
+      const totalW = document.documentElement.scrollWidth;
+      const totalH = document.documentElement.scrollHeight;
+      const origScrollX = window.scrollX;
+      const origScrollY = window.scrollY;
+
+      // Hide fixed/sticky elements so they don't repeat in every strip.
+      // Also watch for late-appearing ones (cookie banners, chat widgets, etc.)
+      const hiddenEls = new Set();
+
+      const hideFixedEl = (el) => {
+        if (hiddenEls.has(el)) return;
+        const pos = getComputedStyle(el).position;
+        if (pos === 'fixed' || pos === 'sticky') {
+          el.dataset._screenshotHidden = el.style.visibility;
+          el.style.visibility = 'hidden';
+          hiddenEls.add(el);
+        }
+      };
+
+      document.querySelectorAll('*').forEach(hideFixedEl);
+
+      const pendingScans = [];
+      const scannedNodes = new WeakSet();
+      let scanPromise = null;
+      let scanCancelled = false;
+      const scanAddedNodes = async () => {
+        let batchSize = 0;
+        while (!scanCancelled && pendingScans.length) {
+          const next = pendingScans[0].next();
+          if (next.done) {
+            pendingScans.shift();
+            continue;
+          }
+          hideFixedEl(next.value);
+          if (++batchSize >= 100) {
+            batchSize = 0;
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
+        }
+      };
+      const scheduleScan = () => {
+        if (scanCancelled || scanPromise) return;
+        scanPromise = scanAddedNodes().finally(() => {
+          scanPromise = null;
+          if (!scanCancelled && pendingScans.length) scheduleScan();
+        });
+      };
+      const observer = new MutationObserver(mutations => {
+        for (const m of mutations) {
+          for (const node of m.addedNodes) {
+            if (node.nodeType === 1) {
+              pendingScans.push(globalThis.PageImageSaverHelpers.getElementsForFixedCheck(node, scannedNodes));
+            }
+          }
+          if (m.type === 'attributes' && m.target.nodeType === 1) {
+            hideFixedEl(m.target);
+          }
+        }
+        if (pendingScans.length) scheduleScan();
+      });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+
+      const loadImage = (dataUrl) => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = dataUrl;
+      });
+
+      try {
+        const canvasSize = globalThis.PageImageSaverHelpers.getSafeCanvasSize(totalW, totalH, dpr);
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasSize.width;
+        canvas.height = canvasSize.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Screenshot 2D canvas context is unavailable');
+
+        let y = 0;
+        while (true) {
+          // Clamp scroll so last partial strip aligns to bottom of page
+          const scrollY = Math.min(y, Math.max(0, totalH - viewH));
+          window.scrollTo(0, scrollY);
+          // Wait for scroll + lazy-load/repaint to settle.
+          // 500ms also keeps us safely under captureVisibleTab's 2/sec quota.
+          await new Promise(r => setTimeout(r, 500));
+          while (scanPromise) await scanPromise;
+
+          const dataUrl = await this.captureVisiblePart();
+          const img = await loadImage(dataUrl);
+          // Draw at actual scroll position (overlap on last strip is fine — same pixels)
+          ctx.drawImage(img, 0, Math.round(scrollY * dpr));
+
+          if (y + viewH >= totalH) break;
+          y += viewH;
+        }
+
+        // Use JPEG (much smaller than PNG for photo-heavy pages).
+        // If still approaching the 64MiB sendMessage limit, scale down.
+        let dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        if (dataUrl.length > 48 * 1024 * 1024) {
+          const scale = Math.sqrt((48 * 1024 * 1024) / dataUrl.length);
+          const scaled = document.createElement('canvas');
+          scaled.width = Math.round(canvas.width * scale);
+          scaled.height = Math.round(canvas.height * scale);
+          const scaledCtx = scaled.getContext('2d');
+          if (!scaledCtx) throw new Error('Screenshot 2D canvas context is unavailable for scaling');
+          scaledCtx.drawImage(canvas, 0, 0, scaled.width, scaled.height);
+          dataUrl = scaled.toDataURL('image/jpeg', 0.85);
+        }
+        return dataUrl;
+      } finally {
+        observer.disconnect();
+        scanCancelled = true;
+        pendingScans.length = 0;
+        hiddenEls.forEach(el => {
+          el.style.visibility = el.dataset._screenshotHidden;
+          delete el.dataset._screenshotHidden;
+        });
+        window.scrollTo(origScrollX, origScrollY);
+        if (container) container.style.display = '';
+      }
     },
     
     // Process the screenshot
-    processScreenshot: function(dataUrl) {
+    processScreenshot: function(dataUrl, captureType = 'visible_area') {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const pageTitle = document.title.replace(/[^a-z0-9]/gi, '_').substring(0, 50);
-      const filename = `screenshot_${pageTitle}_${timestamp}.png`;
+      const ext = captureType === 'full_page' ? 'jpg' : 'png';
+      const filename = `screenshot_${pageTitle}_${timestamp}.${ext}`;
       
       // Create metadata
       const metadata = {
         url: window.location.href,
         title: document.title,
         timestamp: new Date().toISOString(),
-        captureType: 'visible_area'
+        captureType: captureType
       };
       
       // Show saving notification
@@ -60,23 +201,47 @@
     },
     
     // Handle the screenshot process
-    initiateScreenshot: function() {
+    initiateScreenshot: function(fullPage = true) {
       // Store current scroll position
       this.originalScrollPos = window.scrollY;
       
-      // Take visible screenshot
-      this.captureVisiblePart()
-        .then(dataUrl => {
-          this.processScreenshot(dataUrl);
-        })
-        .catch(error => {
-          console.error('Screenshot error:', error);
-          this.showCompletionNotification(false, null, error.message);
-        });
+      if (fullPage) {
+        this.showSavingNotification('Capturing full page...');
+        
+        this.captureFullPage()
+          .then(dataUrl => {
+            // Remove the early notification so processScreenshot can show its own
+            const notification = document.getElementById('screenshot-saving-notification');
+            if (notification) {
+              document.body.removeChild(notification);
+            }
+            this.processScreenshot(dataUrl, 'full_page');
+          })
+          .catch(error => {
+            console.error('Screenshot error:', error);
+            this.showCompletionNotification(false, null, error.message);
+          });
+      } else {
+        // Take visible screenshot
+        this.captureVisiblePart()
+          .then(dataUrl => {
+            this.processScreenshot(dataUrl, 'visible_area');
+          })
+          .catch(error => {
+            console.error('Screenshot error:', error);
+            this.showCompletionNotification(false, null, error.message);
+          });
+      }
     },
     
     // Show a saving notification
-    showSavingNotification: function() {
+    showSavingNotification: function(customMessage = 'Saving screenshot...') {
+      // Remove any existing notification first
+      const existingNotification = document.getElementById('screenshot-saving-notification');
+      if (existingNotification) {
+        document.body.removeChild(existingNotification);
+      }
+
       // Create notification element
       const notification = document.createElement('div');
       notification.id = 'screenshot-saving-notification';
@@ -123,7 +288,7 @@
       
       // Create message
       const message = document.createElement('div');
-      message.textContent = 'Saving screenshot...';
+      message.textContent = customMessage;
       
       // Add elements to container
       notification.appendChild(spinner);

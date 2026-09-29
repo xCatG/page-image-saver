@@ -1,3 +1,5 @@
+import './extension_helpers.js';
+
 //background.js
 // Debugging helper - will show a notification with download paths
 function showSavePathNotification(path) {
@@ -373,7 +375,7 @@ chrome.action.onClicked.addListener(tab => {
         // Inject content script manually
         chrome.scripting.executeScript({
           target: {tabId: tab.id},
-          files: ['content_script.js']
+          files: ['html2canvas.min.js', 'screenshot.js', 'content_script.js']
         }).then(() => {
           // Wait a moment for the script to initialize
           setTimeout(() => {
@@ -427,7 +429,7 @@ chrome.commands.onCommand.addListener(command => {
             // Inject content script manually
             chrome.scripting.executeScript({
               target: {tabId: tab.id},
-              files: ['content_script.js']
+              files: ['html2canvas.min.js', 'screenshot.js', 'content_script.js']
             }).then(() => {
               // Wait a moment for script to initialize
               setTimeout(() => {
@@ -505,6 +507,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const successCount = results.filter(r => r.success).length;
         const skippedCount = results.filter(r => !r.success && r.skipped).length;
         const failedCount = results.length - successCount - skippedCount;
+        const sidecarFailed = results.some(r => !r.success && r.error && r.error.startsWith('JSON sidecar save failed:'));
         console.log(`[UPLOAD FINAL] Upload process completed. Final stats: ${successCount} successful, ${skippedCount} skipped, ${failedCount} failed`);
 
         // Collect URLs that failed (not just skipped) so the content script can
@@ -527,12 +530,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           console.log(`[UPLOAD COMPLETE] Sending completion message to tab ${sender.tab.id}`);
           chrome.tabs.sendMessage(sender.tab.id, {
             action: 'uploadComplete',
-            success: true,
+            success: failedCount === 0,
             count: successCount,
             skipped: skippedCount,
             skipReasons,
             failures: failedCount,
             failedUrls,
+            error: sidecarFailed
+              ? 'JSON sidecar save failed; the image may already be in Downloads. Retry to complete evidence.'
+              : (failedCount ? 'Some images could not be saved.' : undefined),
             total: results.length,
             localFolder,
             timestamp: Date.now()
@@ -587,7 +593,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sender.tab.windowId,
       { format: 'png', quality: 100 },
       dataUrl => {
-        sendResponse({ dataUrl });
+        sendResponse(globalThis.PageImageSaverHelpers.buildCaptureVisibleTabResponse(chrome.runtime.lastError, dataUrl));
       }
     );
     return true; // Keep the message channel open for async response
@@ -599,11 +605,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     console.log(`Processing screenshot: ${filename}`);
     
-    // Check if we have valid settings before proceeding
-    if (!isConfigValid()) {
+    // Check if cloud storage is valid or local download is enabled
+    if (!isConfigValid() && (!CONFIG.local || !CONFIG.local.enabled)) {
       sendResponse({
         success: false, 
-        error: 'Storage settings not configured. Please go to extension settings.'
+        error: 'Storage settings not configured and local download is disabled. Please go to extension settings.'
       });
       
       // Open settings page
@@ -993,15 +999,24 @@ async function processImage(image, sourceInfo) {
       if (CONFIG.local.saveJson) {
         debugLog('JSON sidecar saving is configured, attempting download');
         const jsonFilename = filename.includes('.') ? filename.substring(0, filename.lastIndexOf('.')) + '.json' : filename + '.json';
+        let actualWidth = null, actualHeight = null;
+        try {
+          const bmp = await createImageBitmap(imageBlob);
+          actualWidth = bmp.width;
+          actualHeight = bmp.height;
+          bmp.close();
+        } catch (e) {
+          debugLog(`createImageBitmap failed for sidecar dimensions: ${e.message}`);
+        }
         const metadata = {
           url: image.url,
           sourceUrl: sourceInfo ? sourceInfo.url : null,
           sourceTitle: sourceInfo ? sourceInfo.title : null,
           altText: image.alt || null,
-          width: image.width ?? null,
-          height: image.height ?? null,
-          naturalWidth: image.naturalWidth ?? null,
-          naturalHeight: image.naturalHeight ?? null,
+          width: actualWidth ?? image.width ?? null,
+          height: actualHeight ?? image.height ?? null,
+          naturalWidth: actualWidth ?? image.naturalWidth ?? null,
+          naturalHeight: actualHeight ?? image.naturalHeight ?? null,
           contentType: imageBlob.type || null,
           fileSizeBytes: imageBlob.size,
           savedAt: new Date().toISOString()
@@ -1039,6 +1054,16 @@ async function processImage(image, sourceInfo) {
     // Filter successful results
     const successfulResults = results.filter(r => r && r.success);
     console.log('Successful operations:', successfulResults.length);
+
+    const sidecarFailure = results.find(r => r && r.type === 'local-json' && !r.success);
+    if (sidecarFailure) {
+      return {
+        success: false,
+        image,
+        error: `JSON sidecar save failed: ${sidecarFailure.error}. Image was saved locally but evidence is incomplete.`,
+        results: successfulResults
+      };
+    }
     
     // If at least one operation succeeded, consider the overall process a success
     if (successfulResults.length > 0) {
@@ -1979,4 +2004,3 @@ const browserType = detectBrowser();
 console.log(`Page Image Saver background script loaded in ${browserType} browser.`);
 debugLog(`🌐 Browser detected: ${browserType}`);
 debugLog(`🔍 Full User Agent: ${navigator.userAgent}`);
-
