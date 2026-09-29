@@ -1,4 +1,275 @@
 import './extension_helpers.js';
+import './takeover_runner.js';
+
+const TAKEOVER_ALARM = 'catalog-takeover-step';
+const takeoverHttpStatus = new Map();
+const takeoverBlockedStatus = new Map();
+const takeoverBlockedWaiters = new Map();
+function observeTakeoverHttp(details) {
+  if (details.type === 'main_frame' && Number.isInteger(details.tabId)) {
+    takeoverHttpStatus.set(details.tabId, details.statusCode);
+    if ([403, 429].includes(details.statusCode)) {
+      takeoverBlockedStatus.set(details.tabId, details.statusCode);
+      takeoverBlockedWaiters.get(details.tabId)?.(details.statusCode);
+    }
+  }
+}
+chrome.webRequest.onHeadersReceived?.addListener(observeTakeoverHttp,
+  {urls: ['<all_urls>'], types: ['main_frame']});
+chrome.webRequest.onCompleted.addListener(observeTakeoverHttp,
+  {urls: ['<all_urls>'], types: ['main_frame']});
+
+function chromeCallback(call) {
+  return new Promise((resolve, reject) => call(result => {
+    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+    else resolve(result);
+  }));
+}
+
+async function takeoverTabComplete(tabId) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => finish(new Error('page load timeout')), 30000);
+    function finish(error, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      takeoverBlockedWaiters.delete(tabId);
+      if (error) reject(error); else resolve(value);
+    }
+    function blocked(status) { finish(null, {id: tabId, blockedStatus: status}); }
+    function onUpdated(changedId, info, updated) {
+      if (changedId === tabId && info.status === 'complete') finish(null, updated);
+    }
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    takeoverBlockedWaiters.set(tabId, blocked);
+    const known = takeoverBlockedStatus.get(tabId);
+    if ([403, 429].includes(known)) { blocked(known); return; }
+    chrome.tabs.get(tabId, tab => {
+      if (chrome.runtime.lastError) finish(new Error(chrome.runtime.lastError.message));
+      else if (takeoverBlockedStatus.has(tabId)) blocked(takeoverBlockedStatus.get(tabId));
+      else if (tab?.status === 'complete') finish(null, tab);
+    });
+  });
+}
+
+function takeoverMessage(tabId, message) {
+  return chromeCallback(callback => chrome.tabs.sendMessage(tabId, message, callback)).then(reply => {
+    if (!reply?.success) throw new Error(reply?.error || 'page inspection failed');
+    return reply;
+  });
+}
+
+function takeoverSameUrl(actual, expected) {
+  try {
+    const url = new URL(actual);
+    url.hash = '';
+    return url.href === expected;
+  } catch (_) { return false; }
+}
+
+async function takeoverOwnedTab(binding) {
+  const state = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
+  const run = await takeoverIo.read();
+  if (state.catalogTakeoverTabId !== binding.tabId || run?.status !== 'running' ||
+      run.generation !== binding.generation || run.current?.phase !== 'product' ||
+      run.current.url !== binding.expectedUrl ||
+      run.current.binding?.documentId !== binding.documentId ||
+      run.current.binding.tabId !== binding.tabId) {
+    throw new Error('take-over run/tab binding changed');
+  }
+  const tab = await chromeCallback(callback => chrome.tabs.get(binding.tabId, callback));
+  if (!takeoverSameUrl(tab?.url, binding.expectedUrl)) {
+    throw new Error('take-over tab URL changed');
+  }
+  return tab;
+}
+
+async function assertAutoCaptureAllowed(sender) {
+  if (!sender.tab) throw new Error('automatic capture requires a page tab');
+  const state = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
+  if (state.catalogTakeoverTabId !== sender.tab.id) return;
+  const run = await takeoverIo.read();
+  if (run && ['running', 'paused', 'stopped', 'discovery_incomplete',
+      'finished_with_gaps', 'complete'].includes(run.status)) {
+    throw new Error('automatic capture is unavailable in a take-over tab');
+  }
+}
+
+const takeoverIo = {
+  now: () => Date.now(),
+  read: async () => (await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverRun', callback)))
+    .catalogTakeoverRun || null,
+  save: async run => chromeCallback(callback => chrome.storage.local.set({catalogTakeoverRun: run}, callback)),
+  notify: async reason => chrome.notifications.create({type: 'basic', iconUrl: 'icons/48.png',
+    title: 'Catalog take-over paused', message: reason.slice(0, 200), priority: 1}),
+  alarm: async when => {
+    chrome.alarms.create(TAKEOVER_ALARM, {when, periodInMinutes: 0.5});
+    setTimeout(() => { void tickAfterSettingsReady().catch(console.error); }, Math.max(0, when - Date.now()));
+  },
+  clearAlarm: async () => chrome.alarms.clear(TAKEOVER_ALARM),
+  load: async url => {
+    const old = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
+    const tab = await chromeCallback(callback => chrome.tabs.create({url, active: true}, callback));
+    await chromeCallback(callback => chrome.storage.local.set({catalogTakeoverTabId: tab.id}, callback));
+    if (old.catalogTakeoverTabId && old.catalogTakeoverTabId !== tab.id) {
+      chrome.tabs.remove(old.catalogTakeoverTabId, () => { void chrome.runtime.lastError; });
+    }
+    const completed = await takeoverTabComplete(tab.id);
+    const status = completed.blockedStatus || takeoverBlockedStatus.get(tab.id) ||
+      takeoverHttpStatus.get(tab.id) || 200;
+    takeoverHttpStatus.delete(tab.id);
+    takeoverBlockedStatus.delete(tab.id);
+    if ([403, 429].includes(status)) return {status};
+    const run = await takeoverIo.read();
+    if (completed.url && new URL(completed.url).hostname !== run.domain)
+      return {status: 0, error: 'redirected outside configured site'};
+    const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect'});
+    return {...reply.page, tabId: tab.id, status};
+  },
+  capture: async (url, scope, binding) => {
+    if (!binding || binding.expectedUrl !== url) throw new Error('take-over capture URL binding mismatch');
+    await takeoverOwnedTab(binding);
+    const reply = await takeoverMessage(binding.tabId, {action: 'takeoverCapture', scope, binding});
+    await takeoverOwnedTab(binding);
+    const current = await takeoverMessage(binding.tabId, {action: 'takeoverDocumentCheck'});
+    if (current.documentId !== binding.documentId || !takeoverSameUrl(current.url, url)) {
+      throw new Error('take-over document changed during capture');
+    }
+    return reply.result;
+  },
+  verify: async identity => {
+    await requireSettingsReady();
+    if (CONFIG.receiver?.enabled !== true) throw new Error('local receiver is unavailable for verification');
+    return globalThis.PageImageSaverHelpers.captureWithReceiver({identity}, CONFIG.receiver,
+      {fetch: (...args) => fetch(...args), verifyOnly: true});
+  }
+};
+const takeoverRunner = globalThis.PageImageSaverTakeover.createTakeoverRunner(takeoverIo);
+async function tickAfterSettingsReady() {
+  await requireSettingsReady();
+  return takeoverRunner.tick();
+}
+
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === TAKEOVER_ALARM) void tickAfterSettingsReady().catch(console.error);
+});
+chrome.runtime.onStartup.addListener(() => {
+  void requireSettingsReady().then(() => takeoverRunner.read()).then(run => {
+    if (run?.status === 'running') return tickAfterSettingsReady();
+  }).catch(console.error);
+});
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'autoCaptureAllowed') {
+    assertAutoCaptureAllowed(sender)
+      .then(() => sendResponse({success: true, allowed: true}))
+      .catch(() => sendResponse({success: true, allowed: false}));
+    return true;
+  }
+  if (!['takeoverPreview', 'takeoverStart', 'takeoverPause', 'takeoverStop',
+    'takeoverResume', 'takeoverStatus', 'takeoverExport'].includes(message.action)) return false;
+  (async () => {
+    if (message.action === 'takeoverPreview') {
+      if (!sender.tab || new URL(sender.tab.url).hostname !== message.config?.domain)
+        throw new Error('preview must come from the configured site tab');
+      return takeoverRunner.preview(message.config, message.page);
+    }
+    if (message.action === 'takeoverStatus') return takeoverRunner.read();
+    if (message.action === 'takeoverExport') {
+      const run = await takeoverRunner.read();
+      const report = globalThis.PageImageSaverTakeover.exportTakeoverReport(run);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `PageImageSaver/catalog-runs/${run.domain}/${stamp}-run.json`;
+      const dataUrl = await blobToDataUrl(new Blob([JSON.stringify(report, null, 2)],
+        {type: 'application/json'}));
+      await globalThis.PageImageSaverHelpers.saveCaptureDownload(chrome, dataUrl, filename);
+      return run;
+    }
+    if (message.action === 'takeoverPause') return takeoverRunner.pause();
+    if (message.action === 'takeoverStop') return takeoverRunner.stop();
+    if (message.action === 'takeoverResume') {
+      await requireSettingsReady();
+      const run = await takeoverRunner.resume();
+      void tickAfterSettingsReady().catch(console.error);
+      return run;
+    }
+    await requireSettingsReady();
+    if (CONFIG.receiver?.enabled !== true) {
+      throw new Error('Configure the local receiver before Take over; verified skips require it.');
+    }
+    const run = await takeoverRunner.start();
+    void tickAfterSettingsReady().catch(console.error);
+    return run;
+  })().then(run => sendResponse({success: true, run, summary: globalThis.PageImageSaverTakeover.summarizeTakeover(run)}))
+    .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+  return true;
+});
+
+// Product capture is always local. It does not consult the S3/R2 settings or
+// the existing saveImages upload path.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'captureFailureNotice') {
+    chrome.notifications.create({type: 'basic', iconUrl: 'icons/48.png',
+      title: 'Local product capture needs retry',
+      message: String(message.reason || 'Capture failed').slice(0, 200), priority: 1});
+    sendResponse({success: true});
+    return false;
+  }
+  if (message.action !== 'captureProductLocal') return false;
+  const helpers = globalThis.PageImageSaverHelpers;
+  const assertCaptureAuthority = async () => {
+    if (message.autoPageLoad) await assertAutoCaptureAllowed(sender);
+  };
+  const fetchImage = async url => {
+    await assertCaptureAuthority();
+    const response = await fetch(url, {credentials: 'include'});
+    if (!response.ok) throw new Error(`image HTTP ${response.status}: ${url}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return {bytes, contentType: response.headers?.get?.('content-type') || null,
+      fetched_url: response.url};
+  };
+  const download = () => helpers.exportProductCapture(message.payload, {
+    fetchImage,
+    saveBytes: async (filename, bytes) => {
+      await assertCaptureAuthority();
+      const dataUrl = await blobToDataUrl(new Blob([bytes], {type: 'application/octet-stream'}));
+      await assertCaptureAuthority();
+      await helpers.saveCaptureDownload(chrome, dataUrl, filename);
+    }
+  });
+  const save = (async () => {
+    await requireSettingsReady();
+    await assertCaptureAuthority();
+    if (message.runBinding) {
+      const binding = message.runBinding;
+      const identity = message.payload?.identity;
+      if (sender.tab?.id !== binding.tabId ||
+          !takeoverSameUrl(sender.url || sender.tab?.url, binding.expectedUrl) ||
+          identity?.domain !== new URL(binding.expectedUrl).hostname ||
+          identity?.color_key !== 'url' ||
+          !takeoverSameUrl(identity.product_url, binding.expectedUrl)) {
+        throw new Error('take-over capture sender or identity mismatch');
+      }
+      await takeoverOwnedTab(binding);
+      if (CONFIG.receiver?.enabled !== true) throw new Error('take-over receiver is not configured');
+    }
+    return CONFIG.receiver?.enabled === true
+      ? helpers.captureWithReceiver(message.payload, CONFIG.receiver, {
+        fetch: async (...args) => { await assertCaptureAuthority(); return fetch(...args); },
+        fetchImage, download
+      })
+      : download().then(record => ({storage: 'downloads', status: 'published', record}));
+  })();
+  save.then(result => sendResponse({success: true, ...result}))
+    .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+  return true;
+});
+
+/*
+  The product capture path above is intentionally separate from the legacy
+  image/screenshot upload handlers below. The receiver has no S3/R2 fallback.
+*/
 
 //background.js
 // Debugging helper - will show a notification with download paths
@@ -161,19 +432,33 @@ const DEFAULT_CONFIG = {
 // Store the current configuration (will be loaded from storage)
 let CONFIG = { ...DEFAULT_CONFIG };
 
-// Load settings from storage when the extension starts
-chrome.storage.sync.get('imageUploaderSettings', (result) => {
-  if (result.imageUploaderSettings) {
-    CONFIG = result.imageUploaderSettings;
-    console.log('Settings loaded from storage');
-  } else {
-    console.log('No saved settings found, using defaults');
-  }
+// Receiver decisions must wait for the initial settings read. A storage error
+// settles the gate and leaves persisted capture evidence untouched.
+let settingsLoadError = null;
+let settingsChanged = false;
+const settingsReady = new Promise(resolve => {
+  chrome.storage.sync.get('imageUploaderSettings', result => {
+    if (chrome.runtime.lastError && !settingsChanged) {
+      settingsLoadError = new Error(chrome.runtime.lastError.message || 'settings unavailable');
+    } else if (!settingsChanged && result?.imageUploaderSettings) {
+      CONFIG = result.imageUploaderSettings;
+      console.log('Settings loaded from storage');
+    } else if (!settingsChanged) {
+      console.log('No saved settings found, using defaults');
+    }
+    resolve();
+  });
 });
+async function requireSettingsReady() {
+  await settingsReady;
+  if (settingsLoadError) throw settingsLoadError;
+}
 
 // Listen for settings changes
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'sync' && changes.imageUploaderSettings) {
+    settingsChanged = true;
+    settingsLoadError = null;
     CONFIG = changes.imageUploaderSettings.newValue;
     console.log('Settings updated');
   }
@@ -375,7 +660,7 @@ chrome.action.onClicked.addListener(tab => {
         // Inject content script manually
         chrome.scripting.executeScript({
           target: {tabId: tab.id},
-          files: ['html2canvas.min.js', 'screenshot.js', 'content_script.js']
+          files: ['extension_helpers.js', 'html2canvas.min.js', 'screenshot.js', 'content_script.js']
         }).then(() => {
           // Wait a moment for the script to initialize
           setTimeout(() => {
@@ -429,7 +714,7 @@ chrome.commands.onCommand.addListener(command => {
             // Inject content script manually
             chrome.scripting.executeScript({
               target: {tabId: tab.id},
-              files: ['html2canvas.min.js', 'screenshot.js', 'content_script.js']
+              files: ['extension_helpers.js', 'html2canvas.min.js', 'screenshot.js', 'content_script.js']
             }).then(() => {
               // Wait a moment for script to initialize
               setTimeout(() => {
@@ -507,13 +792,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const successCount = results.filter(r => r.success).length;
         const skippedCount = results.filter(r => !r.success && r.skipped).length;
         const failedCount = results.length - successCount - skippedCount;
-        const sidecarFailed = results.some(r => !r.success && r.error && r.error.startsWith('JSON sidecar save failed:'));
+        const incompleteEvidence = results.filter(r => r.nonRetryable)
+          .map(r => ({url: r.image?.url, savedImagePath: r.savedImagePath,
+            savedSidecarPath: r.savedSidecarPath || null, error: r.error}));
         console.log(`[UPLOAD FINAL] Upload process completed. Final stats: ${successCount} successful, ${skippedCount} skipped, ${failedCount} failed`);
 
         // Collect URLs that failed (not just skipped) so the content script can
         // remove them from alreadyUploadedUrls and allow a retry
         const failedUrls = results
-          .filter(r => !r.success && !r.skipped && r.image && r.image.url)
+          .filter(r => !r.success && !r.skipped && !r.nonRetryable && r.image && r.image.url)
           .map(r => r.image.url);
 
         // Collect skip reasons for better user messaging
@@ -536,8 +823,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             skipReasons,
             failures: failedCount,
             failedUrls,
-            error: sidecarFailed
-              ? 'JSON sidecar save failed; the image may already be in Downloads. Retry to complete evidence.'
+            incompleteEvidence,
+            error: incompleteEvidence.length
+              ? `JSON sidecar evidence is incomplete. Image saved at ${incompleteEvidence[0].savedImagePath || 'an unknown Downloads path'}; inspect Downloads and repair its sidecar manually.`
               : (failedCount ? 'Some images could not be saved.' : undefined),
             total: results.length,
             localFolder,
@@ -641,7 +929,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }
     
-    console.log('Processing screenshot with current config:', CONFIG);
+    console.log('Processing screenshot with current config:', {...CONFIG,
+      receiver: CONFIG.receiver ? {...CONFIG.receiver, token: '[redacted]'} : CONFIG.receiver});
     
     const promises = [];
     
@@ -987,7 +1276,8 @@ async function processImage(image, sourceInfo) {
       }
     }
     
-    console.log('Processing image with current config:', CONFIG);
+    console.log('Processing image with current config:', {...CONFIG,
+      receiver: CONFIG.receiver ? {...CONFIG.receiver, token: '[redacted]'} : CONFIG.receiver});
     
     const promises = [];
     
@@ -1025,7 +1315,8 @@ async function processImage(image, sourceInfo) {
         const jsonBlob = new Blob([jsonStr], { type: 'application/json' });
         // Run separately so a JSON write failure doesn't block the image save
         promises.push(
-          saveToDownloads(jsonBlob, jsonFilename, localFolder).catch(err => {
+          saveToDownloads(jsonBlob, jsonFilename, localFolder)
+            .then(result => ({...result, type: 'local-json'})).catch(err => {
             debugLog(`JSON sidecar write failed for ${filename}: ${err.message}`);
             return { success: false, type: 'local-json', error: err.message };
           })
@@ -1055,14 +1346,30 @@ async function processImage(image, sourceInfo) {
     const successfulResults = results.filter(r => r && r.success);
     console.log('Successful operations:', successfulResults.length);
 
+    const imageSave = results.find(r => r && r.type === 'local' && r.success);
+    const sidecarSave = results.find(r => r && r.type === 'local-json' && r.success);
     const sidecarFailure = results.find(r => r && r.type === 'local-json' && !r.success);
     if (sidecarFailure) {
       return {
         success: false,
         image,
-        error: `JSON sidecar save failed: ${sidecarFailure.error}. Image was saved locally but evidence is incomplete.`,
+        nonRetryable: true,
+        savedImagePath: imageSave?.fullPath || null,
+        error: `JSON sidecar save failed: ${sidecarFailure.error}. Image saved at ${imageSave?.fullPath || 'an unknown Downloads path'}; evidence is incomplete. Inspect Downloads and repair the sidecar manually.`,
         results: successfulResults
       };
+    }
+    if (imageSave && sidecarSave) {
+      const stem = savedPath => {
+        const name = savedPath.split('/').pop();
+        return name.includes('.') ? name.slice(0, name.lastIndexOf('.')) : name;
+      };
+      if (stem(imageSave.fullPath) !== stem(sidecarSave.fullPath)) {
+        return {success: false, image, nonRetryable: true,
+          savedImagePath: imageSave.fullPath, savedSidecarPath: sidecarSave.fullPath,
+          error: `JSON sidecar filename differs from saved image: ${imageSave.fullPath} and ${sidecarSave.fullPath}. Evidence is incomplete; inspect Downloads and repair the pair manually.`,
+          results: successfulResults};
+      }
     }
     
     // If at least one operation succeeded, consider the overall process a success
@@ -1249,16 +1556,6 @@ function extractBaseDomain(domain) {
   }
 }
 
-// Sanitize a user-supplied folder name to prevent path traversal
-function sanitizeFolderName(name) {
-  return (name || '')
-    .replace(/\.\./g, '')          // strip traversal sequences
-    .replace(/[/\\]/g, '_')        // replace path separators
-    .replace(/[^a-zA-Z0-9._\-]/g, '_') // keep safe chars only
-    .replace(/^[._]+/, '')         // no leading dots/underscores
-    .substring(0, 100);
-}
-
 // Sanitize domain name for folder use
 function sanitizeDomain(domain) {
   // Extract the base domain first
@@ -1312,29 +1609,17 @@ async function blobToDataUrl(blob) {
 // in MV3 service workers. The filename field sets the full subpath inside
 // Downloads/ directly, so no onDeterminingFilename indirection is needed.
 async function saveToDownloads(blob, filename, domain) {
-  let localPath = sanitizeFolderName(CONFIG.local.baseFolder) || 'PageImageSaver';
+  let localPath = globalThis.PageImageSaverHelpers.sanitizeFolderPath(CONFIG.local.baseFolder) || 'PageImageSaver';
   if (domain) {
-    localPath += '/' + sanitizeFolderName(domain);
+    localPath += '/' + globalThis.PageImageSaverHelpers.sanitizeFolderPath(domain);
   }
   localPath += '/' + filename;
   localPath = localPath.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
 
   const dataUrl = await blobToDataUrl(blob);
-
-  return new Promise((resolve, reject) => {
-    chrome.downloads.download({
-      url: dataUrl,
-      filename: localPath,
-      saveAs: false,
-      conflictAction: 'uniquify'
-    }, (downloadId) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve({ success: true, type: 'local', fullPath: localPath });
-      }
-    });
-  });
+  const savedPath = await globalThis.PageImageSaverHelpers.saveCaptureDownload(
+    chrome, dataUrl, localPath, 120000, {allowUniquified: true});
+  return {success: true, type: 'local', fullPath: savedPath};
 }
 
 // Build the full storage path with optional domain subfolder

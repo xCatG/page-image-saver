@@ -2,6 +2,8 @@
 
 // Add a global flag that the background script can check to see if we're loaded
 window.PageImageSaverLoaded = true;
+const takeoverDocumentId = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+  byte => byte.toString(16).padStart(2, '0')).join('');
 
 // Global variables for domain-specific settings
 let currentDomain = '';
@@ -878,9 +880,25 @@ function createImageSelectionUI(images) {
       <button id="select-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #4285F4; color: white; cursor: pointer;">Select All</button>
       <button id="deselect-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Deselect All</button>
       <button id="save-page-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer;">Save Page Images</button>
+      <button id="capture-product-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #6b46a0; color: white; cursor: pointer;">Capture Product Locally</button>
+      <button id="takeover-preview-btn" type="button">Preview catalog</button>
+      <button id="takeover-start-btn" type="button">Take over</button>
+      <button id="takeover-pause-btn" type="button">Pause</button>
+      <button id="takeover-resume-btn" type="button">Resume</button>
+      <button id="takeover-stop-btn" type="button">Stop</button>
+      <button id="takeover-export-btn" type="button">Export run JSON</button>
       <button id="take-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Visible)</button>
       <button id="take-full-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Full Page)</button>
       <button id="close-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Close</button>
+    </div>
+    <div style="display: grid; gap: 5px; margin-bottom: 8px; font-size: 12px;">
+      <label>Capture images <select id="capture-image-mode"><option value="selected">Selected checkboxes</option><option value="site">Site product selectors</option></select></label>
+      <label>Color identity <select id="capture-color-policy"><option value="color">Color on this URL</option><option value="url">Each color has its own URL</option></select></label>
+      <label>Selected color <input id="capture-color" type="text" placeholder="Required for same-URL colors"></label>
+      <label>Scope <select id="capture-scope"><option value="review">Review</option><option value="include">Include</option><option value="exclude">Exclude</option></select></label>
+      <label>Scope reason <input id="capture-scope-reason" type="text" placeholder="Why this scope decision?"></label>
+      <label><input id="capture-same-color-selection" type="checkbox"> I changed only the image selection, not the product/color (one capture only)</label>
+      <label><input id="capture-auto-site" type="checkbox"> Auto capture product pages on this site as review</label>
     </div>
     <div id="size-filter" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
       <div style="font-weight: bold; margin-bottom: 5px;">Settings for ${currentDomain}</div>
@@ -904,6 +922,7 @@ function createImageSelectionUI(images) {
       </div>
     </div>
     <div id="status-message" style="margin-top: 10px;"></div>
+    <div id="takeover-progress" role="status" style="margin-top: 8px; font-size: 12px; white-space: pre-wrap;"></div>
   `;
   container.appendChild(header);
   
@@ -930,6 +949,64 @@ images.forEach((image, index) => {
 
 container.appendChild(imageList);
 document.body.appendChild(container);
+
+  loadCaptureSiteConfig().then(config => {
+    if (config) {
+      document.getElementById('capture-image-mode').value = 'site';
+      document.getElementById('capture-color-policy').value =
+        config.colorVariantStrategy === 'separate-url' ? 'url' : 'color';
+    }
+    document.getElementById('capture-color').value = capturePageProduct().color || '';
+  });
+  chrome.storage.local.get({captureAutoDomains: {}}, result => {
+    document.getElementById('capture-auto-site').checked = !!result.captureAutoDomains[currentDomain];
+  });
+  document.getElementById('capture-auto-site').addEventListener('change', event => {
+    chrome.storage.local.get({captureAutoDomains: {}}, result => {
+      const domains = result.captureAutoDomains;
+      domains[currentDomain] = event.target.checked;
+      chrome.storage.local.set({captureAutoDomains: domains});
+    });
+  });
+  document.getElementById('capture-product-btn').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await captureCurrentProduct({manual: true});
+      showStatusMessage(globalThis.PageImageSaverHelpers.captureResultMessage(result), 'success');
+    } catch (error) {
+      await recordCaptureFailure(error);
+      showStatusMessage(`Product capture failed: ${error.message}`, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+  document.getElementById('takeover-preview-btn').addEventListener('click', async () => {
+    try {
+      const config = await loadCaptureSiteConfig();
+      if (!config) throw new Error('No site config for catalog preview');
+      const page = await inspectTakeoverPage(config);
+      await takeoverRequest('takeoverPreview', {config, page});
+      await refreshTakeoverProgress();
+    } catch (error) { showStatusMessage(`Catalog preview failed: ${error.message}`, 'error'); }
+  });
+  for (const [button, action] of [['takeover-start-btn', 'takeoverStart'],
+    ['takeover-pause-btn', 'takeoverPause'], ['takeover-resume-btn', 'takeoverResume'],
+    ['takeover-stop-btn', 'takeoverStop'], ['takeover-export-btn', 'takeoverExport']]) {
+    document.getElementById(button).addEventListener('click', async () => {
+      try {
+        await takeoverRequest(action);
+        if (action === 'takeoverExport') showStatusMessage('Catalog run JSON saved to Downloads.', 'success');
+        await refreshTakeoverProgress();
+      }
+      catch (error) { showStatusMessage(`Catalog take-over: ${error.message}`, 'error'); }
+    });
+  }
+  void refreshTakeoverProgress();
+  const takeoverRefresh = setInterval(() => {
+    if (!document.contains(container)) clearInterval(takeoverRefresh);
+    else void refreshTakeoverProgress();
+  }, 2000);
 
   // Hide the local folder row if local saving is disabled in settings
   chrome.storage.sync.get('imageUploaderSettings', (result) => {
@@ -2161,34 +2238,306 @@ function saveImagesToStorage(images) {
   console.debug(`[CONTENT LOG] SaveImagesToStorage function completed, waiting for async responses`);
 }
 
-// Initialize when the user clicks the extension icon or uses keyboard shortcut
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'findImages') {
-    // Check if UI is already open, and just return success if it is
-    const existingContainer = document.getElementById('image-selector-container');
-    if (existingContainer) {
-      sendResponse({success: true, count: parseInt(existingContainer.getAttribute('data-images-count') || '0')});
-      return true;
+const previousCaptureStates = new Map();
+const captureConfigCache = new Map();
+
+async function loadCaptureSiteConfig() {
+  const domain = window.location.hostname.toLowerCase();
+  if (!captureConfigCache.has(domain)) {
+    captureConfigCache.set(domain, fetch(chrome.runtime.getURL(`site_config/${domain}.json`))
+      .then(response => response.ok ? response.json() : null)
+      .then(config => config?.domain === domain ? config : null)
+      .catch(() => null));
+  }
+  return captureConfigCache.get(domain);
+}
+
+function captureJsonLd() {
+  return Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+    .map(node => { try { return JSON.parse(node.textContent); } catch (_) { return null; } })
+    .filter(value => value !== null);
+}
+
+function capturePageProduct() {
+  return globalThis.PageImageSaverHelpers.captureProductFromJsonLd(
+    Array.from(document.querySelectorAll('script[type="application/ld+json"]'), node => node.textContent));
+}
+
+function captureGallery(config, mode) {
+  let urls;
+  if (mode === 'site') {
+    const selector = config?.product?.allImagesSelector || config?.allImagesSelector || config?.product?.imageSelector;
+    if (!selector) throw new Error('No product image selector in this site config');
+    urls = Array.from(document.querySelectorAll(selector), node =>
+      node.getAttribute('data-src') || node.currentSrc || node.getAttribute('src') || node.getAttribute('href'));
+  } else {
+    const checked = document.querySelectorAll('#image-selector-container input[type="checkbox"]:checked');
+    urls = Array.from(checked, node => currentFilteredImages[Number(node.dataset.index)]?.url);
+  }
+  const unique = new Set();
+  for (const raw of urls) {
+    if (!raw) continue;
+    try {
+      const url = new URL(raw, window.location.href);
+      if (url.protocol === 'http:' || url.protocol === 'https:') unique.add(url.href);
+    } catch (_) { /* Ignore non-image or malformed discovered URLs. */ }
+  }
+  if (!unique.size) throw new Error('No selected product images');
+  return Array.from(unique);
+}
+
+function captureSwatchColor() {
+  const swatch = document.querySelector('[aria-selected="true"][data-color], [aria-checked="true"][data-color]');
+  return swatch?.getAttribute('data-color') || null;
+}
+
+function captureSelectedColor(product) {
+  return product.color || captureSwatchColor() || document.getElementById('capture-color')?.value.trim() || null;
+}
+
+function captureCanonicalUrl() {
+  const candidate = document.querySelector('link[rel="canonical"]')?.href;
+  try {
+    if (candidate && new URL(candidate).hostname === window.location.hostname) return candidate;
+  } catch (_) { /* Use the visited URL. */ }
+  return window.location.href;
+}
+
+function capturePageHtml() {
+  const clone = document.documentElement.cloneNode(true);
+  clone.querySelector('#image-selector-container')?.remove();
+  return '<!doctype html>\n' + clone.outerHTML;
+}
+
+async function recordCaptureFailure(error) {
+  return globalThis.PageImageSaverHelpers.recordCaptureFailure(chrome, window.location.href, error);
+}
+
+function assertTakeoverBinding(binding) {
+  if (!binding) return;
+  const visited = new URL(window.location.href);
+  visited.hash = '';
+  const canonical = new URL(captureCanonicalUrl());
+  canonical.hash = '';
+  if (binding.documentId !== takeoverDocumentId || visited.href !== binding.expectedUrl ||
+      canonical.href !== binding.expectedUrl) {
+    throw new Error('take-over document or product URL changed');
+  }
+}
+
+async function captureCurrentProduct({manual, scopeOverride = null, binding = null, autoPageLoad = false}) {
+  assertTakeoverBinding(binding);
+  const config = await loadCaptureSiteConfig();
+  const mode = manual ? document.getElementById('capture-image-mode').value : 'site';
+  const sameColorControl = manual ? document.getElementById('capture-same-color-selection') : null;
+  const allowSameColorGalleryChange = !!sameColorControl?.checked;
+  if (sameColorControl) sameColorControl.checked = false;
+  if (allowSameColorGalleryChange && mode !== 'selected') {
+    throw new Error('Same-color image reselection requires selected checkboxes');
+  }
+  const policy = manual ? document.getElementById('capture-color-policy').value :
+    config?.colorVariantStrategy === 'separate-url' ? 'url' : 'color';
+  const readState = () => {
+    const product = capturePageProduct();
+    const gallery = captureGallery(config, mode);
+    const swatchColor = captureSwatchColor();
+    return {color: policy === 'url' ? captureCanonicalUrl() : captureSelectedColor(product), gallery,
+      colorConflict: !!(product.color && swatchColor && product.color !== swatchColor)};
+  };
+  const url = captureCanonicalUrl();
+  const previous = previousCaptureStates.get(url);
+  const state = await globalThis.PageImageSaverHelpers.waitForCaptureState(readState, previous,
+    {timeoutMs: 8000, pollMs: 200, allowSameColorGalleryChange: manual && allowSameColorGalleryChange});
+  const product = capturePageProduct();
+  const color = policy === 'url' ? captureSelectedColor(product) : state.color;
+  const identity = globalThis.PageImageSaverHelpers.captureIdentity(url, policy, color);
+  if (!product.color && color) product.color = color;
+  const decision = scopeOverride?.decision || (manual ? document.getElementById('capture-scope').value : 'review');
+  const customReason = manual ? document.getElementById('capture-scope-reason').value.trim() : '';
+  const scope = {decision, reason: scopeOverride?.reason || customReason ||
+    (manual ? `user-selected ${decision}` : 'automatic page-load capture; scope unclassified')};
+  const transform = config?.product?.highResTransform;
+  const images = state.gallery.map(url => globalThis.PageImageSaverHelpers.captureImageUrls(url, transform));
+  const payload = {identity, captured_at: new Date().toISOString(), scope, product,
+    html: capturePageHtml(), jsonld: captureJsonLd(), images};
+  assertTakeoverBinding(binding); // Guard before background image acquisition.
+  const result = await new Promise((resolve, reject) => chrome.runtime.sendMessage(
+    {action: 'captureProductLocal', payload, runBinding: binding, autoPageLoad}, response => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else if (!response?.success) reject(new Error(response?.error || 'local capture failed'));
+      else resolve(response);
+    }));
+  previousCaptureStates.set(url, state);
+  return binding ? {...result, identity} : result;
+}
+
+function takeoverRequest(action, data = {}) {
+  return new Promise((resolve, reject) => chrome.runtime.sendMessage({action, ...data}, response => {
+    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+    else if (!response?.success) reject(new Error(response?.error || 'catalog request failed'));
+    else resolve(response);
+  }));
+}
+
+async function refreshTakeoverProgress() {
+  const box = document.getElementById('takeover-progress');
+  if (!box) return;
+  try {
+    const {run, summary} = await takeoverRequest('takeoverStatus');
+    if (!run) { box.textContent = 'No catalog preview yet. Browse listing and product pages, then preview each page.'; return; }
+    const samples = (run.previews || []).map(page => `${page.kind}: ${page.url}` +
+      (page.products == null ? ` — ${page.product?.name || 'unknown product'}, ` +
+        `${page.imageCount || 0} gallery images, ${page.colorLinks || 0} color links, ` +
+        `${page.scope?.decision || 'review'} (${page.scope?.reason || 'unclassified'})` :
+        ` — ${page.products} product links, next ${page.next || 'absent'}, ` +
+        `end ${JSON.stringify(page.end || 'unverified')}`));
+    const end = run.preview?.endCheckConfigured ? 'Positive end check configured.' :
+      'No verified positive end check configured; discovery will report incomplete at the end.';
+    box.textContent = `Catalog ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n${end}\n` +
+      `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; found ${summary.productsFound}; ` +
+      `captured products ${summary.productsCaptured}; captured colors ${summary.colorsCaptured}; ` +
+      `size options traversed ${summary.sizeOptionsTraversed} (size cycling is not part of this run); ` +
+      `excluded ${summary.excluded}; failed ${summary.failed}; pending ${summary.pending}; ` +
+      `exported/unverified ${summary.exportedUnverified}.\n` +
+      (run.products || []).filter(row => row.status === 'failed').map(row => `${row.url}: ${row.reason}`).join('\n') +
+      '\nVerified skips require the local receiver. Downloads exports are unverified until imported.';
+  } catch (error) { box.textContent = `Catalog status unavailable: ${error.message}`; }
+}
+
+function takeoverCategory() {
+  for (const raw of captureJsonLd()) {
+    const candidates = Array.isArray(raw) ? raw : raw?.['@graph'] || [raw];
+    for (const item of candidates) {
+      if (!item || typeof item !== 'object') continue;
+      const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
+      if (types.some(type => typeof type === 'string' && /Product$/i.test(type)) && item.category) {
+        return Array.isArray(item.category) ? item.category.join(' / ') : String(item.category);
+      }
     }
-    
-    // Get current domain and load saved settings for it
-    currentDomain = getCurrentDomain();
-    
-    loadDomainSettings(currentDomain, (settings) => {
-      // Update domain settings
-      domainSettings = settings;
-      
-      // Find all images with the loaded filter settings
-      const images = findAllImages();
-      
-      // Create the UI with the images
-      createImageSelectionUI(images);
-      
-      // Send response with the count
-      sendResponse({success: true, count: images.length});
-    });
-    
-    return true; // Keep the message channel open for async response
+  }
+  return document.querySelector('[itemprop="category"], nav.breadcrumbs, .breadcrumbs')?.textContent?.trim() || '';
+}
+
+async function inspectTakeoverPage(config) {
+  const challengeText = `${document.title} ${document.body?.innerText?.slice(0, 2000) || ''}`;
+  if (/verify you are human|unusual traffic|access denied|captcha|bot challenge/i.test(challengeText) ||
+      document.querySelector('iframe[src*="captcha"], .g-recaptcha, [data-sitekey]')) {
+    return {kind: 'challenge', url: window.location.href};
+  }
+  const product = capturePageProduct();
+  const productSeen = !!(product.name || product.sku || product.product_id || product.color);
+  if (productSeen) {
+    await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
+      let gallery = [];
+      try { gallery = captureGallery(config, 'site'); } catch (_) { /* Still loading. */ }
+      return {productSeen: true, gallery};
+    }, {timeoutMs: 8000, pollMs: 200});
+    const selector = config.product?.colorLinkSelector ||
+      config.product?.variantTriggers?.find(trigger => trigger.label === 'color')?.selector;
+    const colorLinks = selector ? Array.from(document.querySelectorAll(selector), node => node.href)
+      .filter(Boolean) : [];
+    return {kind: 'product', url: window.location.href, documentId: takeoverDocumentId,
+      product: {...product, category: takeoverCategory()}, colorLinks,
+      imageCount: captureGallery(config, 'site').length};
+  }
+  const selector = config.listing?.productLinkSelector;
+  const nextSelector = config.listing?.pagination?.nextSelector;
+  if (!selector || !nextSelector) throw new Error('listing selectors are missing');
+  let products = [];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    products = Array.from(document.querySelectorAll(selector), node => node.href).filter(Boolean);
+    if (products.length) break;
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  const next = document.querySelector(nextSelector)?.href || null;
+  const check = config.listing?.endCheck;
+  const node = check?.selector ? document.querySelector(check.selector) : null;
+  let end = null;
+  if (check?.type === 'explicit') end = {type: 'explicit', present: !!node};
+  if (check?.type === 'page-count') {
+    const match = node?.textContent?.match(/\bpage\s+(\d+)\s+(?:of|\/)\s+(\d+)\b/i);
+    if (match) end = {type: 'page-count', current: Number(match[1]), total: Number(match[2])};
+  }
+  if (check?.type === 'result-total') {
+    const match = node?.textContent?.match(/\b(\d+)\s+(?:results?|items?|products?)\b/i);
+    if (match) end = {type: 'result-total', total: Number(match[1])};
+  }
+  return {kind: 'listing', url: window.location.href,
+    documentId: takeoverDocumentId, products, next, end};
+}
+
+// A site must be explicitly enabled in the panel, and must have a product
+// selector config. Unknown sites remain a manual, user-selected workflow.
+setTimeout(async () => {
+  const config = await loadCaptureSiteConfig();
+  if (!config?.product?.allImagesSelector) return;
+  chrome.storage.local.get({captureAutoDomains: {}}, async result => {
+    if (!result.captureAutoDomains[window.location.hostname]) return;
+    try {
+      if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
+      const ready = await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
+        const product = capturePageProduct();
+        let gallery = [];
+        try { gallery = captureGallery(config, 'site'); } catch (_) { /* Gallery may render later. */ }
+        return {productSeen: !!(product.name || product.sku || product.product_id || product.color), gallery};
+      }, {timeoutMs: 8000, pollMs: 200});
+      if (!ready) return;
+      if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
+      await captureCurrentProduct({manual: false, autoPageLoad: true});
+    } catch (error) {
+      await recordCaptureFailure(error);
+      console.warn('Automatic local product capture failed:', error);
+    }
+  });
+}, 1000);
+
+// Share the panel entry point between Chrome's toolbar and a page-level shortcut.
+function openImageSelector(sendResponse = () => {}) {
+  const existingContainer = document.getElementById('image-selector-container');
+  if (existingContainer) {
+    sendResponse({success: true, count: parseInt(existingContainer.getAttribute('data-images-count') || '0')});
+    return true;
+  }
+
+  currentDomain = getCurrentDomain();
+  loadDomainSettings(currentDomain, (settings) => {
+    domainSettings = settings;
+    const images = findAllImages();
+    createImageSelectionUI(images);
+    sendResponse({success: true, count: images.length});
+  });
+  return true;
+}
+
+// Browser automation can send this shortcut to the page even when it cannot
+// operate Chrome's extension toolbar or its browser-level shortcut.
+document.addEventListener('keydown', (event) => {
+  if (!globalThis.PageImageSaverHelpers.isFindImagesPageShortcut(event)) return;
+  event.preventDefault();
+  openImageSelector();
+}, true);
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'takeoverInspect') {
+    loadCaptureSiteConfig().then(config => {
+      if (!config) throw new Error('site config unavailable');
+      return inspectTakeoverPage(config);
+    }).then(page => sendResponse({success: true, page}))
+      .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+    return true;
+  } else if (message.action === 'takeoverDocumentCheck') {
+    sendResponse({success: true, documentId: takeoverDocumentId, url: window.location.href});
+    return false;
+  } else if (message.action === 'takeoverCapture') {
+    try { assertTakeoverBinding(message.binding); }
+    catch (error) { sendResponse({success: false, error: error.message}); return false; }
+    captureCurrentProduct({manual: false, scopeOverride: message.scope,
+      binding: message.binding})
+      .then(result => sendResponse({success: true, result}))
+      .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+    return true;
+  } else if (message.action === 'findImages') {
+    return openImageSelector(sendResponse);
   } else if (message.action === 'takeScreenshot') {
     if (window.PageScreenshot) {
       window.PageScreenshot.initiateScreenshot();

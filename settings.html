@@ -362,6 +362,24 @@
 
     <!-- Local Download Settings -->
     <div class="form-section">
+      <h2>Local Capture Receiver</h2>
+      <div class="checkbox-group">
+        <input type="checkbox" id="receiver-enabled" name="receiverEnabled">
+        <label for="receiver-enabled">Send product captures to a local receiver</label>
+      </div>
+      <div class="input-group">
+        <label for="receiver-url">Receiver URL:</label>
+        <input type="url" id="receiver-url" placeholder="http://192.168.1.100:8765">
+      </div>
+      <div class="input-group">
+        <label for="receiver-token">Receiver token:</label>
+        <input type="password" id="receiver-token" autocomplete="off">
+        <div class="help-text">An unreachable receiver falls back to Downloads. Authorization and validation failures remain visible errors.</div>
+      </div>
+    </div>
+
+    <!-- Local Download Settings -->
+    <div class="form-section">
       <h2>Local Download Settings</h2>
       <div class="input-group">
         <button type="button" id="gold-capture-preset" class="primary-button">Use lingerie_trends Gold Capture</button>

@@ -116,6 +116,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('local-subfolder').checked = settings.local.subfolderPerDomain || false;
         document.getElementById('local-save-json').checked = settings.local.saveJson || false;
       }
+      document.getElementById('receiver-enabled').checked = settings.receiver?.enabled === true;
+      document.getElementById('receiver-url').value = settings.receiver?.url || '';
+      document.getElementById('receiver-token').value = settings.receiver?.token || '';
       
       // Set retry settings
       if (settings.retry) {
@@ -175,6 +178,11 @@ document.addEventListener('DOMContentLoaded', () => {
         subfolderPerDomain: document.getElementById('local-subfolder').checked,
         saveJson: document.getElementById('local-save-json').checked,
         baseFolder: document.getElementById('local-base-folder').value || 'PageImageSaver'
+      },
+      receiver: {
+        enabled: document.getElementById('receiver-enabled').checked,
+        url: document.getElementById('receiver-url').value.trim(),
+        token: document.getElementById('receiver-token').value
       },
       retry: {
         enabled: document.getElementById('retry-enabled').checked,
@@ -484,6 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
         saveJson: false,
         baseFolder: 'PageImageSaver'
       },
+      receiver: {enabled: false, url: '', token: ''},
       retry: {
         enabled: true,
         showNotification: true,

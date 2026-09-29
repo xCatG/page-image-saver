@@ -51,6 +51,7 @@ function loadSettingsPage({ writeError = null } = {}) {
       enabled: false, subfolderPerDomain: false, saveJson: false,
       baseFolder: 'My Gold Evidence'
     },
+    receiver: {enabled: true, url: 'http://192.168.1.100:8765', token: 'fixture-token'},
     retry: { enabled: true, showNotification: true, maxRetries: 3 },
     preserveFilenames: true,
     addMetadata: true,
@@ -109,6 +110,9 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
 
   assert.equal(writes.length, 1);
   const saved = writes[0].imageUploaderSettings;
+  assert.equal(saved.receiver.enabled, true);
+  assert.equal(saved.receiver.url, 'http://192.168.1.100:8765');
+  assert.equal(saved.receiver.token, 'fixture-token');
   assert.deepEqual(JSON.parse(JSON.stringify(saved.local)), {
     enabled: true,
     subfolderPerDomain: true,
@@ -123,6 +127,18 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
   assert.equal(saved.r2.bucketName, '');
   assert.equal(saved.r2.apiToken, '');
   assert.equal(saved.r2.makePublic, false);
+});
+
+test('receiver settings survive form save independently of the gold preset', () => {
+  const {getElement, writes} = loadSettingsPage();
+  assert.equal(getElement('receiver-enabled').checked, true);
+  assert.equal(getElement('receiver-url').value, 'http://192.168.1.100:8765');
+  assert.equal(getElement('receiver-token').value, 'fixture-token');
+  getElement('receiver-url').value = 'http://127.0.0.1:8765';
+  getElement('settings-form').dispatchEvent({type: 'submit', preventDefault() {}});
+  assert.deepEqual(JSON.parse(JSON.stringify(writes[0].imageUploaderSettings.receiver)), {
+    enabled: true, url: 'http://127.0.0.1:8765', token: 'fixture-token'
+  });
 });
 
 test('gold capture preset leaves old cloud fields visible and reports sync write failure', () => {

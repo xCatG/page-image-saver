@@ -112,6 +112,9 @@
       });
 
       try {
+        if (totalW > viewW) {
+          throw new Error('Full-page screenshot has horizontal overflow; use visible-area capture instead.');
+        }
         const canvasSize = globalThis.PageImageSaverHelpers.getSafeCanvasSize(totalW, totalH, dpr);
         const canvas = document.createElement('canvas');
         canvas.width = canvasSize.width;

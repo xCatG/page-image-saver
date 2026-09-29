@@ -2,6 +2,8 @@
     "domain": "lisecharmel.com",
     "platform": "magento",
     "botProtection": [],
+    "colorVariantStrategy": "separate-url",
+    "takeover": {"intervalMs": 10000},
     "listing": {
       "productLinkSelector": "a.product-item-link",
       "pagination": {
@@ -10,6 +12,7 @@
       }
     },
     "product": {
+      "colorLinkSelector": ".colors-container .color-item a",
       "variantTriggers": [
         {
           "label": "color",
