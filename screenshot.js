@@ -44,7 +44,6 @@
       const viewH = globalThis.PageImageSaverHelpers.getScrollStep(window.innerHeight);
       const totalW = document.documentElement.scrollWidth;
       const totalH = document.documentElement.scrollHeight;
-      const maxH = globalThis.PageImageSaverHelpers.getSafeCanvasHeight(totalH, dpr);
       const origScrollX = window.scrollX;
       const origScrollY = window.scrollY;
 
@@ -64,22 +63,46 @@
 
       document.querySelectorAll('*').forEach(hideFixedEl);
 
+      const pendingScans = [];
+      const scannedNodes = new WeakSet();
+      let scanPromise = null;
+      let scanCancelled = false;
+      const scanAddedNodes = async () => {
+        let batchSize = 0;
+        while (!scanCancelled && pendingScans.length) {
+          const next = pendingScans[0].next();
+          if (next.done) {
+            pendingScans.shift();
+            continue;
+          }
+          hideFixedEl(next.value);
+          if (++batchSize >= 100) {
+            batchSize = 0;
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
+        }
+      };
+      const scheduleScan = () => {
+        if (scanCancelled || scanPromise) return;
+        scanPromise = scanAddedNodes().finally(() => {
+          scanPromise = null;
+          if (!scanCancelled && pendingScans.length) scheduleScan();
+        });
+      };
       const observer = new MutationObserver(mutations => {
         for (const m of mutations) {
           for (const node of m.addedNodes) {
-            globalThis.PageImageSaverHelpers.getElementsForFixedCheck(node).forEach(hideFixedEl);
+            if (node.nodeType === 1) {
+              pendingScans.push(globalThis.PageImageSaverHelpers.getElementsForFixedCheck(node, scannedNodes));
+            }
           }
           if (m.type === 'attributes' && m.target.nodeType === 1) {
             hideFixedEl(m.target);
           }
         }
+        if (pendingScans.length) scheduleScan();
       });
       observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
-
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(totalW * dpr);
-      canvas.height = Math.round(maxH * dpr);
-      const ctx = canvas.getContext('2d');
 
       const loadImage = (dataUrl) => new Promise((resolve, reject) => {
         const img = new Image();
@@ -89,6 +112,13 @@
       });
 
       try {
+        const canvasSize = globalThis.PageImageSaverHelpers.getSafeCanvasSize(totalW, totalH, dpr);
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasSize.width;
+        canvas.height = canvasSize.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Screenshot 2D canvas context is unavailable');
+
         let y = 0;
         while (true) {
           // Clamp scroll so last partial strip aligns to bottom of page
@@ -97,17 +127,35 @@
           // Wait for scroll + lazy-load/repaint to settle.
           // 500ms also keeps us safely under captureVisibleTab's 2/sec quota.
           await new Promise(r => setTimeout(r, 500));
+          while (scanPromise) await scanPromise;
 
           const dataUrl = await this.captureVisiblePart();
           const img = await loadImage(dataUrl);
           // Draw at actual scroll position (overlap on last strip is fine — same pixels)
           ctx.drawImage(img, 0, Math.round(scrollY * dpr));
 
-          if (y + viewH >= maxH) break;
+          if (y + viewH >= totalH) break;
           y += viewH;
         }
+
+        // Use JPEG (much smaller than PNG for photo-heavy pages).
+        // If still approaching the 64MiB sendMessage limit, scale down.
+        let dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        if (dataUrl.length > 48 * 1024 * 1024) {
+          const scale = Math.sqrt((48 * 1024 * 1024) / dataUrl.length);
+          const scaled = document.createElement('canvas');
+          scaled.width = Math.round(canvas.width * scale);
+          scaled.height = Math.round(canvas.height * scale);
+          const scaledCtx = scaled.getContext('2d');
+          if (!scaledCtx) throw new Error('Screenshot 2D canvas context is unavailable for scaling');
+          scaledCtx.drawImage(canvas, 0, 0, scaled.width, scaled.height);
+          dataUrl = scaled.toDataURL('image/jpeg', 0.85);
+        }
+        return dataUrl;
       } finally {
         observer.disconnect();
+        scanCancelled = true;
+        pendingScans.length = 0;
         hiddenEls.forEach(el => {
           el.style.visibility = el.dataset._screenshotHidden;
           delete el.dataset._screenshotHidden;
@@ -115,19 +163,6 @@
         window.scrollTo(origScrollX, origScrollY);
         if (container) container.style.display = '';
       }
-
-      // Use JPEG (much smaller than PNG for photo-heavy pages).
-      // If still approaching the 64MiB sendMessage limit, scale down.
-      let dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      if (dataUrl.length > 48 * 1024 * 1024) {
-        const scale = Math.sqrt((48 * 1024 * 1024) / dataUrl.length);
-        const scaled = document.createElement('canvas');
-        scaled.width = Math.round(canvas.width * scale);
-        scaled.height = Math.round(canvas.height * scale);
-        scaled.getContext('2d').drawImage(canvas, 0, 0, scaled.width, scaled.height);
-        dataUrl = scaled.toDataURL('image/jpeg', 0.85);
-      }
-      return dataUrl;
     },
     
     // Process the screenshot

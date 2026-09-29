@@ -29,7 +29,7 @@ class FakeElement {
   querySelectorAll() { return []; }
 }
 
-test('gold capture preset saves a local-only sidecar configuration from the settings page', () => {
+function loadSettingsPage({ writeError = null } = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'settings.js'), 'utf8');
   const elements = new Map();
   const getElement = id => {
@@ -87,7 +87,11 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
           }),
           set: (value, callback) => {
             writes.push(value);
-            if (callback) callback();
+            if (callback) {
+              sandbox.chrome.runtime.lastError = writeError ? { message: writeError } : null;
+              callback();
+              sandbox.chrome.runtime.lastError = null;
+            }
           }
         }
       },
@@ -97,18 +101,18 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
 
   vm.runInNewContext(source, sandbox, { filename: 'settings.js' });
   onReady();
-  assert.equal(getElement('receiver-enabled').checked, true);
-  assert.equal(getElement('receiver-url').value, 'http://192.168.1.100:8765');
-  assert.equal(getElement('receiver-token').value, 'fixture-token');
-  getElement('receiver-url').value = 'http://127.0.0.1:8765';
-  getElement('settings-form').dispatchEvent({type: 'submit', preventDefault() {}});
-  assert.deepEqual(JSON.parse(JSON.stringify(writes[0].imageUploaderSettings.receiver)), {
-    enabled: true, url: 'http://127.0.0.1:8765', token: 'fixture-token'
-  });
+  return { getElement, writes };
+}
+
+test('gold capture preset saves a local-only sidecar configuration from the settings page', () => {
+  const { getElement, writes } = loadSettingsPage();
   getElement('gold-capture-preset').dispatchEvent({ type: 'click' });
 
-  assert.equal(writes.length, 2);
-  const saved = writes[1].imageUploaderSettings;
+  assert.equal(writes.length, 1);
+  const saved = writes[0].imageUploaderSettings;
+  assert.equal(saved.receiver.enabled, true);
+  assert.equal(saved.receiver.url, 'http://192.168.1.100:8765');
+  assert.equal(saved.receiver.token, 'fixture-token');
   assert.deepEqual(JSON.parse(JSON.stringify(saved.local)), {
     enabled: true,
     subfolderPerDomain: true,
@@ -123,4 +127,29 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
   assert.equal(saved.r2.bucketName, '');
   assert.equal(saved.r2.apiToken, '');
   assert.equal(saved.r2.makePublic, false);
+});
+
+test('receiver settings survive form save independently of the gold preset', () => {
+  const {getElement, writes} = loadSettingsPage();
+  assert.equal(getElement('receiver-enabled').checked, true);
+  assert.equal(getElement('receiver-url').value, 'http://192.168.1.100:8765');
+  assert.equal(getElement('receiver-token').value, 'fixture-token');
+  getElement('receiver-url').value = 'http://127.0.0.1:8765';
+  getElement('settings-form').dispatchEvent({type: 'submit', preventDefault() {}});
+  assert.deepEqual(JSON.parse(JSON.stringify(writes[0].imageUploaderSettings.receiver)), {
+    enabled: true, url: 'http://127.0.0.1:8765', token: 'fixture-token'
+  });
+});
+
+test('gold capture preset leaves old cloud fields visible and reports sync write failure', () => {
+  const { getElement, writes } = loadSettingsPage({ writeError: 'QUOTA_BYTES quota exceeded' });
+  getElement('gold-capture-preset').dispatchEvent({ type: 'click' });
+
+  assert.equal(writes.length, 1);
+  assert.equal(getElement('s3-bucket').value, 'bucket');
+  assert.equal(getElement('s3-access-key').value, 'access');
+  assert.equal(getElement('local-enabled').checked, false);
+  assert.match(getElement('status-message').innerHTML, /alert-error/);
+  assert.match(getElement('status-message').innerHTML, /previous storage settings remain active/i);
+  assert.doesNotMatch(getElement('status-message').innerHTML, /applied and saved/i);
 });

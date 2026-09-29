@@ -10,6 +10,8 @@
       }
     },
     "colorVariantStrategy": "separate-url",
+    "allImagesSelector": ".pdp-product-images__image img.main-pdp-image",
+    "imageUrlPattern": "imagedelivery\\\\.net/[^/]+/prod/production/",
     "product": {
       "variantTriggers": [
         {

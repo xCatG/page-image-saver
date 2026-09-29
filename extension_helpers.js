@@ -24,15 +24,35 @@
     return viewportHeight > 0 ? viewportHeight : 500;
   }
 
-  function getSafeCanvasHeight(totalHeight, dpr, maxCanvasEdge = 16384) {
-    const safeDpr = dpr > 0 ? dpr : 1;
-    return Math.min(totalHeight, Math.floor(maxCanvasEdge / safeDpr));
+  function getSafeCanvasSize(totalWidth, totalHeight, dpr, maxCanvasEdge = 16384, maxCanvasPixels = 67108864) {
+    const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+    const width = Math.round(totalWidth * safeDpr);
+    if (!Number.isFinite(width) || width < 1 || width > maxCanvasEdge) {
+      throw new Error(`Full-page screenshot canvas width exceeds the supported ${maxCanvasEdge}-pixel limit. Use visible-area capture instead.`);
+    }
+    const height = Math.round(totalHeight * safeDpr);
+    if (!Number.isFinite(height) || height < 1 || height > maxCanvasEdge) {
+      throw new Error(`Full-page screenshot canvas height exceeds the supported ${maxCanvasEdge}-pixel limit. Use visible-area capture instead.`);
+    }
+    if (width * height > maxCanvasPixels) {
+      throw new Error('Full-page screenshot canvas pixel area exceeds the supported limit. Use visible-area capture instead.');
+    }
+    return { width, height };
   }
 
-  function getElementsForFixedCheck(node) {
-    if (!node || node.nodeType !== 1) return [];
-    const children = node.children ? Array.from(node.children) : [];
-    return [node, ...children];
+  function* getElementsForFixedCheck(node, seen = new WeakSet()) {
+    const stack = [node];
+    while (stack.length) {
+      const current = stack.pop();
+      if (!current || current.nodeType !== 1 || seen.has(current)) continue;
+      seen.add(current);
+      yield current;
+      if (current.children) {
+        for (let i = current.children.length - 1; i >= 0; i--) {
+          stack.push(current.children[i]);
+        }
+      }
+    }
   }
 
   function buildCaptureVisibleTabResponse(lastError, dataUrl) {
@@ -504,7 +524,7 @@
     isFindImagesPageShortcut,
     filenameFromUrl,
     getScrollStep,
-    getSafeCanvasHeight,
+    getSafeCanvasSize,
     getElementsForFixedCheck,
     buildCaptureVisibleTabResponse,
     buildGoldCaptureSettings
