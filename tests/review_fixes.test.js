@@ -6,6 +6,23 @@ const vm = require('node:vm');
 
 const helpers = require('../extension_helpers.js');
 
+test('folder paths preserve safe tag subfolders and Unicode', () => {
+  assert.equal(helpers.sanitizeFolderPath('x.com/下着売ります'), 'x.com/下着売ります');
+  assert.equal(helpers.sanitizeFolderPath('x.com\\制服売ります'), 'x.com/制服売ります');
+});
+
+test('folder paths reject traversal and invalid Windows names', () => {
+  assert.equal(helpers.sanitizeFolderPath('../x.com/制服売ります'), 'x.com/制服売ります');
+  assert.equal(helpers.sanitizeFolderPath('x.com/../../CON/hi:there'), 'x.com/_CON/hi_there');
+});
+
+test('page shortcut only matches outside editable controls', () => {
+  const event = { key: 'I', altKey: true, shiftKey: true, ctrlKey: true, metaKey: false, target: { tagName: 'DIV', isContentEditable: false } };
+  assert.equal(helpers.isFindImagesPageShortcut(event), true);
+  assert.equal(helpers.isFindImagesPageShortcut({ ...event, target: { tagName: 'INPUT', isContentEditable: false } }), false);
+  assert.equal(helpers.isFindImagesPageShortcut({ ...event, ctrlKey: false }), false);
+});
+
 test('filenameFromUrl returns fallback for missing or non-string URLs', () => {
   assert.equal(helpers.filenameFromUrl(null, 'fallback.jpg'), 'fallback.jpg');
   assert.equal(helpers.filenameFromUrl(undefined, 'fallback.jpg'), 'fallback.jpg');

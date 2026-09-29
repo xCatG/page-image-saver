@@ -2161,34 +2161,35 @@ function saveImagesToStorage(images) {
   console.debug(`[CONTENT LOG] SaveImagesToStorage function completed, waiting for async responses`);
 }
 
-// Initialize when the user clicks the extension icon or uses keyboard shortcut
+// Share the panel entry point between Chrome's toolbar and a page-level shortcut.
+function openImageSelector(sendResponse = () => {}) {
+  const existingContainer = document.getElementById('image-selector-container');
+  if (existingContainer) {
+    sendResponse({success: true, count: parseInt(existingContainer.getAttribute('data-images-count') || '0')});
+    return true;
+  }
+
+  currentDomain = getCurrentDomain();
+  loadDomainSettings(currentDomain, (settings) => {
+    domainSettings = settings;
+    const images = findAllImages();
+    createImageSelectionUI(images);
+    sendResponse({success: true, count: images.length});
+  });
+  return true;
+}
+
+// Browser automation can send this shortcut to the page even when it cannot
+// operate Chrome's extension toolbar or its browser-level shortcut.
+document.addEventListener('keydown', (event) => {
+  if (!globalThis.PageImageSaverHelpers.isFindImagesPageShortcut(event)) return;
+  event.preventDefault();
+  openImageSelector();
+}, true);
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'findImages') {
-    // Check if UI is already open, and just return success if it is
-    const existingContainer = document.getElementById('image-selector-container');
-    if (existingContainer) {
-      sendResponse({success: true, count: parseInt(existingContainer.getAttribute('data-images-count') || '0')});
-      return true;
-    }
-    
-    // Get current domain and load saved settings for it
-    currentDomain = getCurrentDomain();
-    
-    loadDomainSettings(currentDomain, (settings) => {
-      // Update domain settings
-      domainSettings = settings;
-      
-      // Find all images with the loaded filter settings
-      const images = findAllImages();
-      
-      // Create the UI with the images
-      createImageSelectionUI(images);
-      
-      // Send response with the count
-      sendResponse({success: true, count: images.length});
-    });
-    
-    return true; // Keep the message channel open for async response
+    return openImageSelector(sendResponse);
   } else if (message.action === 'takeScreenshot') {
     if (window.PageScreenshot) {
       window.PageScreenshot.initiateScreenshot();

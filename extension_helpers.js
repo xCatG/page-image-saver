@@ -45,6 +45,34 @@
     return { error: 'Failed to capture screenshot' };
   }
 
+  /** Keep user folder paths relative while preserving Unicode and safe subfolders. */
+  function sanitizeFolderPath(name) {
+    const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+    return String(name || '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(part => part && part !== '.' && part !== '..')
+      .map(part => {
+        let safe = part.replace(/[<>:"|?*\x00-\x1f]/g, '_')
+          .replace(/^[. ]+|[. ]+$/g, '')
+          .substring(0, 100);
+        if (reserved.test(safe)) safe = '_' + safe;
+        return safe;
+      })
+      .filter(Boolean)
+      .join('/')
+      .substring(0, 240);
+  }
+
+  /** Match the page-level shortcut used when automation cannot reach Chrome's toolbar. */
+  function isFindImagesPageShortcut(event) {
+    const target = event.target || {};
+    const tag = (target.tagName || '').toUpperCase();
+    return event.key?.toLowerCase() === 'i'
+      && event.ctrlKey && event.altKey && event.shiftKey && !event.metaKey
+      && !target.isContentEditable && !['INPUT', 'TEXTAREA', 'SELECT'].includes(tag);
+  }
+
   function buildGoldCaptureSettings(settings) {
     const current = settings || {};
     const local = current.local || {};
@@ -82,6 +110,8 @@
   }
 
   const helpers = {
+    sanitizeFolderPath,
+    isFindImagesPageShortcut,
     filenameFromUrl,
     getScrollStep,
     getSafeCanvasHeight,

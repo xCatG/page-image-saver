@@ -1235,16 +1235,6 @@ function extractBaseDomain(domain) {
   }
 }
 
-// Sanitize a user-supplied folder name to prevent path traversal
-function sanitizeFolderName(name) {
-  return (name || '')
-    .replace(/\.\./g, '')          // strip traversal sequences
-    .replace(/[/\\]/g, '_')        // replace path separators
-    .replace(/[^a-zA-Z0-9._\-]/g, '_') // keep safe chars only
-    .replace(/^[._]+/, '')         // no leading dots/underscores
-    .substring(0, 100);
-}
-
 // Sanitize domain name for folder use
 function sanitizeDomain(domain) {
   // Extract the base domain first
@@ -1298,9 +1288,9 @@ async function blobToDataUrl(blob) {
 // in MV3 service workers. The filename field sets the full subpath inside
 // Downloads/ directly, so no onDeterminingFilename indirection is needed.
 async function saveToDownloads(blob, filename, domain) {
-  let localPath = sanitizeFolderName(CONFIG.local.baseFolder) || 'PageImageSaver';
+  let localPath = globalThis.PageImageSaverHelpers.sanitizeFolderPath(CONFIG.local.baseFolder) || 'PageImageSaver';
   if (domain) {
-    localPath += '/' + sanitizeFolderName(domain);
+    localPath += '/' + globalThis.PageImageSaverHelpers.sanitizeFolderPath(domain);
   }
   localPath += '/' + filename;
   localPath = localPath.replace(/\\/g, '/').replace(/\/{2,}/g, '/');

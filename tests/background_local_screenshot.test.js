@@ -116,7 +116,7 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
 
   assert.equal(openedTabs.length, 0);
   assert.equal(downloads.length, 1);
-  assert.equal(downloads[0].filename, 'Gold_Evidence/shop.example.com/product.png');
+  assert.equal(downloads[0].filename, 'Gold Evidence/shop.example.com/product.png');
   assert.deepEqual(JSON.parse(JSON.stringify(responses)), [
     { success: true, url: 'File saved' }
   ]);
