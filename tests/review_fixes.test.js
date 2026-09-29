@@ -35,14 +35,19 @@ test('getElementsForFixedCheck reaches nested descendants once across overlappin
   assert.deepEqual([...helpers.getElementsForFixedCheck(child, seen)], []);
 });
 
-test('getSafeCanvasSize bounds both canvas edges and pixel area', () => {
-  assert.deepEqual(helpers.getSafeCanvasSize(1000, 100000, 2), {
-    width: 2000, height: 16384, captureHeight: 8192
+test('getSafeCanvasSize accepts a complete page within both edge and area limits', () => {
+  assert.deepEqual(helpers.getSafeCanvasSize(1000, 3000, 2), {
+    width: 2000, height: 6000
   });
-  assert.deepEqual(helpers.getSafeCanvasSize(10000, 100000, 1), {
-    width: 10000, height: 6710, captureHeight: 6710
+  assert.deepEqual(helpers.getSafeCanvasSize(8192, 8192, 1), {
+    width: 8192, height: 8192
   });
-  assert.throws(() => helpers.getSafeCanvasSize(20000, 100, 2), /canvas width/i);
+});
+
+test('getSafeCanvasSize rejects pages requiring truncation with a visible-area alternative', () => {
+  assert.throws(() => helpers.getSafeCanvasSize(20000, 100, 2), /canvas width.*visible-area/i);
+  assert.throws(() => helpers.getSafeCanvasSize(1000, 100000, 2), /canvas height.*visible-area/i);
+  assert.throws(() => helpers.getSafeCanvasSize(9000, 9000, 1), /pixel area.*visible-area/i);
 });
 
 test('buildCaptureVisibleTabResponse propagates background capture errors', () => {
@@ -188,12 +193,12 @@ test('captureVisiblePart retries quota errors returned by the background script'
   assert.equal(attempts, 2);
 });
 
-function loadFullPageScreenshot({ width = 100, height = 300, context = { drawImage() {} }, onStyleCheck = () => {}, scheduleTimeout = callback => callback() } = {}) {
+function loadFullPageScreenshot({ width = 100, height = 300, dpr = 1, context = { drawImage() {} }, onStyleCheck = () => {}, scheduleTimeout = callback => callback() } = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'screenshot.js'), 'utf8');
   const container = { style: { display: 'block' } };
   let observer;
   const window = {
-    devicePixelRatio: 1, innerWidth: 100, innerHeight: 100,
+    devicePixelRatio: dpr, innerWidth: 100, innerHeight: 100,
     scrollX: 0, scrollY: 25, scrollTo(x, y) { this.scrollX = x; this.scrollY = y; }
   };
   const sandbox = {
@@ -304,6 +309,19 @@ test('full-page capture rejects an overwide canvas before capture and restores p
   page.screenshot.captureVisiblePart = async () => { captures++; return 'data:image/png;base64,ok'; };
 
   await assert.rejects(page.screenshot.captureFullPage(), /canvas width/i);
+
+  assert.equal(captures, 0);
+  assert.equal(page.getObserver().disconnected, true);
+  assert.equal(page.container.style.display, '');
+  assert.equal(page.window.scrollY, 25);
+});
+
+test('full-page capture rejects a wide long page before capturing a partial image', async () => {
+  const page = loadFullPageScreenshot({ width: 3840, height: 10000, dpr: 2 });
+  let captures = 0;
+  page.screenshot.captureVisiblePart = async () => { captures++; return 'data:image/png;base64,ok'; };
+
+  await assert.rejects(page.screenshot.captureFullPage(), /visible-area/i);
 
   assert.equal(captures, 0);
   assert.equal(page.getObserver().disconnected, true);

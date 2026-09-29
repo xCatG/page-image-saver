@@ -28,18 +28,16 @@
     const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
     const width = Math.round(totalWidth * safeDpr);
     if (!Number.isFinite(width) || width < 1 || width > maxCanvasEdge) {
-      throw new Error(`Screenshot canvas width exceeds the supported ${maxCanvasEdge}-pixel limit`);
+      throw new Error(`Full-page screenshot canvas width exceeds the supported ${maxCanvasEdge}-pixel limit. Use visible-area capture instead.`);
     }
-    const captureHeight = Math.min(
-      totalHeight,
-      Math.floor(maxCanvasEdge / safeDpr),
-      Math.floor(Math.floor(maxCanvasPixels / width) / safeDpr)
-    );
-    const height = Math.round(captureHeight * safeDpr);
-    if (!Number.isFinite(height) || height < 1) {
-      throw new Error('Screenshot canvas height is too small for this page width and display scale');
+    const height = Math.round(totalHeight * safeDpr);
+    if (!Number.isFinite(height) || height < 1 || height > maxCanvasEdge) {
+      throw new Error(`Full-page screenshot canvas height exceeds the supported ${maxCanvasEdge}-pixel limit. Use visible-area capture instead.`);
     }
-    return { width, height, captureHeight };
+    if (width * height > maxCanvasPixels) {
+      throw new Error('Full-page screenshot canvas pixel area exceeds the supported limit. Use visible-area capture instead.');
+    }
+    return { width, height };
   }
 
   function* getElementsForFixedCheck(node, seen = new WeakSet()) {

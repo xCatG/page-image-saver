@@ -134,7 +134,7 @@
           // Draw at actual scroll position (overlap on last strip is fine — same pixels)
           ctx.drawImage(img, 0, Math.round(scrollY * dpr));
 
-          if (y + viewH >= canvasSize.captureHeight) break;
+          if (y + viewH >= totalH) break;
           y += viewH;
         }
 
