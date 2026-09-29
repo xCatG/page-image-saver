@@ -963,8 +963,8 @@ document.body.appendChild(container);
     const button = event.currentTarget;
     button.disabled = true;
     try {
-      await captureCurrentProduct({manual: true});
-      showStatusMessage('Local product bundle exported. Run capture-import to verify Downloads bytes.', 'success');
+      const result = await captureCurrentProduct({manual: true});
+      showStatusMessage(globalThis.PageImageSaverHelpers.captureResultMessage(result), 'success');
     } catch (error) {
       await recordCaptureFailure(error);
       showStatusMessage(`Product capture failed: ${error.message}`, 'error');

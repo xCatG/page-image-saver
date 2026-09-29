@@ -12,21 +12,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.action !== 'captureProductLocal') return false;
   const helpers = globalThis.PageImageSaverHelpers;
-  helpers.exportProductCapture(message.payload, {
-    fetchImage: async url => {
-      const response = await fetch(url, {credentials: 'include'});
-      if (!response.ok) throw new Error(`image HTTP ${response.status}: ${url}`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      return {bytes, fetched_url: response.url};
-    },
+  const fetchImage = async url => {
+    const response = await fetch(url, {credentials: 'include'});
+    if (!response.ok) throw new Error(`image HTTP ${response.status}: ${url}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return {bytes, fetched_url: response.url};
+  };
+  const download = () => helpers.exportProductCapture(message.payload, {
+    fetchImage,
     saveBytes: async (filename, bytes) => {
       const dataUrl = await blobToDataUrl(new Blob([bytes], {type: 'application/octet-stream'}));
       await helpers.saveCaptureDownload(chrome, dataUrl, filename);
     }
-  }).then(record => sendResponse({success: true, record}))
+  });
+  const save = CONFIG.receiver?.enabled === true
+    ? helpers.captureWithReceiver(message.payload, CONFIG.receiver, {
+      fetch: (...args) => fetch(...args), fetchImage, download
+    })
+    : download().then(record => ({storage: 'downloads', status: 'published', record}));
+  save.then(result => sendResponse({success: true, ...result}))
     .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
   return true;
 });
+
+/*
+  The product capture path above is intentionally separate from the legacy
+  image/screenshot upload handlers below. The receiver has no S3/R2 fallback.
+*/
 
 //background.js
 // Debugging helper - will show a notification with download paths

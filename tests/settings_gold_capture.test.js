@@ -51,6 +51,7 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
       enabled: false, subfolderPerDomain: false, saveJson: false,
       baseFolder: 'My Gold Evidence'
     },
+    receiver: {enabled: true, url: 'http://192.168.1.100:8765', token: 'fixture-token'},
     retry: { enabled: true, showNotification: true, maxRetries: 3 },
     preserveFilenames: true,
     addMetadata: true,
@@ -96,10 +97,18 @@ test('gold capture preset saves a local-only sidecar configuration from the sett
 
   vm.runInNewContext(source, sandbox, { filename: 'settings.js' });
   onReady();
+  assert.equal(getElement('receiver-enabled').checked, true);
+  assert.equal(getElement('receiver-url').value, 'http://192.168.1.100:8765');
+  assert.equal(getElement('receiver-token').value, 'fixture-token');
+  getElement('receiver-url').value = 'http://127.0.0.1:8765';
+  getElement('settings-form').dispatchEvent({type: 'submit', preventDefault() {}});
+  assert.deepEqual(JSON.parse(JSON.stringify(writes[0].imageUploaderSettings.receiver)), {
+    enabled: true, url: 'http://127.0.0.1:8765', token: 'fixture-token'
+  });
   getElement('gold-capture-preset').dispatchEvent({ type: 'click' });
 
-  assert.equal(writes.length, 1);
-  const saved = writes[0].imageUploaderSettings;
+  assert.equal(writes.length, 2);
+  const saved = writes[1].imageUploaderSettings;
   assert.deepEqual(JSON.parse(JSON.stringify(saved.local)), {
     enabled: true,
     subfolderPerDomain: true,

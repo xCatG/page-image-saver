@@ -121,3 +121,8 @@ To update the extension after making changes:
 - Never include sensitive API keys or credentials directly in the extension code
 - Always use a backend service to handle authenticated requests to your storage service
 - Consider adding additional authentication to your backend service
+# Local product capture receiver
+
+For private product captures, open Settings and enable **Local Capture Receiver**. Enter the receiver's private LAN URL (for example `http://192.168.1.100:8765`) and the operator-provided token. Product captures use this receiver when enabled; a network outage retries briefly and then saves the complete bundle to Chrome Downloads. A receiver rejection remains an explicit capture error. Product captures never use the S3/R2 upload settings.
+
+The receiver must be running with the exact `chrome-extension://<extension ID>` origin allowed and its NAS marker validated. After WSL starts, run `lt.py capture-index` against the mounted `artifacts/catalog-capture/` tree; Downloads fallback bundles use `lt.py capture-import`. The Python project's `docs/catalog-capture-receiver.md` has the full deployment inputs and safety boundary.

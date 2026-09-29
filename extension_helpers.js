@@ -251,6 +251,101 @@
     return completion;
   }
 
+  async function captureWithReceiver(payload, settings, io) {
+    const url = new URL(settings.url);
+    const host = url.hostname.toLowerCase();
+    const privateIp = /^(?:127|10)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host);
+    if (!['http:', 'https:'].includes(url.protocol) || !privateIp && host !== 'localhost' &&
+        !host.endsWith('.local') || url.username || url.password || url.pathname !== '/' ||
+        url.search || url.hash || !settings.token) {
+      throw new Error('invalid local receiver URL or token');
+    }
+    const base = url.origin;
+    const fetcher = io.fetch || globalThis.fetch;
+    const delay = io.delay || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    const request = async (endpoint, method, body, extraHeaders = {}) => {
+      let lastNetworkError = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        let response;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), io.timeoutMs ?? 10000);
+        try {
+          response = await fetcher(base + endpoint, {method, body,
+            credentials: 'omit', referrerPolicy: 'no-referrer', signal: controller.signal,
+            headers: {'X-Capture-Token': settings.token,
+              'Content-Type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json',
+              ...extraHeaders}});
+        } catch (error) {
+          if (!(error instanceof TypeError) && error?.name !== 'AbortError') throw error;
+          lastNetworkError = error;
+          if (attempt === 2) break;
+          await delay(200 * (attempt + 1));
+          continue;
+        } finally {
+          clearTimeout(timeout);
+        }
+        let result;
+        try {
+          result = await response.json();
+        } catch (_) {
+          throw new Error('invalid receiver JSON response');
+        }
+        if (response.ok) return result;
+        if (![408, 429].includes(response.status) && response.status < 500) {
+          throw new Error(`receiver HTTP ${response.status}: ${result.error || 'rejected'}`);
+        }
+        if (attempt === 2) throw new Error(`receiver HTTP ${response.status}: ${result.error || 'transient failure'}`);
+        await delay(200 * (attempt + 1));
+      }
+      const failure = new Error(`receiver unreachable: ${lastNetworkError?.message || 'network error'}`);
+      failure.receiverUnreachable = true;
+      throw failure;
+    };
+    try {
+      const already = await request('/v1/already', 'POST', JSON.stringify({identity: payload.identity}));
+      if (already.complete === true) {
+        return {storage: 'receiver', status: 'already', captured_at: already.captured_at};
+      }
+      let publication = null;
+      await exportProductCapture(payload, {
+        attemptId: io.attemptId,
+        fetchImage: io.fetchImage,
+        saveBytes: async (filename, bytes) => {
+          if (filename.endsWith('/complete.json')) {
+            publication = await request('/v1/completion', 'POST', JSON.stringify({
+              bundle: filename.slice(0, -'/complete.json'.length),
+              record: JSON.parse(new TextDecoder().decode(bytes))
+            }));
+            return;
+          }
+          const digest = await captureSha256(bytes);
+          await request('/v1/evidence', 'PUT', bytes, {
+            'X-Capture-Path': filename, 'X-Content-SHA256': digest});
+        }
+      });
+      return {storage: 'receiver', status: publication.status, captured_at: publication.captured_at};
+    } catch (error) {
+      if (!error.receiverUnreachable) throw error;
+      const record = await io.download();
+      return {storage: 'downloads', status: 'fallback', reason: 'receiver unreachable', record};
+    }
+  }
+
+  function captureResultMessage(result) {
+    if (result.storage === 'receiver' && result.status === 'already') {
+      return 'Product already captured and verified on the local receiver.';
+    }
+    if (result.storage === 'receiver') {
+      return 'Product saved to the local receiver. Run capture-index in WSL to update the viewer.';
+    }
+    if (result.status === 'fallback') {
+      return 'Receiver unreachable; product bundle saved to Downloads. Run capture-import in WSL.';
+    }
+    return 'Local product bundle exported. Run capture-import to verify Downloads bytes.';
+  }
+
   function saveCaptureDownload(chromeApi, dataUrl, filename, timeoutMs = 120000) {
     return new Promise((resolve, reject) => {
       let id = null;
@@ -342,6 +437,8 @@
     recordCaptureFailure,
     buildCaptureCompletion,
     exportProductCapture,
+    captureWithReceiver,
+    captureResultMessage,
     saveCaptureDownload,
     sanitizeFolderPath,
     isFindImagesPageShortcut,
