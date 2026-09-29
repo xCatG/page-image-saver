@@ -879,6 +879,12 @@ function createImageSelectionUI(images) {
       <button id="deselect-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Deselect All</button>
       <button id="save-page-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer;">Save Page Images</button>
       <button id="capture-product-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #6b46a0; color: white; cursor: pointer;">Capture Product Locally</button>
+      <button id="takeover-preview-btn" type="button">Preview catalog</button>
+      <button id="takeover-start-btn" type="button">Take over</button>
+      <button id="takeover-pause-btn" type="button">Pause</button>
+      <button id="takeover-resume-btn" type="button">Resume</button>
+      <button id="takeover-stop-btn" type="button">Stop</button>
+      <button id="takeover-export-btn" type="button">Export run JSON</button>
       <button id="take-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Visible)</button>
       <button id="take-full-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Full Page)</button>
       <button id="close-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Close</button>
@@ -914,6 +920,7 @@ function createImageSelectionUI(images) {
       </div>
     </div>
     <div id="status-message" style="margin-top: 10px;"></div>
+    <div id="takeover-progress" role="status" style="margin-top: 8px; font-size: 12px; white-space: pre-wrap;"></div>
   `;
   container.appendChild(header);
   
@@ -972,6 +979,32 @@ document.body.appendChild(container);
       button.disabled = false;
     }
   });
+  document.getElementById('takeover-preview-btn').addEventListener('click', async () => {
+    try {
+      const config = await loadCaptureSiteConfig();
+      if (!config) throw new Error('No site config for catalog preview');
+      const page = await inspectTakeoverPage(config);
+      await takeoverRequest('takeoverPreview', {config, page});
+      await refreshTakeoverProgress();
+    } catch (error) { showStatusMessage(`Catalog preview failed: ${error.message}`, 'error'); }
+  });
+  for (const [button, action] of [['takeover-start-btn', 'takeoverStart'],
+    ['takeover-pause-btn', 'takeoverPause'], ['takeover-resume-btn', 'takeoverResume'],
+    ['takeover-stop-btn', 'takeoverStop'], ['takeover-export-btn', 'takeoverExport']]) {
+    document.getElementById(button).addEventListener('click', async () => {
+      try {
+        await takeoverRequest(action);
+        if (action === 'takeoverExport') showStatusMessage('Catalog run JSON saved to Downloads.', 'success');
+        await refreshTakeoverProgress();
+      }
+      catch (error) { showStatusMessage(`Catalog take-over: ${error.message}`, 'error'); }
+    });
+  }
+  void refreshTakeoverProgress();
+  const takeoverRefresh = setInterval(() => {
+    if (!document.contains(container)) clearInterval(takeoverRefresh);
+    else void refreshTakeoverProgress();
+  }, 2000);
 
   // Hide the local folder row if local saving is disabled in settings
   chrome.storage.sync.get('imageUploaderSettings', (result) => {
@@ -2278,7 +2311,7 @@ async function recordCaptureFailure(error) {
   return globalThis.PageImageSaverHelpers.recordCaptureFailure(chrome, window.location.href, error);
 }
 
-async function captureCurrentProduct({manual}) {
+async function captureCurrentProduct({manual, scopeOverride = null}) {
   const config = await loadCaptureSiteConfig();
   const mode = manual ? document.getElementById('capture-image-mode').value : 'site';
   const sameColorControl = manual ? document.getElementById('capture-same-color-selection') : null;
@@ -2304,9 +2337,10 @@ async function captureCurrentProduct({manual}) {
   const color = policy === 'url' ? captureSelectedColor(product) : state.color;
   const identity = globalThis.PageImageSaverHelpers.captureIdentity(url, policy, color);
   if (!product.color && color) product.color = color;
-  const decision = manual ? document.getElementById('capture-scope').value : 'review';
+  const decision = scopeOverride?.decision || (manual ? document.getElementById('capture-scope').value : 'review');
   const customReason = manual ? document.getElementById('capture-scope-reason').value.trim() : '';
-  const scope = {decision, reason: customReason || (manual ? `user-selected ${decision}` : 'automatic page-load capture; scope unclassified')};
+  const scope = {decision, reason: scopeOverride?.reason || customReason ||
+    (manual ? `user-selected ${decision}` : 'automatic page-load capture; scope unclassified')};
   const transform = config?.product?.highResTransform;
   const images = state.gallery.map(url => globalThis.PageImageSaverHelpers.captureImageUrls(url, transform));
   const payload = {identity, captured_at: new Date().toISOString(), scope, product,
@@ -2321,6 +2355,100 @@ async function captureCurrentProduct({manual}) {
   return result;
 }
 
+function takeoverRequest(action, data = {}) {
+  return new Promise((resolve, reject) => chrome.runtime.sendMessage({action, ...data}, response => {
+    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+    else if (!response?.success) reject(new Error(response?.error || 'catalog request failed'));
+    else resolve(response);
+  }));
+}
+
+async function refreshTakeoverProgress() {
+  const box = document.getElementById('takeover-progress');
+  if (!box) return;
+  try {
+    const {run, summary} = await takeoverRequest('takeoverStatus');
+    if (!run) { box.textContent = 'No catalog preview yet. Browse listing and product pages, then preview each page.'; return; }
+    const samples = (run.previews || []).map(page => `${page.kind}: ${page.url}` +
+      (page.products == null ? ` — ${page.product?.name || 'unknown product'}, ` +
+        `${page.imageCount || 0} gallery images, ${page.colorLinks || 0} color links, ` +
+        `${page.scope?.decision || 'review'} (${page.scope?.reason || 'unclassified'})` :
+        ` — ${page.products} product links, next ${page.next || 'absent'}, ` +
+        `end ${JSON.stringify(page.end || 'unverified')}`));
+    const end = run.preview?.endCheckConfigured ? 'Positive end check configured.' :
+      'No verified positive end check configured; discovery will report incomplete at the end.';
+    box.textContent = `Catalog ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n${end}\n` +
+      `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; found ${summary.productsFound}; ` +
+      `captured products ${summary.productsCaptured}; captured colors ${summary.colorsCaptured}; ` +
+      `size options traversed ${summary.sizeOptionsTraversed} (size cycling is not part of this run); ` +
+      `excluded ${summary.excluded}; failed ${summary.failed}; pending ${summary.pending}; ` +
+      `exported/unverified ${summary.exportedUnverified}.\n` +
+      (run.products || []).filter(row => row.status === 'failed').map(row => `${row.url}: ${row.reason}`).join('\n') +
+      '\nVerified skips require the local receiver. Downloads exports are unverified until imported.';
+  } catch (error) { box.textContent = `Catalog status unavailable: ${error.message}`; }
+}
+
+function takeoverCategory() {
+  for (const raw of captureJsonLd()) {
+    const candidates = Array.isArray(raw) ? raw : raw?.['@graph'] || [raw];
+    for (const item of candidates) {
+      if (!item || typeof item !== 'object') continue;
+      const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
+      if (types.some(type => typeof type === 'string' && /Product$/i.test(type)) && item.category) {
+        return Array.isArray(item.category) ? item.category.join(' / ') : String(item.category);
+      }
+    }
+  }
+  return document.querySelector('[itemprop="category"], nav.breadcrumbs, .breadcrumbs')?.textContent?.trim() || '';
+}
+
+async function inspectTakeoverPage(config) {
+  const challengeText = `${document.title} ${document.body?.innerText?.slice(0, 2000) || ''}`;
+  if (/verify you are human|unusual traffic|access denied|captcha|bot challenge/i.test(challengeText) ||
+      document.querySelector('iframe[src*="captcha"], .g-recaptcha, [data-sitekey]')) {
+    return {kind: 'challenge', url: window.location.href};
+  }
+  const product = capturePageProduct();
+  const productSeen = !!(product.name || product.sku || product.product_id || product.color);
+  if (productSeen) {
+    await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
+      let gallery = [];
+      try { gallery = captureGallery(config, 'site'); } catch (_) { /* Still loading. */ }
+      return {productSeen: true, gallery};
+    }, {timeoutMs: 8000, pollMs: 200});
+    const selector = config.product?.colorLinkSelector ||
+      config.product?.variantTriggers?.find(trigger => trigger.label === 'color')?.selector;
+    const colorLinks = selector ? Array.from(document.querySelectorAll(selector), node => node.href)
+      .filter(Boolean) : [];
+    return {kind: 'product', url: window.location.href,
+      product: {...product, category: takeoverCategory()}, colorLinks,
+      imageCount: captureGallery(config, 'site').length};
+  }
+  const selector = config.listing?.productLinkSelector;
+  const nextSelector = config.listing?.pagination?.nextSelector;
+  if (!selector || !nextSelector) throw new Error('listing selectors are missing');
+  let products = [];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    products = Array.from(document.querySelectorAll(selector), node => node.href).filter(Boolean);
+    if (products.length) break;
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  const next = document.querySelector(nextSelector)?.href || null;
+  const check = config.listing?.endCheck;
+  const node = check?.selector ? document.querySelector(check.selector) : null;
+  let end = null;
+  if (check?.type === 'explicit') end = {type: 'explicit', present: !!node};
+  if (check?.type === 'page-count') {
+    const match = node?.textContent?.match(/\bpage\s+(\d+)\s+(?:of|\/)\s+(\d+)\b/i);
+    if (match) end = {type: 'page-count', current: Number(match[1]), total: Number(match[2])};
+  }
+  if (check?.type === 'result-total') {
+    const match = node?.textContent?.match(/\b(\d+)\s+(?:results?|items?|products?)\b/i);
+    if (match) end = {type: 'result-total', total: Number(match[1])};
+  }
+  return {kind: 'listing', url: window.location.href, products, next, end};
+}
+
 // A site must be explicitly enabled in the panel, and must have a product
 // selector config. Unknown sites remain a manual, user-selected workflow.
 setTimeout(async () => {
@@ -2329,6 +2457,8 @@ setTimeout(async () => {
   chrome.storage.local.get({captureAutoDomains: {}}, async result => {
     if (!result.captureAutoDomains[window.location.hostname]) return;
     try {
+      const takeover = await takeoverRequest('takeoverStatus');
+      if (takeover.run?.status === 'running' && takeover.run.domain === window.location.hostname) return;
       const ready = await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
         const product = capturePageProduct();
         let gallery = [];
@@ -2371,7 +2501,19 @@ document.addEventListener('keydown', (event) => {
 }, true);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'findImages') {
+  if (message.action === 'takeoverInspect') {
+    loadCaptureSiteConfig().then(config => {
+      if (!config) throw new Error('site config unavailable');
+      return inspectTakeoverPage(config);
+    }).then(page => sendResponse({success: true, page}))
+      .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+    return true;
+  } else if (message.action === 'takeoverCapture') {
+    captureCurrentProduct({manual: false, scopeOverride: message.scope})
+      .then(result => sendResponse({success: true, result}))
+      .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+    return true;
+  } else if (message.action === 'findImages') {
     return openImageSelector(sendResponse);
   } else if (message.action === 'takeScreenshot') {
     if (window.PageScreenshot) {

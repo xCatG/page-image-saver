@@ -48,6 +48,7 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
   settings.receiver = {enabled: true, url: 'http://127.0.0.1:8765', token: 'must-not-log-receiver-token'};
   const sandbox = {
     PageImageSaverHelpers: helpers,
+    PageImageSaverTakeover: require('../takeover_runner.js'),
     Blob,
     URL,
     Uint8Array,
@@ -63,9 +64,11 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
       runtime: {
         onMessage: chromeEvent(listeners),
         onInstalled: chromeEvent(),
+        onStartup: chromeEvent(),
         lastError: null
       },
       webRequest: { onCompleted: chromeEvent() },
+      alarms: {onAlarm: chromeEvent(), create() {}},
       storage: {
         sync: { get: (_key, callback) => callback({ imageUploaderSettings: settings }) },
         local: {
@@ -102,7 +105,8 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
 
   const backgroundPath = path.join(__dirname, '..', 'background.js');
   const source = fs.readFileSync(backgroundPath, 'utf8')
-    .replace("import './extension_helpers.js';", '');
+    .replace("import './extension_helpers.js';", '')
+    .replace("import './takeover_runner.js';", '');
   vm.runInNewContext(source, sandbox, { filename: backgroundPath });
 
   const message = {

@@ -216,13 +216,15 @@ test('background capture message selects receiver without using cloud settings',
   const responses = [];
   const calls = [];
   const sandbox = {
-    PageImageSaverHelpers: helpers, Blob, URL, Uint8Array, ArrayBuffer, atob, btoa,
+    PageImageSaverHelpers: helpers, PageImageSaverTakeover: require('../takeover_runner.js'),
+    Blob, URL, Uint8Array, ArrayBuffer, atob, btoa,
     navigator: {userAgent: 'Chrome'}, console: {log() {}, warn() {}, error() {}},
     setTimeout: () => 1, clearTimeout() {},
     fetch: async url => { calls.push(url); return ok({complete: true, captured_at: payload.captured_at}); },
     chrome: {
-      runtime: {onMessage: event(), onInstalled: passive(), lastError: null},
+      runtime: {onMessage: event(), onInstalled: passive(), onStartup: passive(), lastError: null},
       webRequest: {onCompleted: passive()},
+      alarms: {onAlarm: passive(), create() {}},
       storage: {sync: {get: (_key, callback) => callback({imageUploaderSettings: {
         receiver: settings, useS3: true, s3: {bucketName: 'old-cloud', accessKeyId: 'old', secretAccessKey: 'old'},
         r2: {}, local: {enabled: false}
@@ -237,7 +239,8 @@ test('background capture message selects receiver without using cloud settings',
   };
   sandbox.globalThis = sandbox;
   const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8')
-    .replace("import './extension_helpers.js';", '');
+    .replace("import './extension_helpers.js';", '')
+    .replace("import './takeover_runner.js';", '');
   vm.runInNewContext(source, sandbox, {filename: 'background.js'});
   for (const listener of listeners) {
     listener({action: 'captureProductLocal', payload}, {tab: {id: 1}}, response => responses.push(response));

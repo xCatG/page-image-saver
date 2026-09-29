@@ -1,4 +1,132 @@
 import './extension_helpers.js';
+import './takeover_runner.js';
+
+const TAKEOVER_ALARM = 'catalog-takeover-step';
+const takeoverHttpStatus = new Map();
+chrome.webRequest.onCompleted.addListener(details => {
+  if (details.type === 'main_frame' && Number.isInteger(details.tabId)) {
+    takeoverHttpStatus.set(details.tabId, details.statusCode);
+  }
+}, {urls: ['<all_urls>'], types: ['main_frame']});
+
+function chromeCallback(call) {
+  return new Promise((resolve, reject) => call(result => {
+    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+    else resolve(result);
+  }));
+}
+
+async function takeoverTabComplete(tabId) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => finish(new Error('page load timeout')), 30000);
+    function finish(error, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      if (error) reject(error); else resolve(value);
+    }
+    function onUpdated(changedId, info, updated) {
+      if (changedId === tabId && info.status === 'complete') finish(null, updated);
+    }
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.get(tabId, tab => {
+      if (chrome.runtime.lastError) finish(new Error(chrome.runtime.lastError.message));
+      else if (tab?.status === 'complete') finish(null, tab);
+    });
+  });
+}
+
+function takeoverMessage(tabId, message) {
+  return chromeCallback(callback => chrome.tabs.sendMessage(tabId, message, callback)).then(reply => {
+    if (!reply?.success) throw new Error(reply?.error || 'page inspection failed');
+    return reply;
+  });
+}
+
+const takeoverIo = {
+  now: () => Date.now(),
+  read: async () => (await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverRun', callback)))
+    .catalogTakeoverRun || null,
+  save: async run => chromeCallback(callback => chrome.storage.local.set({catalogTakeoverRun: run}, callback)),
+  notify: async reason => chrome.notifications.create({type: 'basic', iconUrl: 'icons/48.png',
+    title: 'Catalog take-over paused', message: reason.slice(0, 200), priority: 1}),
+  alarm: async when => {
+    chrome.alarms.create(TAKEOVER_ALARM, {when, periodInMinutes: 0.5});
+    setTimeout(() => { void takeoverRunner.tick().catch(console.error); }, Math.max(0, when - Date.now()));
+  },
+  clearAlarm: async () => chrome.alarms.clear(TAKEOVER_ALARM),
+  load: async url => {
+    const old = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
+    const tab = await chromeCallback(callback => chrome.tabs.create({url, active: true}, callback));
+    await chromeCallback(callback => chrome.storage.local.set({catalogTakeoverTabId: tab.id}, callback));
+    if (old.catalogTakeoverTabId && old.catalogTakeoverTabId !== tab.id) {
+      chrome.tabs.remove(old.catalogTakeoverTabId, () => { void chrome.runtime.lastError; });
+    }
+    const completed = await takeoverTabComplete(tab.id);
+    const status = takeoverHttpStatus.get(tab.id) || 200;
+    takeoverHttpStatus.delete(tab.id);
+    if ([403, 429].includes(status)) return {status};
+    const run = await takeoverIo.read();
+    if (completed.url && new URL(completed.url).hostname !== run.domain)
+      return {status: 0, error: 'redirected outside configured site'};
+    const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect'});
+    return {...reply.page, status};
+  },
+  capture: async (_url, scope) => {
+    const state = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
+    const reply = await takeoverMessage(state.catalogTakeoverTabId, {action: 'takeoverCapture', scope});
+    return reply.result;
+  }
+};
+const takeoverRunner = globalThis.PageImageSaverTakeover.createTakeoverRunner(takeoverIo);
+
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === TAKEOVER_ALARM) void takeoverRunner.tick().catch(console.error);
+});
+chrome.runtime.onStartup.addListener(() => {
+  void takeoverRunner.read().then(run => {
+    if (run?.status === 'running') return takeoverRunner.tick();
+  }).catch(console.error);
+});
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!['takeoverPreview', 'takeoverStart', 'takeoverPause', 'takeoverStop',
+    'takeoverResume', 'takeoverStatus', 'takeoverExport'].includes(message.action)) return false;
+  (async () => {
+    if (message.action === 'takeoverPreview') {
+      if (!sender.tab || new URL(sender.tab.url).hostname !== message.config?.domain)
+        throw new Error('preview must come from the configured site tab');
+      return takeoverRunner.preview(message.config, message.page);
+    }
+    if (message.action === 'takeoverStatus') return takeoverRunner.read();
+    if (message.action === 'takeoverExport') {
+      const run = await takeoverRunner.read();
+      const report = globalThis.PageImageSaverTakeover.exportTakeoverReport(run);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `PageImageSaver/catalog-runs/${run.domain}/${stamp}-run.json`;
+      const dataUrl = await blobToDataUrl(new Blob([JSON.stringify(report, null, 2)],
+        {type: 'application/json'}));
+      await globalThis.PageImageSaverHelpers.saveCaptureDownload(chrome, dataUrl, filename);
+      return run;
+    }
+    if (message.action === 'takeoverPause') return takeoverRunner.pause();
+    if (message.action === 'takeoverStop') return takeoverRunner.stop();
+    if (message.action === 'takeoverResume') {
+      const run = await takeoverRunner.resume();
+      void takeoverRunner.tick().catch(console.error);
+      return run;
+    }
+    if (CONFIG.receiver?.enabled !== true) {
+      throw new Error('Configure the local receiver before Take over; verified skips require it.');
+    }
+    const run = await takeoverRunner.start();
+    void takeoverRunner.tick().catch(console.error);
+    return run;
+  })().then(run => sendResponse({success: true, run, summary: globalThis.PageImageSaverTakeover.summarizeTakeover(run)}))
+    .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+  return true;
+});
 
 // Product capture is always local. It does not consult the S3/R2 settings or
 // the existing saveImages upload path.
