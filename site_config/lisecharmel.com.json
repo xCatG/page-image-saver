@@ -2,6 +2,7 @@
     "domain": "lisecharmel.com",
     "platform": "magento",
     "botProtection": [],
+    "colorVariantStrategy": "separate-url",
     "listing": {
       "productLinkSelector": "a.product-item-link",
       "pagination": {

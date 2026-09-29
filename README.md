@@ -26,6 +26,16 @@ A Chrome extension to find and save images from web pages to your S3 or R2 stora
 4. Click "Load unpacked" and select the extension directory
 5. The extension icon should appear in your toolbar
 
+### Local product/color capture for lingerie_trends
+
+For the Milestone 1 integration, load this exact unpacked directory in `chrome://extensions/`:
+
+`/home/yenchi/src/lingerie_trends/.worktrees/page-image-saver-capture`
+
+On a product page, press Alt+Shift+I or click the toolbar button. Select product images, choose **Capture Product Locally**, set the color identity policy and scope, then capture. Use **Color on this URL** for in-place swatches (a selected color is required) or **Each color has its own URL** only when the site really uses separate URLs. You may choose site product selectors when a packaged `site_config/<domain>.json` exists; otherwise select images by checkbox. The optional site auto-capture toggle captures only product pages you visit, as `review`, and never navigates the catalog.
+
+This action always writes to Chrome's local `Downloads/PageImageSaver/` folder; S3/R2 settings do not apply. The `complete.json` is written after the page HTML, JSON-LD, and image downloads finish. Chrome's download completion event is not a disk-integrity check. Use `lt.py capture-import` in the Python worktree to verify actual saved bytes before viewing them. See [`docs/catalog-manual-capture.md` in lingerie_trends](../catalog-manual-capture/docs/catalog-manual-capture.md) for the exact offline import and viewer commands.
+
 ## Setting Up Your Storage
 
 The extension includes a Settings page where you can configure your storage credentials:

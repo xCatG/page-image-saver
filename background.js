@@ -1,5 +1,26 @@
 import './extension_helpers.js';
 
+// Product capture is always local. It does not consult the S3/R2 settings or
+// the existing saveImages upload path.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action !== 'captureProductLocal') return false;
+  const helpers = globalThis.PageImageSaverHelpers;
+  helpers.exportProductCapture(message.payload, {
+    fetchImage: async url => {
+      const response = await fetch(url, {credentials: 'include'});
+      if (!response.ok) throw new Error(`image HTTP ${response.status}: ${url}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return {bytes, fetched_url: response.url};
+    },
+    saveBytes: async (filename, bytes) => {
+      const dataUrl = await blobToDataUrl(new Blob([bytes], {type: 'application/octet-stream'}));
+      await helpers.saveCaptureDownload(chrome, dataUrl, filename);
+    }
+  }).then(record => sendResponse({success: true, record}))
+    .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+  return true;
+});
+
 //background.js
 // Debugging helper - will show a notification with download paths
 function showSavePathNotification(path) {

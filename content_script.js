@@ -878,9 +878,18 @@ function createImageSelectionUI(images) {
       <button id="select-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #4285F4; color: white; cursor: pointer;">Select All</button>
       <button id="deselect-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Deselect All</button>
       <button id="save-page-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer;">Save Page Images</button>
+      <button id="capture-product-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #6b46a0; color: white; cursor: pointer;">Capture Product Locally</button>
       <button id="take-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Visible)</button>
       <button id="take-full-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Full Page)</button>
       <button id="close-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Close</button>
+    </div>
+    <div style="display: grid; gap: 5px; margin-bottom: 8px; font-size: 12px;">
+      <label>Capture images <select id="capture-image-mode"><option value="selected">Selected checkboxes</option><option value="site">Site product selectors</option></select></label>
+      <label>Color identity <select id="capture-color-policy"><option value="color">Color on this URL</option><option value="url">Each color has its own URL</option></select></label>
+      <label>Selected color <input id="capture-color" type="text" placeholder="Required for same-URL colors"></label>
+      <label>Scope <select id="capture-scope"><option value="review">Review</option><option value="include">Include</option><option value="exclude">Exclude</option></select></label>
+      <label>Scope reason <input id="capture-scope-reason" type="text" placeholder="Why this scope decision?"></label>
+      <label><input id="capture-auto-site" type="checkbox"> Auto capture product pages on this site as review</label>
     </div>
     <div id="size-filter" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
       <div style="font-weight: bold; margin-bottom: 5px;">Settings for ${currentDomain}</div>
@@ -930,6 +939,38 @@ images.forEach((image, index) => {
 
 container.appendChild(imageList);
 document.body.appendChild(container);
+
+  loadCaptureSiteConfig().then(config => {
+    if (config) {
+      document.getElementById('capture-image-mode').value = 'site';
+      document.getElementById('capture-color-policy').value =
+        config.colorVariantStrategy === 'separate-url' ? 'url' : 'color';
+    }
+    document.getElementById('capture-color').value = capturePageProduct().color || '';
+  });
+  chrome.storage.local.get({captureAutoDomains: {}}, result => {
+    document.getElementById('capture-auto-site').checked = !!result.captureAutoDomains[currentDomain];
+  });
+  document.getElementById('capture-auto-site').addEventListener('change', event => {
+    chrome.storage.local.get({captureAutoDomains: {}}, result => {
+      const domains = result.captureAutoDomains;
+      domains[currentDomain] = event.target.checked;
+      chrome.storage.local.set({captureAutoDomains: domains});
+    });
+  });
+  document.getElementById('capture-product-btn').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await captureCurrentProduct({manual: true});
+      showStatusMessage('Local product bundle exported. Run capture-import to verify Downloads bytes.', 'success');
+    } catch (error) {
+      await recordCaptureFailure(error);
+      showStatusMessage(`Product capture failed: ${error.message}`, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
 
   // Hide the local folder row if local saving is disabled in settings
   chrome.storage.sync.get('imageUploaderSettings', (result) => {
@@ -2160,6 +2201,135 @@ function saveImagesToStorage(images) {
   
   console.debug(`[CONTENT LOG] SaveImagesToStorage function completed, waiting for async responses`);
 }
+
+const previousCaptureStates = new Map();
+const captureConfigCache = new Map();
+
+async function loadCaptureSiteConfig() {
+  const domain = window.location.hostname.toLowerCase();
+  if (!captureConfigCache.has(domain)) {
+    captureConfigCache.set(domain, fetch(chrome.runtime.getURL(`site_config/${domain}.json`))
+      .then(response => response.ok ? response.json() : null)
+      .then(config => config?.domain === domain ? config : null)
+      .catch(() => null));
+  }
+  return captureConfigCache.get(domain);
+}
+
+function captureJsonLd() {
+  return Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+    .map(node => { try { return JSON.parse(node.textContent); } catch (_) { return null; } })
+    .filter(value => value !== null);
+}
+
+function capturePageProduct() {
+  return globalThis.PageImageSaverHelpers.captureProductFromJsonLd(
+    Array.from(document.querySelectorAll('script[type="application/ld+json"]'), node => node.textContent));
+}
+
+function captureGallery(config, mode) {
+  let urls;
+  if (mode === 'site') {
+    const selector = config?.product?.allImagesSelector || config?.allImagesSelector || config?.product?.imageSelector;
+    if (!selector) throw new Error('No product image selector in this site config');
+    urls = Array.from(document.querySelectorAll(selector), node =>
+      node.getAttribute('data-src') || node.currentSrc || node.getAttribute('src') || node.getAttribute('href'));
+  } else {
+    const checked = document.querySelectorAll('#image-selector-container input[type="checkbox"]:checked');
+    urls = Array.from(checked, node => currentFilteredImages[Number(node.dataset.index)]?.url);
+  }
+  const unique = new Set();
+  for (const raw of urls) {
+    if (!raw) continue;
+    try {
+      const url = new URL(raw, window.location.href);
+      if (url.protocol === 'http:' || url.protocol === 'https:') unique.add(url.href);
+    } catch (_) { /* Ignore non-image or malformed discovered URLs. */ }
+  }
+  if (!unique.size) throw new Error('No selected product images');
+  return Array.from(unique);
+}
+
+function captureSelectedColor(product) {
+  const swatch = document.querySelector('[aria-selected="true"][data-color], [aria-checked="true"][data-color], .swatch-option.selected[data-option-label]');
+  return product.color || swatch?.getAttribute('data-color') || swatch?.getAttribute('data-option-label') ||
+    document.getElementById('capture-color')?.value.trim() || null;
+}
+
+function captureCanonicalUrl() {
+  const candidate = document.querySelector('link[rel="canonical"]')?.href;
+  try {
+    if (candidate && new URL(candidate).hostname === window.location.hostname) return candidate;
+  } catch (_) { /* Use the visited URL. */ }
+  return window.location.href;
+}
+
+function capturePageHtml() {
+  const clone = document.documentElement.cloneNode(true);
+  clone.querySelector('#image-selector-container')?.remove();
+  return '<!doctype html>\n' + clone.outerHTML;
+}
+
+async function recordCaptureFailure(error) {
+  return new Promise(resolve => chrome.storage.local.get({captureFailures: []}, result => {
+    const failures = result.captureFailures || [];
+    failures.push({url: window.location.href, at: new Date().toISOString(),
+      reason: String(error?.message || error)});
+    chrome.storage.local.set({captureFailures: failures.slice(-100)}, resolve);
+  }));
+}
+
+async function captureCurrentProduct({manual}) {
+  const config = await loadCaptureSiteConfig();
+  const mode = manual ? document.getElementById('capture-image-mode').value : 'site';
+  const policy = manual ? document.getElementById('capture-color-policy').value :
+    config?.colorVariantStrategy === 'separate-url' ? 'url' : 'color';
+  const readState = () => {
+    const product = capturePageProduct();
+    const gallery = captureGallery(config, mode);
+    return {color: policy === 'url' ? captureCanonicalUrl() : captureSelectedColor(product), gallery};
+  };
+  const url = captureCanonicalUrl();
+  const previous = previousCaptureStates.get(url);
+  const state = await globalThis.PageImageSaverHelpers.waitForCaptureState(readState, previous,
+    {timeoutMs: 8000, pollMs: 200});
+  const product = capturePageProduct();
+  const color = policy === 'url' ? captureSelectedColor(product) : state.color;
+  const identity = globalThis.PageImageSaverHelpers.captureIdentity(url, policy, color);
+  if (!product.color && color) product.color = color;
+  const decision = manual ? document.getElementById('capture-scope').value : 'review';
+  const customReason = manual ? document.getElementById('capture-scope-reason').value.trim() : '';
+  const scope = {decision, reason: customReason || (manual ? `user-selected ${decision}` : 'automatic page-load capture; scope unclassified')};
+  const transform = config?.product?.highResTransform;
+  const images = state.gallery.map(url => globalThis.PageImageSaverHelpers.captureImageUrls(url, transform));
+  const payload = {identity, captured_at: new Date().toISOString(), scope, product,
+    html: capturePageHtml(), jsonld: captureJsonLd(), images};
+  const result = await new Promise((resolve, reject) => chrome.runtime.sendMessage(
+    {action: 'captureProductLocal', payload}, response => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else if (!response?.success) reject(new Error(response?.error || 'local capture failed'));
+      else resolve(response);
+    }));
+  previousCaptureStates.set(url, state);
+  return result;
+}
+
+// A site must be explicitly enabled in the panel, and must have a product
+// selector config. Unknown sites remain a manual, user-selected workflow.
+setTimeout(async () => {
+  const config = await loadCaptureSiteConfig();
+  if (!config?.product?.allImagesSelector) return;
+  chrome.storage.local.get({captureAutoDomains: {}}, async result => {
+    if (!result.captureAutoDomains[window.location.hostname]) return;
+    try {
+      if (!document.querySelector(config.product.allImagesSelector)) return;
+      await captureCurrentProduct({manual: false});
+    } catch (error) {
+      await recordCaptureFailure(error);
+      console.warn('Automatic local product capture failed:', error);
+    }
+  });
+}, 1000);
 
 // Share the panel entry point between Chrome's toolbar and a page-level shortcut.
 function openImageSelector(sendResponse = () => {}) {

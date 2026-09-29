@@ -73,6 +73,171 @@
       && !target.isContentEditable && !['INPUT', 'TEXTAREA', 'SELECT'].includes(tag);
   }
 
+  function captureProductFromJsonLd(scriptTexts) {
+    const empty = {name: null, sku: null, product_id: null, color: null,
+      offers: {price: null, currency: null}};
+    function findProduct(value) {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          const found = findProduct(item);
+          if (found) return found;
+        }
+      } else if (value && typeof value === 'object') {
+        const types = Array.isArray(value['@type']) ? value['@type'] : [value['@type']];
+        if (types.some(type => typeof type === 'string' && /(^|\/)Product$/i.test(type))) return value;
+        if (value['@graph']) return findProduct(value['@graph']);
+      }
+      return null;
+    }
+    for (const script of scriptTexts) {
+      let parsed;
+      try { parsed = JSON.parse(script); } catch (_) { continue; }
+      const raw = findProduct(parsed);
+      if (!raw) continue;
+      const offer = Array.isArray(raw.offers) ? raw.offers[0] : raw.offers;
+      const text = value => value == null ? null : String(value);
+      return {name: text(raw.name), sku: text(raw.sku), product_id: text(raw.productID),
+        color: text(raw.color), offers: {price: text(offer?.price), currency: text(offer?.priceCurrency)}};
+    }
+    return empty;
+  }
+
+  function captureIdentity(pageUrl, colorKey, selectedColor) {
+    const url = new URL(pageUrl);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('product URL must be HTTP(S)');
+    url.hash = '';
+    if (!['color', 'url'].includes(colorKey)) throw new Error('unknown color identity policy');
+    const color = selectedColor == null ? null : String(selectedColor).trim();
+    if (colorKey === 'color' && !color) throw new Error('selected color is required for this page');
+    return {domain: url.hostname.toLowerCase(), product_url: url.href,
+      selected_color: color || null, color_key: colorKey};
+  }
+
+  function captureImageUrls(original, transform) {
+    const url = new URL(original).href;
+    const find = transform?.find;
+    const fetched = typeof find === 'string' && find
+      ? url.replace(find, typeof transform.replace === 'string' ? transform.replace : '') : url;
+    return {original_url: url, fetched_url: fetched};
+  }
+
+  async function waitForCaptureState(readState, previous, options = {}) {
+    const now = options.now || Date.now;
+    const delay = options.delay || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    const start = now();
+    const timeout = options.timeoutMs ?? 8000;
+    const poll = options.pollMs ?? 150;
+    let last = null;
+    while (now() - start <= timeout) {
+      const state = readState();
+      const valid = state && typeof state.color === 'string' && state.color.trim()
+        && Array.isArray(state.gallery) && state.gallery.length > 0;
+      const changed = !previous || state.color === previous.color ||
+        JSON.stringify(state.gallery) !== JSON.stringify(previous.gallery);
+      if (valid && changed) {
+        if (last && last.color === state.color && JSON.stringify(last.gallery) === JSON.stringify(state.gallery)) {
+          return state;
+        }
+        last = state;
+      } else {
+        last = null;
+      }
+      await delay(poll);
+    }
+    throw new Error('color/gallery transition timeout');
+  }
+
+  function buildCaptureCompletion(data) {
+    return {schema_version: 1, format: 'page-image-saver-capture/v1',
+      identity: data.identity, captured_at: data.captured_at, scope: data.scope,
+      product: data.product, evidence: {html: data.html, jsonld: data.jsonld, images: data.images}};
+  }
+
+  async function captureSha256(bytes) {
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function exportProductCapture(payload, io) {
+    const encode = value => new TextEncoder().encode(value);
+    const identityHash = await captureSha256(encode(JSON.stringify(payload.identity)));
+    const attempt = io.attemptId || globalThis.crypto.randomUUID();
+    if (!/^[a-zA-Z0-9_-]+$/.test(attempt)) throw new Error('unsafe capture attempt ID');
+    const domain = payload.identity.domain;
+    if (!/^[a-z0-9.-]+$/.test(domain)) throw new Error('unsafe capture domain');
+    const base = `PageImageSaver/captures/${domain}/${identityHash}/${attempt}`;
+    const html = encode(payload.html);
+    const jsonld = encode(JSON.stringify(payload.jsonld));
+    const htmlRef = {path: 'page.html', sha256: await captureSha256(html), bytes: html.byteLength};
+    const jsonldRef = {path: 'product.json', sha256: await captureSha256(jsonld), bytes: jsonld.byteLength};
+    await io.saveBytes(`${base}/${htmlRef.path}`, html);
+    await io.saveBytes(`${base}/${jsonldRef.path}`, jsonld);
+    const images = [];
+    for (const [index, requested] of payload.images.entries()) {
+      const fetched = await io.fetchImage(requested.fetched_url);
+      const bytes = fetched.bytes instanceof Uint8Array ? fetched.bytes : new Uint8Array(fetched.bytes);
+      if (!bytes.byteLength || bytes.byteLength > 25 * 1024 * 1024) throw new Error('invalid image byte count');
+      const digest = await captureSha256(bytes);
+      const extension = /\.jpe?g(?:$|\?)/i.test(requested.fetched_url) ? 'jpg' :
+        /\.webp(?:$|\?)/i.test(requested.fetched_url) ? 'webp' :
+        /\.gif(?:$|\?)/i.test(requested.fetched_url) ? 'gif' : 'png';
+      const path = `images/${index}-${digest}.${extension}`;
+      await io.saveBytes(`${base}/${path}`, bytes);
+      images.push({path, sha256: digest, bytes: bytes.byteLength,
+        original_url: requested.original_url, fetched_url: fetched.fetched_url || requested.fetched_url});
+    }
+    if (!images.length) throw new Error('no selected product images');
+    const completion = buildCaptureCompletion({identity: payload.identity, captured_at: payload.captured_at,
+      scope: payload.scope, product: payload.product, html: htmlRef, jsonld: jsonldRef, images});
+    await io.saveBytes(`${base}/complete.json`, encode(JSON.stringify(completion)));
+    return completion;
+  }
+
+  function saveCaptureDownload(chromeApi, dataUrl, filename, timeoutMs = 120000) {
+    return new Promise((resolve, reject) => {
+      let id = null;
+      let settled = false;
+      const early = new Map();
+      const timer = setTimeout(() => finish(new Error('capture download timeout')), timeoutMs);
+      function finish(error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        chromeApi.downloads.onChanged.removeListener(onChanged);
+        if (error) reject(error);
+        else resolve();
+      }
+      function terminal(delta) {
+        if (delta.state?.current === 'interrupted') {
+          finish(new Error(`capture download interrupted: ${delta.error?.current || filename}`));
+        } else if (delta.state?.current === 'complete') {
+          chromeApi.downloads.search({id: delta.id}, items => {
+            const savedName = items?.[0]?.filename?.replace(/\\/g, '/');
+            if (chromeApi.runtime.lastError || !savedName?.endsWith('/' + filename)) {
+              finish(new Error(`capture download filename mismatch: expected ${filename}, got ${savedName || '<missing>'}`));
+            } else {
+              finish(null);
+            }
+          });
+        }
+      }
+      function onChanged(delta) {
+        if (delta.state?.current !== 'complete' && delta.state?.current !== 'interrupted') return;
+        if (id === null) early.set(delta.id, delta);
+        else if (delta.id === id) terminal(delta);
+      }
+      chromeApi.downloads.onChanged.addListener(onChanged);
+      chromeApi.downloads.download({url: dataUrl, filename, saveAs: false, conflictAction: 'uniquify'}, downloadId => {
+        if (chromeApi.runtime.lastError || !Number.isInteger(downloadId)) {
+          finish(new Error(chromeApi.runtime.lastError?.message || 'capture download failed to start'));
+          return;
+        }
+        id = downloadId;
+        if (early.has(id)) terminal(early.get(id));
+      });
+    });
+  }
+
   function buildGoldCaptureSettings(settings) {
     const current = settings || {};
     const local = current.local || {};
@@ -110,6 +275,13 @@
   }
 
   const helpers = {
+    captureProductFromJsonLd,
+    captureIdentity,
+    captureImageUrls,
+    waitForCaptureState,
+    buildCaptureCompletion,
+    exportProductCapture,
+    saveCaptureDownload,
     sanitizeFolderPath,
     isFindImagesPageShortcut,
     filenameFromUrl,

@@ -1,0 +1,136 @@
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const helpers = require('../extension_helpers.js');
+
+test('JSON-LD product extraction keeps recorded color, price, and currency', () => {
+  const value = helpers.captureProductFromJsonLd([
+    JSON.stringify({'@graph': [{'@type': 'BreadcrumbList'}, {'@type': 'Product', name: 'Fixture bra',
+      sku: 'BRA-1', color: 'Black', offers: {price: '42.00', priceCurrency: 'USD'}}]})
+  ]);
+  assert.deepEqual(value, {name: 'Fixture bra', sku: 'BRA-1', product_id: null,
+    color: 'Black', offers: {price: '42.00', currency: 'USD'}});
+});
+
+test('unknown product facts remain explicit and per-URL identity keeps unknown color', () => {
+  assert.deepEqual(helpers.captureProductFromJsonLd([]), {name: null, sku: null,
+    product_id: null, color: null, offers: {price: null, currency: null}});
+  assert.deepEqual(helpers.captureIdentity('https://shop.example.test/bra-red#details', 'url', null),
+    {domain: 'shop.example.test', product_url: 'https://shop.example.test/bra-red',
+      selected_color: null, color_key: 'url'});
+  assert.throws(() => helpers.captureIdentity('https://shop.example.test/bra', 'color', null), /selected color/);
+});
+
+test('high-resolution transform preserves the exact original URL', () => {
+  assert.deepEqual(helpers.captureImageUrls('https://cdn.example.test/bra/w=1024',
+    {find: '/w=1024', replace: '/w=2048'}),
+    {original_url: 'https://cdn.example.test/bra/w=1024',
+      fetched_url: 'https://cdn.example.test/bra/w=2048'});
+});
+
+test('in-place color waits for both changed color and changed stable gallery', async () => {
+  const states = [
+    {color: 'Red', gallery: ['black.png']},
+    {color: 'Red', gallery: ['red.png']},
+    {color: 'Red', gallery: ['red.png']}
+  ];
+  const result = await helpers.waitForCaptureState(() => states.shift() || {color: 'Red', gallery: ['red.png']},
+    {color: 'Black', gallery: ['black.png']}, {timeoutMs: 100, pollMs: 0, delay: async () => {}});
+  assert.deepEqual(result, {color: 'Red', gallery: ['red.png']});
+});
+
+test('mismatched in-place color/gallery state times out without a completion', async () => {
+  let now = 0;
+  await assert.rejects(() => helpers.waitForCaptureState(
+    () => ({color: 'Red', gallery: ['black.png']}),
+    {color: 'Black', gallery: ['black.png']},
+    {timeoutMs: 5, pollMs: 1, now: () => ++now, delay: async () => {}}), /timeout/);
+});
+
+test('same color can be recaptured after a stable human image selection change', async () => {
+  const result = await helpers.waitForCaptureState(
+    () => ({color: 'Black', gallery: ['black-detail.png']}),
+    {color: 'Black', gallery: ['black-front.png']},
+    {timeoutMs: 100, pollMs: 0, delay: async () => {}});
+  assert.deepEqual(result.gallery, ['black-detail.png']);
+});
+
+test('completion record has strict versioned evidence and scope fields', () => {
+  const record = helpers.buildCaptureCompletion({
+    identity: {domain: 'shop.example.test', product_url: 'https://shop.example.test/bra',
+      selected_color: 'Black', color_key: 'color'},
+    captured_at: '2026-09-29T12:00:00Z', scope: {decision: 'review', reason: 'unclassified'},
+    product: {name: 'Fixture bra', sku: 'BRA-1', product_id: null,
+      color: 'Black', offers: {price: '42.00', currency: 'USD'}},
+    html: {path: 'page.html', sha256: 'a'.repeat(64), bytes: 4},
+    jsonld: {path: 'product.json', sha256: 'b'.repeat(64), bytes: 5},
+    images: [{path: 'images/0.png', sha256: 'c'.repeat(64), bytes: 6,
+      original_url: 'https://cdn.example.test/1024.png', fetched_url: 'https://cdn.example.test/2048.png'}]
+  });
+  assert.equal(record.format, 'page-image-saver-capture/v1');
+  assert.equal(record.schema_version, 1);
+  assert.equal(record.scope.decision, 'review');
+  assert.equal(record.evidence.images[0].original_url, 'https://cdn.example.test/1024.png');
+});
+
+test('local export saves all evidence before publishing completion, with no cloud action', async () => {
+  const saved = [];
+  const payload = {
+    identity: {domain: 'shop.example.test', product_url: 'https://shop.example.test/bra',
+      selected_color: 'Black', color_key: 'color'},
+    captured_at: '2026-09-29T12:00:00Z', scope: {decision: 'review', reason: 'manual'},
+    product: {name: 'Fixture bra', sku: 'BRA-1', product_id: null,
+      color: 'Black', offers: {price: '42.00', currency: 'USD'}},
+    html: '<!doctype html><title>Fixture bra</title>',
+    jsonld: [{'@type': 'Product', name: 'Fixture bra', color: 'Black'}],
+    images: [{original_url: 'https://cdn.example.test/1024.png', fetched_url: 'https://cdn.example.test/2048.png'}]
+  };
+  const record = await helpers.exportProductCapture(payload, {
+    attemptId: 'test-attempt',
+    fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71]),
+      fetched_url: 'https://cdn.example.test/2048.png'}),
+    saveBytes: async (path, bytes) => saved.push({path, bytes})
+  });
+  assert.equal(saved.length, 4);
+  assert.equal(saved[0].path.endsWith('/page.html'), true);
+  assert.equal(saved[1].path.endsWith('/product.json'), true);
+  assert.equal(saved[2].path.includes('/images/0-'), true);
+  assert.equal(saved[3].path.endsWith('/complete.json'), true);
+  assert.equal(JSON.parse(new TextDecoder().decode(saved[3].bytes)).evidence.images[0].sha256,
+    record.evidence.images[0].sha256);
+});
+
+test('failed image fetch leaves an uncompleted export', async () => {
+  const saved = [];
+  await assert.rejects(() => helpers.exportProductCapture({
+    identity: {domain: 'shop.example.test', product_url: 'https://shop.example.test/bra',
+      selected_color: 'Black', color_key: 'color'},
+    captured_at: '2026-09-29T12:00:00Z', scope: {decision: 'review', reason: 'manual'},
+    product: {name: null, sku: null, product_id: null, color: 'Black',
+      offers: {price: null, currency: null}}, html: '<html></html>', jsonld: [],
+    images: [{original_url: 'https://cdn.example.test/a.png', fetched_url: 'https://cdn.example.test/a.png'}]
+  }, {attemptId: 'failure', fetchImage: async () => { throw new Error('HTTP 429'); },
+    saveBytes: async path => saved.push(path)}), /HTTP 429/);
+  assert.equal(saved.some(path => path.endsWith('complete.json')), false);
+});
+
+test('Chrome download callback alone never marks capture evidence saved', async () => {
+  let onChanged;
+  const calls = [];
+  const chrome = {
+    runtime: {lastError: null},
+    downloads: {
+      onChanged: {addListener(fn) { onChanged = fn; }, removeListener() {}},
+      download(request, callback) { calls.push(request); callback(7); },
+      search(query, callback) { callback([{id: query.id, filename: '/tmp/Downloads/' + calls[0].filename}]); }
+    }
+  };
+  let completed = false;
+  const promise = helpers.saveCaptureDownload(chrome, 'data:text/plain;base64,YQ==',
+    'PageImageSaver/captures/shop.example.test/one/page.html', 1000).then(() => { completed = true; });
+  await Promise.resolve();
+  assert.equal(completed, false);
+  assert.equal(calls[0].conflictAction, 'uniquify');
+  onChanged({id: 7, state: {current: 'complete'}});
+  await promise;
+  assert.equal(completed, true);
+});
