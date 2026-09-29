@@ -2325,7 +2325,7 @@ function assertTakeoverBinding(binding) {
   }
 }
 
-async function captureCurrentProduct({manual, scopeOverride = null, binding = null}) {
+async function captureCurrentProduct({manual, scopeOverride = null, binding = null, autoPageLoad = false}) {
   assertTakeoverBinding(binding);
   const config = await loadCaptureSiteConfig();
   const mode = manual ? document.getElementById('capture-image-mode').value : 'site';
@@ -2362,7 +2362,7 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
     html: capturePageHtml(), jsonld: captureJsonLd(), images};
   assertTakeoverBinding(binding); // Guard before background image acquisition.
   const result = await new Promise((resolve, reject) => chrome.runtime.sendMessage(
-    {action: 'captureProductLocal', payload, runBinding: binding}, response => {
+    {action: 'captureProductLocal', payload, runBinding: binding, autoPageLoad}, response => {
       if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
       else if (!response?.success) reject(new Error(response?.error || 'local capture failed'));
       else resolve(response);
@@ -2474,8 +2474,7 @@ setTimeout(async () => {
   chrome.storage.local.get({captureAutoDomains: {}}, async result => {
     if (!result.captureAutoDomains[window.location.hostname]) return;
     try {
-      const takeover = await takeoverRequest('takeoverStatus');
-      if (takeover.run?.status === 'running' && takeover.run.domain === window.location.hostname) return;
+      if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
       const ready = await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
         const product = capturePageProduct();
         let gallery = [];
@@ -2483,7 +2482,8 @@ setTimeout(async () => {
         return {productSeen: !!(product.name || product.sku || product.product_id || product.color), gallery};
       }, {timeoutMs: 8000, pollMs: 200});
       if (!ready) return;
-      await captureCurrentProduct({manual: false});
+      if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
+      await captureCurrentProduct({manual: false, autoPageLoad: true});
     } catch (error) {
       await recordCaptureFailure(error);
       console.warn('Automatic local product capture failed:', error);

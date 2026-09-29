@@ -86,6 +86,17 @@ async function takeoverOwnedTab(binding) {
   return tab;
 }
 
+async function assertAutoCaptureAllowed(sender) {
+  if (!sender.tab) throw new Error('automatic capture requires a page tab');
+  const state = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
+  if (state.catalogTakeoverTabId !== sender.tab.id) return;
+  const run = await takeoverIo.read();
+  if (run && ['running', 'paused', 'stopped', 'discovery_incomplete',
+      'finished_with_gaps', 'complete'].includes(run.status)) {
+    throw new Error('automatic capture is unavailable in a take-over tab');
+  }
+}
+
 const takeoverIo = {
   now: () => Date.now(),
   read: async () => (await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverRun', callback)))
@@ -145,6 +156,12 @@ chrome.runtime.onStartup.addListener(() => {
   }).catch(console.error);
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'autoCaptureAllowed') {
+    assertAutoCaptureAllowed(sender)
+      .then(() => sendResponse({success: true, allowed: true}))
+      .catch(() => sendResponse({success: true, allowed: false}));
+    return true;
+  }
   if (!['takeoverPreview', 'takeoverStart', 'takeoverPause', 'takeoverStop',
     'takeoverResume', 'takeoverStatus', 'takeoverExport'].includes(message.action)) return false;
   (async () => {
@@ -194,7 +211,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.action !== 'captureProductLocal') return false;
   const helpers = globalThis.PageImageSaverHelpers;
+  const assertCaptureAuthority = async () => {
+    if (message.autoPageLoad) await assertAutoCaptureAllowed(sender);
+  };
   const fetchImage = async url => {
+    await assertCaptureAuthority();
     const response = await fetch(url, {credentials: 'include'});
     if (!response.ok) throw new Error(`image HTTP ${response.status}: ${url}`);
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -203,11 +224,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const download = () => helpers.exportProductCapture(message.payload, {
     fetchImage,
     saveBytes: async (filename, bytes) => {
+      await assertCaptureAuthority();
       const dataUrl = await blobToDataUrl(new Blob([bytes], {type: 'application/octet-stream'}));
       await helpers.saveCaptureDownload(chrome, dataUrl, filename);
     }
   });
   const save = (async () => {
+    await assertCaptureAuthority();
     if (message.runBinding) {
       const binding = message.runBinding;
       const identity = message.payload?.identity;
@@ -223,7 +246,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     return CONFIG.receiver?.enabled === true
       ? helpers.captureWithReceiver(message.payload, CONFIG.receiver, {
-        fetch: (...args) => fetch(...args), fetchImage, download
+        fetch: async (...args) => { await assertCaptureAuthority(); return fetch(...args); },
+        fetchImage, download
       })
       : download().then(record => ({storage: 'downloads', status: 'published', record}));
   })();

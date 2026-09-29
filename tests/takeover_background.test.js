@@ -11,6 +11,7 @@ function bridge() {
   const webCompleted = [];
   const webHeaders = [];
   const tabUpdated = [];
+  const runtimeMessages = [];
   const messages = [];
   const tab = {id: 7, status: 'loading', url: black};
   const stored = {catalogTakeoverRun: {domain: 'shop.example.test', status: 'running', generation: 2,
@@ -20,7 +21,7 @@ function bridge() {
     removeListener(fn) { const index = listeners.indexOf(fn); if (index >= 0) listeners.splice(index, 1); }});
   const passive = () => ({addListener() {}});
   const chrome = {
-    runtime: {lastError: null, onMessage: passive(), onStartup: passive()},
+    runtime: {lastError: null, onMessage: event(runtimeMessages), onStartup: passive()},
     webRequest: {onCompleted: event(webCompleted), onHeadersReceived: event(webHeaders)},
     alarms: {onAlarm: passive(), create() {}, clear() {}},
     notifications: {create() {}},
@@ -55,9 +56,88 @@ function bridge() {
     .split('// Product capture is always local.')[0]
     .replace("import './extension_helpers.js';", '')
     .replace("import './takeover_runner.js';", '');
-  vm.runInNewContext(source, sandbox, {filename: 'background.js'});
-  return {io, tab, stored, chrome, messages, webCompleted, webHeaders, tabUpdated};
+  vm.createContext(sandbox);
+  vm.runInContext(source, sandbox, {filename: 'background.js'});
+  return {io, tab, stored, chrome, messages, webCompleted, webHeaders, tabUpdated,
+    runtimeMessages, sandbox};
 }
+
+function captureBridge() {
+  const b = bridge();
+  const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+  const captureStart = source.indexOf('chrome.runtime.onMessage.addListener(',
+    source.indexOf('// Product capture is always local.'));
+  const captureSource = source.slice(captureStart, source.indexOf('/*\n  The product capture path'));
+  const acquisitions = [];
+  const imageRequests = [];
+  b.sandbox.CONFIG = {receiver: {enabled: true}};
+  b.sandbox.fetch = async url => {
+    imageRequests.push(url);
+    return {ok: true, url, arrayBuffer: async () => new Uint8Array([1]).buffer};
+  };
+  b.sandbox.PageImageSaverHelpers.captureWithReceiver = async (_payload, _settings, io) => {
+    await io.fetchImage(black + '.png');
+    acquisitions.push('published');
+    return {storage: 'receiver', status: 'published'};
+  };
+  vm.runInContext(captureSource, b.sandbox, {filename: 'background-capture.js'});
+  const dispatch = (message, tabId = 7) => new Promise(resolve => {
+    for (const listener of b.runtimeMessages) {
+      if (listener(message, {tab: {id: tabId, url: black}, url: black}, resolve) === true) return;
+    }
+    resolve(null);
+  });
+  return {...b, acquisitions, imageRequests, dispatch};
+}
+
+test('owned runner tab blocks page-load capture after pause, challenge, or stop', async () => {
+  for (const status of ['paused', 'stopped']) {
+    const b = captureBridge();
+    b.stored.catalogTakeoverRun.status = status;
+    if (status === 'paused') b.stored.catalogTakeoverRun.current = null;
+    const permission = await b.dispatch({action: 'autoCaptureAllowed'});
+    assert.equal(permission.allowed, false, status);
+    const result = await b.dispatch({action: 'captureProductLocal', autoPageLoad: true,
+      payload: {identity: {domain: 'shop.example.test', product_url: black}}});
+    assert.equal(result.success, false, status);
+    assert.deepEqual(b.acquisitions, []);
+    assert.deepEqual(b.imageRequests, []);
+  }
+});
+
+test('late pause is rechecked when automatic image acquisition begins', async () => {
+  const b = captureBridge();
+  let release;
+  b.sandbox.PageImageSaverHelpers.captureWithReceiver = async (_payload, _settings, io) => {
+    await new Promise(resolve => { release = resolve; });
+    await io.fetchImage(black + '.png');
+    b.acquisitions.push('published');
+    return {storage: 'receiver', status: 'published'};
+  };
+  const pending = b.dispatch({action: 'captureProductLocal', autoPageLoad: true,
+    payload: {identity: {domain: 'shop.example.test', product_url: black}}}, 8);
+  while (!release) await Promise.resolve();
+  b.stored.catalogTakeoverTabId = 8;
+  b.stored.catalogTakeoverRun.status = 'paused';
+  release();
+  const result = await pending;
+  assert.equal(result.success, false);
+  assert.deepEqual(b.acquisitions, []);
+  assert.deepEqual(b.imageRequests, []);
+});
+
+test('manual capture and unrelated same-site tab retain capture access', async () => {
+  const b = captureBridge();
+  b.stored.catalogTakeoverRun.status = 'stopped';
+  const manual = await b.dispatch({action: 'captureProductLocal', payload: {
+    identity: {domain: 'shop.example.test', product_url: black}}});
+  assert.equal(manual.success, true);
+  const other = await b.dispatch({action: 'captureProductLocal', autoPageLoad: true,
+    payload: {identity: {domain: 'shop.example.test', product_url: black}}}, 8);
+  assert.equal(other.success, true);
+  assert.equal(b.acquisitions.length, 2);
+  assert.equal(b.imageRequests.length, 2);
+});
 
 test('known 429 main-frame response settles load while tab stays loading', async () => {
   const b = bridge();

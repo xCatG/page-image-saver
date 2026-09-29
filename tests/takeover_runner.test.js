@@ -256,6 +256,14 @@ test('scope uses product evidence and leaves uncertain mixed use as review', () 
   assert.equal(classifyTakeoverScope({name: 'Mens Briefs', category: ''}).decision, 'review');
   assert.equal(classifyTakeoverScope({name: 'Lace Bra', category: 'Men'}).decision, 'review');
   assert.equal(classifyTakeoverScope({name: 'Women Briefs', category: ''}).decision, 'include');
+  for (const name of ['Swim Bra', 'Swimsuit Bodysuit', 'Nightdress with Bra Support']) {
+    assert.equal(classifyTakeoverScope({name, category: ''}).decision, 'review', name);
+    assert.equal(classifyTakeoverScope({name: 'Lace Bra', category: name}).decision, 'review', `category: ${name}`);
+  }
+  for (const name of ['Swim', 'Swimsuit', 'Nightdress']) {
+    assert.equal(classifyTakeoverScope({name, category: ''}).decision, 'exclude', name);
+    assert.equal(classifyTakeoverScope({name: 'Unknown', category: name}).decision, 'exclude', `category: ${name}`);
+  }
 });
 
 test('restarted worker revalidates a saved captured identity before catalog completion', async () => {
