@@ -209,12 +209,14 @@ test('captureVisiblePart retries quota errors returned by the background script'
   assert.equal(attempts, 2);
 });
 
-function loadFullPageScreenshot({ width = 100, height = 300, dpr = 1, context = { drawImage() {} }, onStyleCheck = () => {}, scheduleTimeout = callback => callback() } = {}) {
+function loadFullPageScreenshot({ width = 100, height = 300, viewportWidth = 100,
+  dpr = 1, context = { drawImage() {} }, onStyleCheck = () => {},
+  scheduleTimeout = callback => callback() } = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'screenshot.js'), 'utf8');
   const container = { style: { display: 'block' } };
   let observer;
   const window = {
-    devicePixelRatio: dpr, innerWidth: 100, innerHeight: 100,
+    devicePixelRatio: dpr, innerWidth: viewportWidth, innerHeight: 100,
     scrollX: 0, scrollY: 25, scrollTo(x, y) { this.scrollX = x; this.scrollY = y; }
   };
   const sandbox = {
@@ -320,7 +322,7 @@ test('aborted full-page capture does not hide nodes from a pending scan after cl
 });
 
 test('full-page capture rejects an overwide canvas before capture and restores page state', async () => {
-  const page = loadFullPageScreenshot({ width: 20000 });
+  const page = loadFullPageScreenshot({ width: 20000, viewportWidth: 20000 });
   let captures = 0;
   page.screenshot.captureVisiblePart = async () => { captures++; return 'data:image/png;base64,ok'; };
 
@@ -329,6 +331,20 @@ test('full-page capture rejects an overwide canvas before capture and restores p
   assert.equal(captures, 0);
   assert.equal(page.getObserver().disconnected, true);
   assert.equal(page.container.style.display, '');
+  assert.equal(page.window.scrollY, 25);
+});
+
+test('full-page capture rejects horizontal overflow before saving a blank right edge', async () => {
+  const page = loadFullPageScreenshot({width: 200, viewportWidth: 100});
+  let captures = 0;
+  page.screenshot.captureVisiblePart = async () => { captures++; return 'data:image/png;base64,ok'; };
+
+  await assert.rejects(page.screenshot.captureFullPage(), /horizontal.*visible-area/i);
+
+  assert.equal(captures, 0);
+  assert.equal(page.getObserver().disconnected, true);
+  assert.equal(page.container.style.display, '');
+  assert.equal(page.window.scrollX, 0);
   assert.equal(page.window.scrollY, 25);
 });
 

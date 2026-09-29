@@ -11,7 +11,7 @@
     },
     "colorVariantStrategy": "separate-url",
     "allImagesSelector": ".pdp-product-images__image img.main-pdp-image",
-    "imageUrlPattern": "imagedelivery\\\\.net/[^/]+/prod/production/",
+    "imageUrlPattern": "imagedelivery\\.net/[^/]+/prod/production/",
     "product": {
       "variantTriggers": [
         {
@@ -41,7 +41,7 @@
       ],
       "imageSelector": ".pdp-product-images__image:first-child img.main-pdp-image",
       "allImagesSelector": ".pdp-product-images__image img.main-pdp-image",
-      "imageUrlPattern": "imagedelivery\\\\.net/[^/]+/prod/production/[^/]+/[A-Z0-9-]+/[A-Z0-9-]+/w=\\\\d+",
+      "imageUrlPattern": "imagedelivery\\.net/[^/]+/prod/production/[^/]+/[A-Z0-9-]+/[A-Z0-9-]+/w=\\d+",
       "highResTransform": {
         "description": "Cloudflare imagedelivery.net serves images with a width parameter; swap w=1024 for w=2048 to get double resolution",
         "find": "/w=1024",

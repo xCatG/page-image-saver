@@ -11,7 +11,7 @@
     },
     "imagesVisibleWithoutClicks": true,
     "colorVariantStrategy": "separate-url",
-    "imageUrlPattern": "\\\\/cdn\\\\/shop\\\\/files\\\\/[A-Z0-9]+_[A-Z]+_(?:\\\\d+|gt\\\\d+)\\\\.jpg",
+    "imageUrlPattern": "\\/cdn\\/shop\\/files\\/[A-Z0-9]+_[A-Z]+_(?:\\d+|gt\\d+)\\.jpg",
     "product": {
       "variantTriggers": [
         {
@@ -33,7 +33,7 @@
       ],
       "allImagesSelector": ".product-gallery__media img",
       "imageSelector": ".product-gallery__media.is-initial img",
-      "imageUrlPattern": "\\\\/cdn\\\\/shop\\\\/files\\\\/[A-Z0-9]+_[A-Z]+_(?:\\\\d+|gt\\\\d+)\\\\.jpg",
+      "imageUrlPattern": "\\/cdn\\/shop\\/files\\/[A-Z0-9]+_[A-Z]+_(?:\\d+|gt\\d+)\\.jpg",
       "highResTransform": {
         "description": "Shopify CDN: images are served as base files under /cdn/shop/files/. Add ?width=2400 query param to request max resolution. The declared img width/height attributes on the element indicate 2400x2880 original dimensions.",
         "type": "query-param",

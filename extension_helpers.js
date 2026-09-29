@@ -426,19 +426,19 @@
     return 'Local product bundle exported. Run capture-import to verify Downloads bytes.';
   }
 
-  function saveCaptureDownload(chromeApi, dataUrl, filename, timeoutMs = 120000) {
+  function saveCaptureDownload(chromeApi, dataUrl, filename, timeoutMs = 120000, options = {}) {
     return new Promise((resolve, reject) => {
       let id = null;
       let settled = false;
       const early = new Map();
       const timer = setTimeout(() => finish(new Error('capture download timeout')), timeoutMs);
-      function finish(error) {
+      function finish(error, savedPath) {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         chromeApi.downloads.onChanged.removeListener(onChanged);
         if (error) reject(error);
-        else resolve();
+        else resolve(savedPath);
       }
       function terminal(delta) {
         if (delta.state?.current === 'interrupted') {
@@ -446,10 +446,23 @@
         } else if (delta.state?.current === 'complete') {
           chromeApi.downloads.search({id: delta.id}, items => {
             const savedName = items?.[0]?.filename?.replace(/\\/g, '/');
-            if (chromeApi.runtime.lastError || !savedName?.endsWith('/' + filename)) {
+            const directory = filename.slice(0, filename.lastIndexOf('/'));
+            const requestedName = filename.slice(filename.lastIndexOf('/') + 1);
+            const savedDirectory = savedName?.slice(0, savedName.lastIndexOf('/'));
+            const savedBase = savedName?.slice(savedName.lastIndexOf('/') + 1);
+            const dot = requestedName.lastIndexOf('.');
+            const stem = dot > 0 ? requestedName.slice(0, dot) : requestedName;
+            const extension = dot > 0 ? requestedName.slice(dot) : '';
+            const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const unique = new RegExp(`^${escape(stem)} ?\\(\\d+\\)${escape(extension)}$`);
+            const sameDirectory = savedDirectory?.endsWith('/' + directory);
+            const valid = options.allowUniquified
+              ? sameDirectory && (savedBase === requestedName || unique.test(savedBase))
+              : savedName?.endsWith('/' + filename);
+            if (chromeApi.runtime.lastError || !valid) {
               finish(new Error(`capture download filename mismatch: expected ${filename}, got ${savedName || '<missing>'}`));
             } else {
-              finish(null);
+              finish(null, options.allowUniquified ? `${directory}/${savedBase}` : filename);
             }
           });
         }

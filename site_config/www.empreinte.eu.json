@@ -11,7 +11,7 @@
   },
   "imagesVisibleWithoutClicks": true,
   "colorVariantStrategy": "separate-url",
-  "imageUrlPattern": "/in/\\\\d+-large_default/[^/]+\\\\.jpg",
+  "imageUrlPattern": "/in/\\d+-large_default/[^/]+\\.jpg",
   "product": {
     "variantTriggers": [
       {
@@ -33,7 +33,7 @@
     ],
     "allImagesSelector": ".images-container .js-qv-product-cover",
     "imageSelector": ".images-container .js-qv-product-cover:first-of-type",
-    "imageUrlPattern": "/in/\\\\d+-large_default/[^/]+\\\\.jpg",
+    "imageUrlPattern": "/in/\\d+-large_default/[^/]+\\.jpg",
     "highResTransform": {
       "description": "large_default is already the highest resolution available (1300×1768px). No zoom_default exists on this store. To get listing thumbnails instead use listing_category_default (300×408px). No find/replace needed — just use the large_default URL as-is.",
       "find": "-listing_category_default/",

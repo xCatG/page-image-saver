@@ -10,6 +10,10 @@ function chromeEvent(listeners = []) {
   return {
     addListener(listener) {
       listeners.push(listener);
+    },
+    removeListener(listener) {
+      const index = listeners.indexOf(listener);
+      if (index >= 0) listeners.splice(index, 1);
     }
   };
 }
@@ -21,6 +25,7 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
   const responses = [];
   const notices = [];
   const logs = [];
+  const downloadChanges = [];
   const settings = {
     useS3: true,
     s3: {
@@ -93,10 +98,16 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
         captureVisibleTab() {}
       },
       downloads: {
-        search: (_query, callback) => callback([]),
+        onChanged: chromeEvent(downloadChanges),
+        search: (query, callback) => callback([{
+          filename: '/tmp/Downloads/' + downloads[query.id - 1].filename
+        }]),
         download: (request, callback) => {
           downloads.push(request);
-          callback(1);
+          const id = downloads.length;
+          callback(id);
+          setImmediate(() => downloadChanges.slice().forEach(listener =>
+            listener({id, state: {current: 'complete'}})));
         }
       }
     }
@@ -119,7 +130,9 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
     listener(message, { tab: { id: 1, windowId: 1 } }, response => responses.push(response));
   }
 
-  await new Promise(resolve => setImmediate(resolve));
+  for (let i = 0; i < 5 && !responses.length; i++) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
 
   assert.equal(openedTabs.length, 0);
   assert.equal(downloads.length, 1);
@@ -146,6 +159,7 @@ test('selected image reports incomplete evidence when its JSON sidecar download 
   const downloads = [];
   const listeners = [];
   const completionMessages = [];
+  const downloadChanges = [];
   const settings = {
     useS3: true,
     s3: { region: '', bucketName: '', folderPath: '', accessKeyId: '', secretAccessKey: '', makePublic: false },
@@ -186,7 +200,10 @@ test('selected image reports incomplete evidence when its JSON sidecar download 
         }
       },
       downloads: {
-        search: (_query, callback) => callback([]),
+        onChanged: chromeEvent(downloadChanges),
+        search: (query, callback) => callback([{
+          filename: '/tmp/Downloads/' + downloads[query.id - 1]
+        }]),
         download: (request, callback) => {
           downloads.push(request.filename);
           if (request.filename.endsWith('.json')) {
@@ -194,7 +211,10 @@ test('selected image reports incomplete evidence when its JSON sidecar download 
             callback(undefined);
             sandbox.chrome.runtime.lastError = null;
           } else {
-            callback(1);
+            const id = downloads.length;
+            callback(id);
+            setImmediate(() => downloadChanges.slice().forEach(listener =>
+              listener({id, state: {current: 'complete'}})));
           }
         }
       }
@@ -218,6 +238,7 @@ test('selected image reports incomplete evidence when its JSON sidecar download 
     'Gold Evidence/shop.example.com/one.json'
   ]);
   assert.equal(result.success, false);
+  assert.equal(result.nonRetryable, true);
   assert.match(result.error, /JSON sidecar.*disk write failed/i);
   assert.match(result.error, /image.*saved/i);
   assert.equal(result.results[0].fullPath, 'Gold Evidence/shop.example.com/one.jpg');
@@ -229,11 +250,17 @@ test('selected image reports incomplete evidence when its JSON sidecar download 
     pageTitle: 'One'
   };
   for (const listener of listeners) listener(request, { tab: { id: 1 } }, () => {});
-  await new Promise(resolve => setImmediate(resolve));
+  for (let i = 0; i < 5 && !completionMessages.length; i++) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
 
   assert.equal(completionMessages.length, 1);
   assert.equal(completionMessages[0].success, false);
   assert.equal(completionMessages[0].count, 0);
   assert.equal(completionMessages[0].failures, 1);
+  assert.equal(completionMessages[0].failedUrls.length, 0);
+  assert.equal(completionMessages[0].incompleteEvidence[0].savedImagePath,
+    'Gold Evidence/shop.example.com/one.jpg');
   assert.match(completionMessages[0].error, /JSON sidecar/i);
+  assert.doesNotMatch(completionMessages[0].error, /retry to complete evidence/i);
 });

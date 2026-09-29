@@ -660,7 +660,7 @@ chrome.action.onClicked.addListener(tab => {
         // Inject content script manually
         chrome.scripting.executeScript({
           target: {tabId: tab.id},
-          files: ['html2canvas.min.js', 'screenshot.js', 'content_script.js']
+          files: ['extension_helpers.js', 'html2canvas.min.js', 'screenshot.js', 'content_script.js']
         }).then(() => {
           // Wait a moment for the script to initialize
           setTimeout(() => {
@@ -714,7 +714,7 @@ chrome.commands.onCommand.addListener(command => {
             // Inject content script manually
             chrome.scripting.executeScript({
               target: {tabId: tab.id},
-              files: ['html2canvas.min.js', 'screenshot.js', 'content_script.js']
+              files: ['extension_helpers.js', 'html2canvas.min.js', 'screenshot.js', 'content_script.js']
             }).then(() => {
               // Wait a moment for script to initialize
               setTimeout(() => {
@@ -792,13 +792,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const successCount = results.filter(r => r.success).length;
         const skippedCount = results.filter(r => !r.success && r.skipped).length;
         const failedCount = results.length - successCount - skippedCount;
-        const sidecarFailed = results.some(r => !r.success && r.error && r.error.startsWith('JSON sidecar save failed:'));
+        const incompleteEvidence = results.filter(r => r.nonRetryable)
+          .map(r => ({url: r.image?.url, savedImagePath: r.savedImagePath,
+            savedSidecarPath: r.savedSidecarPath || null, error: r.error}));
         console.log(`[UPLOAD FINAL] Upload process completed. Final stats: ${successCount} successful, ${skippedCount} skipped, ${failedCount} failed`);
 
         // Collect URLs that failed (not just skipped) so the content script can
         // remove them from alreadyUploadedUrls and allow a retry
         const failedUrls = results
-          .filter(r => !r.success && !r.skipped && r.image && r.image.url)
+          .filter(r => !r.success && !r.skipped && !r.nonRetryable && r.image && r.image.url)
           .map(r => r.image.url);
 
         // Collect skip reasons for better user messaging
@@ -821,8 +823,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             skipReasons,
             failures: failedCount,
             failedUrls,
-            error: sidecarFailed
-              ? 'JSON sidecar save failed; the image may already be in Downloads. Retry to complete evidence.'
+            incompleteEvidence,
+            error: incompleteEvidence.length
+              ? `JSON sidecar evidence is incomplete. Image saved at ${incompleteEvidence[0].savedImagePath || 'an unknown Downloads path'}; inspect Downloads and repair its sidecar manually.`
               : (failedCount ? 'Some images could not be saved.' : undefined),
             total: results.length,
             localFolder,
@@ -1312,7 +1315,8 @@ async function processImage(image, sourceInfo) {
         const jsonBlob = new Blob([jsonStr], { type: 'application/json' });
         // Run separately so a JSON write failure doesn't block the image save
         promises.push(
-          saveToDownloads(jsonBlob, jsonFilename, localFolder).catch(err => {
+          saveToDownloads(jsonBlob, jsonFilename, localFolder)
+            .then(result => ({...result, type: 'local-json'})).catch(err => {
             debugLog(`JSON sidecar write failed for ${filename}: ${err.message}`);
             return { success: false, type: 'local-json', error: err.message };
           })
@@ -1342,14 +1346,30 @@ async function processImage(image, sourceInfo) {
     const successfulResults = results.filter(r => r && r.success);
     console.log('Successful operations:', successfulResults.length);
 
+    const imageSave = results.find(r => r && r.type === 'local' && r.success);
+    const sidecarSave = results.find(r => r && r.type === 'local-json' && r.success);
     const sidecarFailure = results.find(r => r && r.type === 'local-json' && !r.success);
     if (sidecarFailure) {
       return {
         success: false,
         image,
-        error: `JSON sidecar save failed: ${sidecarFailure.error}. Image was saved locally but evidence is incomplete.`,
+        nonRetryable: true,
+        savedImagePath: imageSave?.fullPath || null,
+        error: `JSON sidecar save failed: ${sidecarFailure.error}. Image saved at ${imageSave?.fullPath || 'an unknown Downloads path'}; evidence is incomplete. Inspect Downloads and repair the sidecar manually.`,
         results: successfulResults
       };
+    }
+    if (imageSave && sidecarSave) {
+      const stem = savedPath => {
+        const name = savedPath.split('/').pop();
+        return name.includes('.') ? name.slice(0, name.lastIndexOf('.')) : name;
+      };
+      if (stem(imageSave.fullPath) !== stem(sidecarSave.fullPath)) {
+        return {success: false, image, nonRetryable: true,
+          savedImagePath: imageSave.fullPath, savedSidecarPath: sidecarSave.fullPath,
+          error: `JSON sidecar filename differs from saved image: ${imageSave.fullPath} and ${sidecarSave.fullPath}. Evidence is incomplete; inspect Downloads and repair the pair manually.`,
+          results: successfulResults};
+      }
     }
     
     // If at least one operation succeeded, consider the overall process a success
@@ -1597,21 +1617,9 @@ async function saveToDownloads(blob, filename, domain) {
   localPath = localPath.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
 
   const dataUrl = await blobToDataUrl(blob);
-
-  return new Promise((resolve, reject) => {
-    chrome.downloads.download({
-      url: dataUrl,
-      filename: localPath,
-      saveAs: false,
-      conflictAction: 'uniquify'
-    }, (downloadId) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve({ success: true, type: 'local', fullPath: localPath });
-      }
-    });
-  });
+  const savedPath = await globalThis.PageImageSaverHelpers.saveCaptureDownload(
+    chrome, dataUrl, localPath, 120000, {allowUniquified: true});
+  return {success: true, type: 'local', fullPath: savedPath};
 }
 
 // Build the full storage path with optional domain subfolder
