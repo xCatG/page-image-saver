@@ -113,11 +113,36 @@
       selected_color: color || null, color_key: colorKey};
   }
 
+  function captureIdentityKey(identity) {
+    if (identity.color_key === 'url') {
+      return {color_key: 'url', domain: identity.domain, product_url: identity.product_url};
+    }
+    if (identity.color_key === 'color' && identity.selected_color) {
+      return {color_key: 'color', domain: identity.domain, product_url: identity.product_url,
+        selected_color: identity.selected_color};
+    }
+    throw new Error('invalid capture identity key');
+  }
+
   function captureImageUrls(original, transform) {
     const url = new URL(original).href;
-    const find = transform?.find;
-    const fetched = typeof find === 'string' && find
-      ? url.replace(find, typeof transform.replace === 'string' ? transform.replace : '') : url;
+    let fetched = url;
+    if (transform?.type === 'query-param') {
+      if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(transform.name) ||
+          !/^[a-zA-Z0-9_-]+$/.test(transform.value)) {
+        throw new Error('invalid query-param image transform');
+      }
+      const changed = new URL(url);
+      changed.searchParams.set(transform.name, transform.value);
+      fetched = changed.href;
+    } else if (!transform || transform.type === undefined || transform.type === 'literal') {
+      if (transform && (typeof transform.find !== 'string' || typeof transform.replace !== 'string')) {
+        throw new Error('invalid literal image transform');
+      }
+      if (transform?.find) fetched = url.replace(transform.find, transform.replace);
+    } else {
+      throw new Error('unknown image transform type');
+    }
     return {original_url: url, fetched_url: fetched};
   }
 
@@ -131,10 +156,12 @@
     while (now() - start <= timeout) {
       const state = readState();
       const valid = state && typeof state.color === 'string' && state.color.trim()
-        && Array.isArray(state.gallery) && state.gallery.length > 0;
-      const changed = !previous || state.color === previous.color ||
-        JSON.stringify(state.gallery) !== JSON.stringify(previous.gallery);
-      if (valid && changed) {
+        && Array.isArray(state.gallery) && state.gallery.length > 0 && state.colorConflict !== true;
+      const colorChanged = previous && state && state.color !== previous.color;
+      const galleryChanged = previous && state && JSON.stringify(state.gallery) !== JSON.stringify(previous.gallery);
+      const coherent = !previous || (colorChanged && galleryChanged) ||
+        (!colorChanged && (!galleryChanged || options.allowSameColorGalleryChange === true));
+      if (valid && coherent) {
         if (last && last.color === state.color && JSON.stringify(last.gallery) === JSON.stringify(state.gallery)) {
           return state;
         }
@@ -145,6 +172,37 @@
       await delay(poll);
     }
     throw new Error('color/gallery transition timeout');
+  }
+
+  async function waitForAutoCaptureReady(readEvidence, options = {}) {
+    const now = options.now || Date.now;
+    const delay = options.delay || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    const start = now();
+    const timeout = options.timeoutMs ?? 8000;
+    const poll = options.pollMs ?? 200;
+    let productSeen = false;
+    while (now() - start <= timeout) {
+      const evidence = readEvidence();
+      productSeen ||= evidence.productSeen === true;
+      if (evidence.productSeen === true && Array.isArray(evidence.gallery) && evidence.gallery.length > 0) return true;
+      await delay(poll);
+    }
+    if (productSeen) throw new Error('automatic product gallery readiness timeout');
+    return false;
+  }
+
+  async function recordCaptureFailure(chromeApi, url, error, at = new Date().toISOString()) {
+    const reason = String(error?.message || error);
+    return new Promise(resolve => chromeApi.storage.local.get({captureFailures: []}, result => {
+      const failures = Array.isArray(result.captureFailures) ? result.captureFailures : [];
+      failures.push({url, at, reason});
+      chromeApi.storage.local.set({captureFailures: failures.slice(-100)}, () => {
+        chromeApi.runtime.sendMessage({action: 'captureFailureNotice', reason}, () => {
+          void chromeApi.runtime.lastError;
+          resolve();
+        });
+      });
+    }));
   }
 
   function buildCaptureCompletion(data) {
@@ -160,7 +218,7 @@
 
   async function exportProductCapture(payload, io) {
     const encode = value => new TextEncoder().encode(value);
-    const identityHash = await captureSha256(encode(JSON.stringify(payload.identity)));
+    const identityHash = await captureSha256(encode(JSON.stringify(captureIdentityKey(payload.identity)) + '\n'));
     const attempt = io.attemptId || globalThis.crypto.randomUUID();
     if (!/^[a-zA-Z0-9_-]+$/.test(attempt)) throw new Error('unsafe capture attempt ID');
     const domain = payload.identity.domain;
@@ -277,8 +335,11 @@
   const helpers = {
     captureProductFromJsonLd,
     captureIdentity,
+    captureIdentityKey,
     captureImageUrls,
     waitForCaptureState,
+    waitForAutoCaptureReady,
+    recordCaptureFailure,
     buildCaptureCompletion,
     exportProductCapture,
     saveCaptureDownload,

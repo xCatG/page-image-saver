@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const path = require('node:path');
 const helpers = require('../extension_helpers.js');
 
 test('JSON-LD product extraction keeps recorded color, price, and currency', () => {
@@ -20,11 +22,37 @@ test('unknown product facts remain explicit and per-URL identity keeps unknown c
   assert.throws(() => helpers.captureIdentity('https://shop.example.test/bra', 'color', null), /selected color/);
 });
 
+test('URL-only identity key ignores recorded color while in-place colors stay distinct', () => {
+  const unknown = helpers.captureIdentity('https://shop.example.test/bra-red', 'url', null);
+  const known = helpers.captureIdentity('https://shop.example.test/bra-red', 'url', 'Red');
+  assert.notDeepEqual(unknown, known);
+  assert.deepEqual(helpers.captureIdentityKey(unknown), {
+    color_key: 'url', domain: 'shop.example.test', product_url: 'https://shop.example.test/bra-red'
+  });
+  assert.deepEqual(helpers.captureIdentityKey(unknown), helpers.captureIdentityKey(known));
+  const black = helpers.captureIdentity('https://shop.example.test/bra', 'color', 'Black');
+  const red = helpers.captureIdentity('https://shop.example.test/bra', 'color', 'Red');
+  assert.deepEqual(helpers.captureIdentityKey(black), {
+    color_key: 'color', domain: 'shop.example.test', product_url: 'https://shop.example.test/bra',
+    selected_color: 'Black'
+  });
+  assert.notDeepEqual(helpers.captureIdentityKey(black), helpers.captureIdentityKey(red));
+});
+
 test('high-resolution transform preserves the exact original URL', () => {
   assert.deepEqual(helpers.captureImageUrls('https://cdn.example.test/bra/w=1024',
     {find: '/w=1024', replace: '/w=2048'}),
     {original_url: 'https://cdn.example.test/bra/w=1024',
       fetched_url: 'https://cdn.example.test/bra/w=2048'});
+});
+
+test('packaged Aubade transform sets width query without changing original URL', () => {
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'site_config', 'int.aubade.com.json')));
+  const original = 'https://int.aubade.com/cdn/shop/files/BRA_BLACK_1.jpg?width=800&crop=center';
+  assert.deepEqual(helpers.captureImageUrls(original, config.product.highResTransform), {
+    original_url: original,
+    fetched_url: 'https://int.aubade.com/cdn/shop/files/BRA_BLACK_1.jpg?width=2400&crop=center'
+  });
 });
 
 test('in-place color waits for both changed color and changed stable gallery', async () => {
@@ -38,6 +66,16 @@ test('in-place color waits for both changed color and changed stable gallery', a
   assert.deepEqual(result, {color: 'Red', gallery: ['red.png']});
 });
 
+test('gallery-first swatch transition waits for the new color before capture', async () => {
+  let now = 0;
+  const result = await helpers.waitForCaptureState(
+    () => now < 600 ? {color: 'Black', gallery: ['red.png']} : {color: 'Red', gallery: ['red.png']},
+    {color: 'Black', gallery: ['black.png']},
+    {timeoutMs: 1200, pollMs: 200, now: () => now, delay: async ms => { now += ms; }});
+  assert.deepEqual(result, {color: 'Red', gallery: ['red.png']});
+  assert.ok(now >= 600);
+});
+
 test('mismatched in-place color/gallery state times out without a completion', async () => {
   let now = 0;
   await assert.rejects(() => helpers.waitForCaptureState(
@@ -46,12 +84,76 @@ test('mismatched in-place color/gallery state times out without a completion', a
     {timeoutMs: 5, pollMs: 1, now: () => ++now, delay: async () => {}}), /timeout/);
 });
 
-test('same color can be recaptured after a stable human image selection change', async () => {
+test('same-color changed selection requires explicit manual recapture intent', async () => {
+  let now = 0;
+  await assert.rejects(() => helpers.waitForCaptureState(
+    () => ({color: 'Black', gallery: ['black-detail.png']}),
+    {color: 'Black', gallery: ['black-front.png']},
+    {timeoutMs: 5, pollMs: 1, now: () => now, delay: async ms => { now += ms; }}), /timeout/);
   const result = await helpers.waitForCaptureState(
     () => ({color: 'Black', gallery: ['black-detail.png']}),
     {color: 'Black', gallery: ['black-front.png']},
-    {timeoutMs: 100, pollMs: 0, delay: async () => {}});
+    {timeoutMs: 100, pollMs: 0, delay: async () => {}, allowSameColorGalleryChange: true});
   assert.deepEqual(result.gallery, ['black-detail.png']);
+});
+
+test('manual same-color opt-in cannot override a selected-swatch color contradiction', async () => {
+  let now = 0;
+  await assert.rejects(() => helpers.waitForCaptureState(
+    () => ({color: 'Black', gallery: ['red.png'], colorConflict: true}),
+    {color: 'Black', gallery: ['black.png']},
+    {timeoutMs: 5, pollMs: 1, now: () => now, delay: async ms => { now += ms; },
+      allowSameColorGalleryChange: true}), /timeout/);
+});
+
+test('auto capture waits for a delayed gallery on a recognized product', async () => {
+  let now = 0;
+  const ready = await helpers.waitForAutoCaptureReady(
+    () => ({productSeen: true, gallery: now < 600 ? [] : ['https://example.test/red.png']}),
+    {timeoutMs: 1200, pollMs: 200, now: () => now, delay: async ms => { now += ms; }});
+  assert.equal(ready, true);
+  assert.ok(now >= 600);
+});
+
+test('auto capture reports bounded timeout for recognized product without gallery', async () => {
+  let now = 0;
+  await assert.rejects(() => helpers.waitForAutoCaptureReady(
+    () => ({productSeen: true, gallery: []}),
+    {timeoutMs: 5, pollMs: 1, now: () => now, delay: async ms => { now += ms; }}), /gallery readiness timeout/);
+});
+
+test('auto capture leaves non-product page alone after readiness window', async () => {
+  let now = 0;
+  const ready = await helpers.waitForAutoCaptureReady(
+    () => ({productSeen: false, gallery: []}),
+    {timeoutMs: 5, pollMs: 1, now: () => now, delay: async ms => { now += ms; }});
+  assert.equal(ready, false);
+});
+
+test('auto capture does not mistake a matching gallery alone for a product', async () => {
+  let now = 0;
+  const ready = await helpers.waitForAutoCaptureReady(
+    () => ({productSeen: false, gallery: ['https://example.test/promo.png']}),
+    {timeoutMs: 5, pollMs: 1, now: () => now, delay: async ms => { now += ms; }});
+  assert.equal(ready, false);
+});
+
+test('capture timeout is stored locally and sent to the visible failure notice', async () => {
+  let stored = {captureFailures: []};
+  const messages = [];
+  const chrome = {
+    runtime: {lastError: null, sendMessage(message, callback) { messages.push(message); callback({success: true}); }},
+    storage: {local: {
+      get(_defaults, callback) { callback(stored); },
+      set(value, callback) { stored = value; callback(); }
+    }}
+  };
+  await helpers.recordCaptureFailure(chrome, 'https://shop.example.test/bra',
+    new Error('automatic product gallery readiness timeout'), '2026-09-29T12:00:00Z');
+  assert.deepEqual(stored.captureFailures, [{url: 'https://shop.example.test/bra',
+    at: '2026-09-29T12:00:00Z', reason: 'automatic product gallery readiness timeout'}]);
+  assert.deepEqual(messages, [{action: 'captureFailureNotice',
+    reason: 'automatic product gallery readiness timeout'}]);
 });
 
 test('completion record has strict versioned evidence and scope fields', () => {

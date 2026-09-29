@@ -36,8 +36,9 @@
       "imageUrlPattern": "\\\\/cdn\\\\/shop\\\\/files\\\\/[A-Z0-9]+_[A-Z]+_(?:\\\\d+|gt\\\\d+)\\\\.jpg",
       "highResTransform": {
         "description": "Shopify CDN: images are served as base files under /cdn/shop/files/. Add ?width=2400 query param to request max resolution. The declared img width/height attributes on the element indicate 2400x2880 original dimensions.",
-        "find": "(\\\\.jpg)(\\\\?.*)?$",
-        "replace": ".jpg?width=2400"
+        "type": "query-param",
+        "name": "width",
+        "value": "2400"
       },
       "lazyLoad": true
     },

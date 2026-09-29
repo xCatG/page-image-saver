@@ -889,6 +889,7 @@ function createImageSelectionUI(images) {
       <label>Selected color <input id="capture-color" type="text" placeholder="Required for same-URL colors"></label>
       <label>Scope <select id="capture-scope"><option value="review">Review</option><option value="include">Include</option><option value="exclude">Exclude</option></select></label>
       <label>Scope reason <input id="capture-scope-reason" type="text" placeholder="Why this scope decision?"></label>
+      <label><input id="capture-same-color-selection" type="checkbox"> I changed only the image selection, not the product/color (one capture only)</label>
       <label><input id="capture-auto-site" type="checkbox"> Auto capture product pages on this site as review</label>
     </div>
     <div id="size-filter" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
@@ -2250,10 +2251,13 @@ function captureGallery(config, mode) {
   return Array.from(unique);
 }
 
+function captureSwatchColor() {
+  const swatch = document.querySelector('[aria-selected="true"][data-color], [aria-checked="true"][data-color]');
+  return swatch?.getAttribute('data-color') || null;
+}
+
 function captureSelectedColor(product) {
-  const swatch = document.querySelector('[aria-selected="true"][data-color], [aria-checked="true"][data-color], .swatch-option.selected[data-option-label]');
-  return product.color || swatch?.getAttribute('data-color') || swatch?.getAttribute('data-option-label') ||
-    document.getElementById('capture-color')?.value.trim() || null;
+  return product.color || captureSwatchColor() || document.getElementById('capture-color')?.value.trim() || null;
 }
 
 function captureCanonicalUrl() {
@@ -2271,28 +2275,31 @@ function capturePageHtml() {
 }
 
 async function recordCaptureFailure(error) {
-  return new Promise(resolve => chrome.storage.local.get({captureFailures: []}, result => {
-    const failures = result.captureFailures || [];
-    failures.push({url: window.location.href, at: new Date().toISOString(),
-      reason: String(error?.message || error)});
-    chrome.storage.local.set({captureFailures: failures.slice(-100)}, resolve);
-  }));
+  return globalThis.PageImageSaverHelpers.recordCaptureFailure(chrome, window.location.href, error);
 }
 
 async function captureCurrentProduct({manual}) {
   const config = await loadCaptureSiteConfig();
   const mode = manual ? document.getElementById('capture-image-mode').value : 'site';
+  const sameColorControl = manual ? document.getElementById('capture-same-color-selection') : null;
+  const allowSameColorGalleryChange = !!sameColorControl?.checked;
+  if (sameColorControl) sameColorControl.checked = false;
+  if (allowSameColorGalleryChange && mode !== 'selected') {
+    throw new Error('Same-color image reselection requires selected checkboxes');
+  }
   const policy = manual ? document.getElementById('capture-color-policy').value :
     config?.colorVariantStrategy === 'separate-url' ? 'url' : 'color';
   const readState = () => {
     const product = capturePageProduct();
     const gallery = captureGallery(config, mode);
-    return {color: policy === 'url' ? captureCanonicalUrl() : captureSelectedColor(product), gallery};
+    const swatchColor = captureSwatchColor();
+    return {color: policy === 'url' ? captureCanonicalUrl() : captureSelectedColor(product), gallery,
+      colorConflict: !!(product.color && swatchColor && product.color !== swatchColor)};
   };
   const url = captureCanonicalUrl();
   const previous = previousCaptureStates.get(url);
   const state = await globalThis.PageImageSaverHelpers.waitForCaptureState(readState, previous,
-    {timeoutMs: 8000, pollMs: 200});
+    {timeoutMs: 8000, pollMs: 200, allowSameColorGalleryChange: manual && allowSameColorGalleryChange});
   const product = capturePageProduct();
   const color = policy === 'url' ? captureSelectedColor(product) : state.color;
   const identity = globalThis.PageImageSaverHelpers.captureIdentity(url, policy, color);
@@ -2322,7 +2329,13 @@ setTimeout(async () => {
   chrome.storage.local.get({captureAutoDomains: {}}, async result => {
     if (!result.captureAutoDomains[window.location.hostname]) return;
     try {
-      if (!document.querySelector(config.product.allImagesSelector)) return;
+      const ready = await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
+        const product = capturePageProduct();
+        let gallery = [];
+        try { gallery = captureGallery(config, 'site'); } catch (_) { /* Gallery may render later. */ }
+        return {productSeen: !!(product.name || product.sku || product.product_id || product.color), gallery};
+      }, {timeoutMs: 8000, pollMs: 200});
+      if (!ready) return;
       await captureCurrentProduct({manual: false});
     } catch (error) {
       await recordCaptureFailure(error);

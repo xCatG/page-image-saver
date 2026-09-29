@@ -19,6 +19,7 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
   const downloads = [];
   const openedTabs = [];
   const responses = [];
+  const notices = [];
   const settings = {
     useS3: true,
     s3: {
@@ -76,7 +77,7 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
         create() {},
         onClicked: chromeEvent()
       },
-      notifications: { create() {} },
+      notifications: { create: notice => notices.push(notice) },
       action: { onClicked: chromeEvent() },
       commands: { onCommand: chromeEvent() },
       scripting: { executeScript: () => Promise.resolve([]) },
@@ -120,4 +121,11 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
   assert.deepEqual(JSON.parse(JSON.stringify(responses)), [
     { success: true, url: 'File saved' }
   ]);
+
+  for (const listener of listeners) {
+    listener({ action: 'captureFailureNotice', reason: 'automatic product gallery readiness timeout' },
+      { tab: { id: 1, windowId: 1 } }, () => {});
+  }
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].message, /gallery readiness timeout/);
 });

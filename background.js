@@ -3,6 +3,13 @@ import './extension_helpers.js';
 // Product capture is always local. It does not consult the S3/R2 settings or
 // the existing saveImages upload path.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'captureFailureNotice') {
+    chrome.notifications.create({type: 'basic', iconUrl: 'icons/48.png',
+      title: 'Local product capture needs retry',
+      message: String(message.reason || 'Capture failed').slice(0, 200), priority: 1});
+    sendResponse({success: true});
+    return false;
+  }
   if (message.action !== 'captureProductLocal') return false;
   const helpers = globalThis.PageImageSaverHelpers;
   helpers.exportProductCapture(message.payload, {
