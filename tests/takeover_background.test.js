@@ -1,0 +1,117 @@
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const black = 'https://shop.example.test/bra-black';
+const red = 'https://shop.example.test/bra-red';
+
+function bridge() {
+  const webCompleted = [];
+  const webHeaders = [];
+  const tabUpdated = [];
+  const messages = [];
+  const tab = {id: 7, status: 'loading', url: black};
+  const stored = {catalogTakeoverRun: {domain: 'shop.example.test', status: 'running', generation: 2,
+    current: {phase: 'product', url: black}}, catalogTakeoverTabId: 7};
+  let io;
+  const event = listeners => ({addListener(fn) { listeners.push(fn); },
+    removeListener(fn) { const index = listeners.indexOf(fn); if (index >= 0) listeners.splice(index, 1); }});
+  const passive = () => ({addListener() {}});
+  const chrome = {
+    runtime: {lastError: null, onMessage: passive(), onStartup: passive()},
+    webRequest: {onCompleted: event(webCompleted), onHeadersReceived: event(webHeaders)},
+    alarms: {onAlarm: passive(), create() {}, clear() {}},
+    notifications: {create() {}},
+    storage: {local: {
+      get(key, callback) { callback({[key]: stored[key]}); },
+      set(value, callback) { Object.assign(stored, value); callback?.(); }
+    }},
+    tabs: {onUpdated: event(tabUpdated),
+      create(_details, callback) { callback({...tab}); },
+      get(_id, callback) { callback({...tab}); },
+      remove(_id, callback) { callback?.(); },
+      sendMessage(_id, message, callback) {
+        messages.push(message);
+        if (message.action === 'takeoverInspect') callback({success: true, page: {
+          kind: 'product', url: black, documentId: 'doc-black',
+          product: {name: 'Lace Bra', category: 'Bras'}, colorLinks: []}});
+        else callback({success: true, result: {storage: 'receiver', status: 'already',
+          identity: {domain: 'shop.example.test', product_url: red,
+            selected_color: 'Red', color_key: 'url'}}});
+      }
+    }
+  };
+  const sandbox = {chrome, URL, Date, Promise, console,
+    setTimeout() { return 1; }, clearTimeout() {},
+    PageImageSaverTakeover: {createTakeoverRunner(value) {
+      io = value;
+      return {tick: async () => {}, read: async () => stored.catalogTakeoverRun};
+    }, summarizeTakeover() { return {}; }},
+    PageImageSaverHelpers: {}};
+  sandbox.globalThis = sandbox;
+  const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8')
+    .split('// Product capture is always local.')[0]
+    .replace("import './extension_helpers.js';", '')
+    .replace("import './takeover_runner.js';", '');
+  vm.runInNewContext(source, sandbox, {filename: 'background.js'});
+  return {io, tab, stored, chrome, messages, webCompleted, webHeaders, tabUpdated};
+}
+
+test('known 429 main-frame response settles load while tab stays loading', async () => {
+  const b = bridge();
+  let settled = false;
+  const loading = b.io.load(black).then(result => { settled = true; return result; });
+  await new Promise(resolve => setImmediate(resolve));
+  b.webCompleted[0]({type: 'main_frame', tabId: 7, statusCode: 429});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, true, 'known 429 must not wait for tab complete or the deadline');
+  assert.equal((await loading).status, 429);
+});
+
+test('blocked status survives later main-frame events before tab creation callback', async () => {
+  const b = bridge();
+  b.chrome.tabs.create = (_details, callback) => {
+    b.webCompleted[0]({type: 'main_frame', tabId: 7, statusCode: 429});
+    b.webCompleted[0]({type: 'main_frame', tabId: 7, statusCode: 200});
+    callback({...b.tab});
+  };
+  let settled = false;
+  const loading = b.io.load(black).then(result => { settled = true; return result; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, true);
+  assert.equal((await loading).status, 429);
+});
+
+test('tab navigation after inspection rejects capture before media acquisition', async () => {
+  const b = bridge();
+  b.tab.status = 'complete';
+  const inspected = await b.io.load(black);
+  assert.equal(inspected.url, black);
+  b.tab.url = red;
+  const before = b.messages.length;
+  await assert.rejects(() => b.io.capture(black, {decision: 'include', reason: 'Bras'}, {
+    tabId: 7, documentId: 'doc-black', generation: 2, expectedUrl: black
+  }), /tab|URL|identity|binding/i);
+  assert.equal(b.messages.length, before, 'no capture message may reach the changed tab');
+});
+
+test('navigation during capture prevents accepting a receiver result for the old document', async () => {
+  const b = bridge();
+  b.tab.status = 'complete';
+  const inspected = await b.io.load(black);
+  const binding = {tabId: inspected.tabId, documentId: inspected.documentId,
+    generation: 2, expectedUrl: black};
+  b.stored.catalogTakeoverRun.current.binding = binding;
+  b.chrome.tabs.sendMessage = (_id, message, callback) => {
+    if (message.action === 'takeoverCapture') {
+      b.tab.url = red;
+      callback({success: true, result: {storage: 'receiver', status: 'already',
+        identity: {domain: 'shop.example.test', product_url: black,
+          selected_color: 'Black', color_key: 'url'}}});
+    } else callback({success: true, documentId: 'doc-black', url: black});
+  };
+  await assert.rejects(() => b.io.capture(black, {decision: 'include', reason: 'Bras'}, binding),
+    /tab URL changed|document changed/);
+});

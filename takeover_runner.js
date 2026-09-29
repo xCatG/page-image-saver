@@ -20,9 +20,9 @@
     const category = String(product?.category || '').trim();
     const evidence = category.toLowerCase();
     const title = name.toLowerCase();
-    const excluded = /\b(swimwear|bikini|maillot de bain|sleepwear|nightwear|pyjamas?|pajamas?|menswear|men's|men’s|ready.to.wear|apparel)\b/i.test(evidence);
+    const excluded = /\b(swimwear|bikini|maillot de bain|sleepwear|nightwear|pyjamas?|pajamas?|menswear|men's|men’s|ready.to.wear|apparel)\b/i.test(`${evidence} ${title}`);
     const intimate = /\b(lingerie|bras?|sports? bras?|panties|briefs|thongs|corsets?|bodies|bodysuits?|culottes?|soutiens?.gorge)\b/i.test(`${evidence} ${title}`);
-    if (excluded && !intimate) return {decision: 'exclude', reason: `category evidence: ${category}`};
+    if (excluded && !intimate) return {decision: 'exclude', reason: `product/category evidence: ${category || name}`};
     if (excluded) return {decision: 'review', reason: `mixed category and product evidence: ${category}; ${name}`};
     if (intimate) return {decision: 'include', reason: `product evidence: ${category || name}`};
     return {decision: 'review', reason: 'insufficient product/category evidence'};
@@ -62,6 +62,7 @@
   }
 
   function createTakeoverRunner(io) {
+    const verifiedHere = new Set();
     async function save(run) { await io.save(run); return run; }
     async function read() { return io.read(); }
     async function preview(config, page) {
@@ -138,6 +139,33 @@
     async function tickUnlocked() {
       const run = await read();
       if (!run || run.status !== 'running') return run;
+      for (const row of run.products) {
+        if (row.status !== 'captured') continue;
+        const key = `${run.generation}|${row.url}`;
+        if (verifiedHere.has(key)) continue;
+        try {
+          if (!row.identity || row.identity.domain !== run.domain ||
+              row.identity.color_key !== 'url' ||
+              canonical(row.identity.product_url, run.domain) !== row.url) {
+            throw new Error('missing or mismatched saved capture identity');
+          }
+          const result = await io.verify(row.identity);
+          const afterVerification = await read();
+          if (afterVerification?.status !== 'running' ||
+              afterVerification.generation !== run.generation) return afterVerification;
+          if (result?.storage !== 'receiver' || result.status !== 'already') {
+            throw new Error('receiver no longer verifies published completion');
+          }
+          verifiedHere.add(key);
+        } catch (error) {
+          const afterFailure = await read();
+          if (afterFailure?.status !== 'running' ||
+              afterFailure.generation !== run.generation) return afterFailure;
+          row.status = 'failed';
+          row.reason = `saved completion verification failed: ${String(error?.message || error)}`;
+          await save(run);
+        }
+      }
       const interval = Number.isFinite(run.config.takeover?.intervalMs) ?
         run.config.takeover.intervalMs : 10000;
       if (interval < 0 || interval > 300000) return interrupt(run, 'paused', 'invalid site pacing interval');
@@ -176,6 +204,15 @@
         if (run.loadFailures[url] >= 3) return interrupt(run, 'paused', `repeated page load failure at ${url}`);
         await io.alarm(run.lastNavigationStarted + interval);
         return run;
+      }
+      try {
+        if (canonical(page.url, run.domain) !== url) {
+          return interrupt(run, listingUrl ? 'discovery_incomplete' : 'paused',
+            `inspected page URL does not match queued URL at ${url}`);
+        }
+      } catch (_) {
+        return interrupt(run, listingUrl ? 'discovery_incomplete' : 'paused',
+          `invalid inspected page URL at ${url}`);
       }
       if (listingUrl) {
         if (page.kind !== 'listing' || !Array.isArray(page.products))
@@ -225,9 +262,23 @@
           item.status = 'excluded'; item.reason = scope.reason;
         } else {
           try {
-            const result = await io.capture(url, scope);
+            if (!Number.isInteger(page.tabId) || !page.documentId) {
+              return interrupt(run, 'paused', `missing product document binding at ${url}`);
+            }
+            const binding = {generation: run.generation, tabId: page.tabId,
+              documentId: page.documentId, expectedUrl: url};
+            run.current.binding = binding;
+            await save(run); // Bind this document before any image acquisition.
+            const result = await io.capture(url, scope, binding);
+            if (!result.identity || result.identity.domain !== run.domain ||
+                result.identity.color_key !== 'url' ||
+                canonical(result.identity.product_url, run.domain) !== url) {
+              return interrupt(run, 'paused', `capture identity does not match queued URL at ${url}`);
+            }
             if (result.storage === 'receiver' && ['published', 'reused', 'already'].includes(result.status)) {
               item.status = 'captured'; item.captureStatus = result.status;
+              item.identity = result.identity;
+              verifiedHere.add(`${run.generation}|${item.url}`);
             } else if (result.storage === 'downloads') {
               item.status = 'failed'; item.reason = 'exported_unverified';
             } else { throw new Error('invalid capture result'); }

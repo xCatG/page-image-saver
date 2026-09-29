@@ -350,6 +350,7 @@
       if (already.complete === true) {
         return {storage: 'receiver', status: 'already', captured_at: already.captured_at};
       }
+      if (io.verifyOnly === true) return {storage: 'receiver', status: 'missing'};
       let publication = null;
       await exportProductCapture(payload, {
         attemptId: io.attemptId,
@@ -369,6 +370,7 @@
       });
       return {storage: 'receiver', status: publication.status, captured_at: publication.captured_at};
     } catch (error) {
+      if (io.verifyOnly === true) throw error;
       if (!error.receiverTransportFailure) throw error;
       const record = await io.download();
       return {storage: 'downloads', status: 'fallback', reason: 'receiver transport unavailable', record};

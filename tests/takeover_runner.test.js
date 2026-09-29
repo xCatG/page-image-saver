@@ -18,6 +18,7 @@ function rig(pages, captures = {}, opts = {}) {
   const memory = {run: null};
   const visits = [];
   const captureCalls = [];
+  const verificationCalls = [];
   const alarms = [];
   const notices = [];
   let now = 100000;
@@ -25,13 +26,20 @@ function rig(pages, captures = {}, opts = {}) {
   let crashOnSave = false;
   const io = {
     now: () => now,
-    load: async url => { visits.push(url); return pages[url] || {status: 404}; },
-    capture: async (url, scope) => {
-      captureCalls.push({url, scope});
+    load: async url => { visits.push(url); return {...(pages[url] || {status: 404}),
+      tabId: 7, documentId: `fixture:${url}`}; },
+    capture: async (url, scope, binding) => {
+      captureCalls.push({url, scope, binding});
       const reply = captures[url] || {storage: 'receiver', status: 'published'};
       if (reply instanceof Error) throw reply;
       if (failAfterCapture) { failAfterCapture = false; crashOnSave = true; }
-      return reply;
+      return {...reply, identity: reply.identity || {domain: 'shop.example.test', product_url: url,
+        selected_color: null, color_key: 'url'}};
+    },
+    verify: async identity => {
+      verificationCalls.push(identity);
+      if (opts.verifyError) throw opts.verifyError;
+      return opts.verifyResult || {storage: 'receiver', status: 'already'};
     },
     save: async run => {
       if (crashOnSave) { crashOnSave = false; throw Error('worker terminated'); }
@@ -41,7 +49,7 @@ function rig(pages, captures = {}, opts = {}) {
     alarm: async when => { alarms.push(when); },
     notify: async reason => { notices.push(reason); }
   };
-  return {memory, visits, captureCalls, alarms, notices, io,
+  return {memory, visits, captureCalls, verificationCalls, alarms, notices, io,
     runner: () => createTakeoverRunner(io),
     advance: ms => { now += ms; },
     terminateAfterCapture: () => { failAfterCapture = true; }};
@@ -241,6 +249,50 @@ test('scope uses product evidence and leaves uncertain mixed use as review', () 
   assert.equal(classifyTakeoverScope({name: 'Swim Bra', category: 'Swimwear / Bras'}).decision, 'review');
   assert.equal(classifyTakeoverScope({name: 'Women Bra', category: ''}).decision, 'include');
   assert.equal(classifyTakeoverScope({name: 'Mystery Set', category: ''}).decision, 'review');
+  assert.equal(classifyTakeoverScope({name: 'Swimwear Bikini Bra', category: ''}).decision, 'review');
+  assert.equal(classifyTakeoverScope({name: "Men's Briefs", category: ''}).decision, 'review');
+  assert.equal(classifyTakeoverScope({name: 'Women Briefs', category: ''}).decision, 'include');
+});
+
+test('restarted worker revalidates a saved captured identity before catalog completion', async () => {
+  const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
+  const r = rig({[first]: {...listing1, products: [bra], next: null,
+    end: {type: 'explicit', present: true}}, [bra]: {...braPage, colorLinks: []}}, {},
+    {verifyResult: {storage: 'receiver', status: 'missing'}});
+  await prepare(r, config); await r.runner().start();
+  await r.runner().tick(); r.advance(10000); await r.runner().tick();
+  assert.equal(r.memory.run.products[0].status, 'captured');
+  r.advance(10000); await r.runner().tick();
+  assert.equal(r.verificationCalls.length, 1);
+  assert.equal(r.memory.run.products[0].status, 'failed');
+  assert.equal(r.memory.run.status, 'finished_with_gaps');
+});
+
+test('pause during saved completion verification cannot be overwritten by late receiver reply', async () => {
+  const r = rig({});
+  let release;
+  r.memory.run = {version: 1, generation: 5, status: 'running', domain: site.domain,
+    config: site, listings: {queue: [], visited: [], discoveryComplete: true},
+    products: [{url: bra, status: 'captured', identity: {domain: site.domain,
+      product_url: bra, selected_color: null, color_key: 'url'}}],
+    current: null, lastNavigationStarted: null, loadFailures: {}, reason: null};
+  r.io.verify = async () => new Promise(resolve => { release = () => resolve({storage: 'receiver', status: 'already'}); });
+  const step = r.runner().tick();
+  while (!release) await Promise.resolve();
+  await r.runner().pause();
+  release(); await step;
+  assert.equal(r.memory.run.status, 'paused');
+});
+
+test('same-site product redirect cannot satisfy a different queued URL', async () => {
+  const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
+  const r = rig({[first]: {...listing1, products: [bra], next: null,
+    end: {type: 'explicit', present: true}}, [bra]: {...redPage, url: red}});
+  await prepare(r, config); await r.runner().start();
+  await r.runner().tick(); r.advance(10000); await r.runner().tick();
+  assert.equal(r.memory.run.status, 'paused');
+  assert.equal(r.memory.run.products[0].status, 'pending');
+  assert.equal(r.captureCalls.length, 0);
 });
 
 test('exported run carries the saved accounting and reasons for a gap', async () => {

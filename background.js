@@ -3,11 +3,21 @@ import './takeover_runner.js';
 
 const TAKEOVER_ALARM = 'catalog-takeover-step';
 const takeoverHttpStatus = new Map();
-chrome.webRequest.onCompleted.addListener(details => {
+const takeoverBlockedStatus = new Map();
+const takeoverBlockedWaiters = new Map();
+function observeTakeoverHttp(details) {
   if (details.type === 'main_frame' && Number.isInteger(details.tabId)) {
     takeoverHttpStatus.set(details.tabId, details.statusCode);
+    if ([403, 429].includes(details.statusCode)) {
+      takeoverBlockedStatus.set(details.tabId, details.statusCode);
+      takeoverBlockedWaiters.get(details.tabId)?.(details.statusCode);
+    }
   }
-}, {urls: ['<all_urls>'], types: ['main_frame']});
+}
+chrome.webRequest.onHeadersReceived?.addListener(observeTakeoverHttp,
+  {urls: ['<all_urls>'], types: ['main_frame']});
+chrome.webRequest.onCompleted.addListener(observeTakeoverHttp,
+  {urls: ['<all_urls>'], types: ['main_frame']});
 
 function chromeCallback(call) {
   return new Promise((resolve, reject) => call(result => {
@@ -25,14 +35,20 @@ async function takeoverTabComplete(tabId) {
       settled = true;
       clearTimeout(timer);
       chrome.tabs.onUpdated.removeListener(onUpdated);
+      takeoverBlockedWaiters.delete(tabId);
       if (error) reject(error); else resolve(value);
     }
+    function blocked(status) { finish(null, {id: tabId, blockedStatus: status}); }
     function onUpdated(changedId, info, updated) {
       if (changedId === tabId && info.status === 'complete') finish(null, updated);
     }
     chrome.tabs.onUpdated.addListener(onUpdated);
+    takeoverBlockedWaiters.set(tabId, blocked);
+    const known = takeoverBlockedStatus.get(tabId);
+    if ([403, 429].includes(known)) { blocked(known); return; }
     chrome.tabs.get(tabId, tab => {
       if (chrome.runtime.lastError) finish(new Error(chrome.runtime.lastError.message));
+      else if (takeoverBlockedStatus.has(tabId)) blocked(takeoverBlockedStatus.get(tabId));
       else if (tab?.status === 'complete') finish(null, tab);
     });
   });
@@ -43,6 +59,31 @@ function takeoverMessage(tabId, message) {
     if (!reply?.success) throw new Error(reply?.error || 'page inspection failed');
     return reply;
   });
+}
+
+function takeoverSameUrl(actual, expected) {
+  try {
+    const url = new URL(actual);
+    url.hash = '';
+    return url.href === expected;
+  } catch (_) { return false; }
+}
+
+async function takeoverOwnedTab(binding) {
+  const state = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
+  const run = await takeoverIo.read();
+  if (state.catalogTakeoverTabId !== binding.tabId || run?.status !== 'running' ||
+      run.generation !== binding.generation || run.current?.phase !== 'product' ||
+      run.current.url !== binding.expectedUrl ||
+      run.current.binding?.documentId !== binding.documentId ||
+      run.current.binding.tabId !== binding.tabId) {
+    throw new Error('take-over run/tab binding changed');
+  }
+  const tab = await chromeCallback(callback => chrome.tabs.get(binding.tabId, callback));
+  if (!takeoverSameUrl(tab?.url, binding.expectedUrl)) {
+    throw new Error('take-over tab URL changed');
+  }
+  return tab;
 }
 
 const takeoverIo = {
@@ -65,19 +106,32 @@ const takeoverIo = {
       chrome.tabs.remove(old.catalogTakeoverTabId, () => { void chrome.runtime.lastError; });
     }
     const completed = await takeoverTabComplete(tab.id);
-    const status = takeoverHttpStatus.get(tab.id) || 200;
+    const status = completed.blockedStatus || takeoverBlockedStatus.get(tab.id) ||
+      takeoverHttpStatus.get(tab.id) || 200;
     takeoverHttpStatus.delete(tab.id);
+    takeoverBlockedStatus.delete(tab.id);
     if ([403, 429].includes(status)) return {status};
     const run = await takeoverIo.read();
     if (completed.url && new URL(completed.url).hostname !== run.domain)
       return {status: 0, error: 'redirected outside configured site'};
     const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect'});
-    return {...reply.page, status};
+    return {...reply.page, tabId: tab.id, status};
   },
-  capture: async (_url, scope) => {
-    const state = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
-    const reply = await takeoverMessage(state.catalogTakeoverTabId, {action: 'takeoverCapture', scope});
+  capture: async (url, scope, binding) => {
+    if (!binding || binding.expectedUrl !== url) throw new Error('take-over capture URL binding mismatch');
+    await takeoverOwnedTab(binding);
+    const reply = await takeoverMessage(binding.tabId, {action: 'takeoverCapture', scope, binding});
+    await takeoverOwnedTab(binding);
+    const current = await takeoverMessage(binding.tabId, {action: 'takeoverDocumentCheck'});
+    if (current.documentId !== binding.documentId || !takeoverSameUrl(current.url, url)) {
+      throw new Error('take-over document changed during capture');
+    }
     return reply.result;
+  },
+  verify: async identity => {
+    if (CONFIG.receiver?.enabled !== true) throw new Error('local receiver is unavailable for verification');
+    return globalThis.PageImageSaverHelpers.captureWithReceiver({identity}, CONFIG.receiver,
+      {fetch: (...args) => fetch(...args), verifyOnly: true});
   }
 };
 const takeoverRunner = globalThis.PageImageSaverTakeover.createTakeoverRunner(takeoverIo);
@@ -153,11 +207,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await helpers.saveCaptureDownload(chrome, dataUrl, filename);
     }
   });
-  const save = CONFIG.receiver?.enabled === true
-    ? helpers.captureWithReceiver(message.payload, CONFIG.receiver, {
-      fetch: (...args) => fetch(...args), fetchImage, download
-    })
-    : download().then(record => ({storage: 'downloads', status: 'published', record}));
+  const save = (async () => {
+    if (message.runBinding) {
+      const binding = message.runBinding;
+      const identity = message.payload?.identity;
+      if (sender.tab?.id !== binding.tabId ||
+          !takeoverSameUrl(sender.url || sender.tab?.url, binding.expectedUrl) ||
+          identity?.domain !== new URL(binding.expectedUrl).hostname ||
+          identity?.color_key !== 'url' ||
+          !takeoverSameUrl(identity.product_url, binding.expectedUrl)) {
+        throw new Error('take-over capture sender or identity mismatch');
+      }
+      await takeoverOwnedTab(binding);
+      if (CONFIG.receiver?.enabled !== true) throw new Error('take-over receiver is not configured');
+    }
+    return CONFIG.receiver?.enabled === true
+      ? helpers.captureWithReceiver(message.payload, CONFIG.receiver, {
+        fetch: (...args) => fetch(...args), fetchImage, download
+      })
+      : download().then(record => ({storage: 'downloads', status: 'published', record}));
+  })();
   save.then(result => sendResponse({success: true, ...result}))
     .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
   return true;

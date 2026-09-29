@@ -2,6 +2,8 @@
 
 // Add a global flag that the background script can check to see if we're loaded
 window.PageImageSaverLoaded = true;
+const takeoverDocumentId = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+  byte => byte.toString(16).padStart(2, '0')).join('');
 
 // Global variables for domain-specific settings
 let currentDomain = '';
@@ -2311,7 +2313,20 @@ async function recordCaptureFailure(error) {
   return globalThis.PageImageSaverHelpers.recordCaptureFailure(chrome, window.location.href, error);
 }
 
-async function captureCurrentProduct({manual, scopeOverride = null}) {
+function assertTakeoverBinding(binding) {
+  if (!binding) return;
+  const visited = new URL(window.location.href);
+  visited.hash = '';
+  const canonical = new URL(captureCanonicalUrl());
+  canonical.hash = '';
+  if (binding.documentId !== takeoverDocumentId || visited.href !== binding.expectedUrl ||
+      canonical.href !== binding.expectedUrl) {
+    throw new Error('take-over document or product URL changed');
+  }
+}
+
+async function captureCurrentProduct({manual, scopeOverride = null, binding = null}) {
+  assertTakeoverBinding(binding);
   const config = await loadCaptureSiteConfig();
   const mode = manual ? document.getElementById('capture-image-mode').value : 'site';
   const sameColorControl = manual ? document.getElementById('capture-same-color-selection') : null;
@@ -2345,14 +2360,15 @@ async function captureCurrentProduct({manual, scopeOverride = null}) {
   const images = state.gallery.map(url => globalThis.PageImageSaverHelpers.captureImageUrls(url, transform));
   const payload = {identity, captured_at: new Date().toISOString(), scope, product,
     html: capturePageHtml(), jsonld: captureJsonLd(), images};
+  assertTakeoverBinding(binding); // Guard before background image acquisition.
   const result = await new Promise((resolve, reject) => chrome.runtime.sendMessage(
-    {action: 'captureProductLocal', payload}, response => {
+    {action: 'captureProductLocal', payload, runBinding: binding}, response => {
       if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
       else if (!response?.success) reject(new Error(response?.error || 'local capture failed'));
       else resolve(response);
     }));
   previousCaptureStates.set(url, state);
-  return result;
+  return binding ? {...result, identity} : result;
 }
 
 function takeoverRequest(action, data = {}) {
@@ -2420,7 +2436,7 @@ async function inspectTakeoverPage(config) {
       config.product?.variantTriggers?.find(trigger => trigger.label === 'color')?.selector;
     const colorLinks = selector ? Array.from(document.querySelectorAll(selector), node => node.href)
       .filter(Boolean) : [];
-    return {kind: 'product', url: window.location.href,
+    return {kind: 'product', url: window.location.href, documentId: takeoverDocumentId,
       product: {...product, category: takeoverCategory()}, colorLinks,
       imageCount: captureGallery(config, 'site').length};
   }
@@ -2446,7 +2462,8 @@ async function inspectTakeoverPage(config) {
     const match = node?.textContent?.match(/\b(\d+)\s+(?:results?|items?|products?)\b/i);
     if (match) end = {type: 'result-total', total: Number(match[1])};
   }
-  return {kind: 'listing', url: window.location.href, products, next, end};
+  return {kind: 'listing', url: window.location.href,
+    documentId: takeoverDocumentId, products, next, end};
 }
 
 // A site must be explicitly enabled in the panel, and must have a product
@@ -2508,8 +2525,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }).then(page => sendResponse({success: true, page}))
       .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
     return true;
+  } else if (message.action === 'takeoverDocumentCheck') {
+    sendResponse({success: true, documentId: takeoverDocumentId, url: window.location.href});
+    return false;
   } else if (message.action === 'takeoverCapture') {
-    captureCurrentProduct({manual: false, scopeOverride: message.scope})
+    try { assertTakeoverBinding(message.binding); }
+    catch (error) { sendResponse({success: false, error: error.message}); return false; }
+    captureCurrentProduct({manual: false, scopeOverride: message.scope,
+      binding: message.binding})
       .then(result => sendResponse({success: true, result}))
       .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
     return true;

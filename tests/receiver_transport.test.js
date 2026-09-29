@@ -56,6 +56,20 @@ test('transient receiver error retries a bounded number and then succeeds', asyn
   assert.deepEqual(result, {storage: 'receiver', status: 'already', captured_at: '2026-09-28T00:00:00Z'});
 });
 
+test('verify-only receiver check never acquires media or exports on a missing identity', async () => {
+  let images = 0;
+  let downloads = 0;
+  const result = await helpers.captureWithReceiver({identity: payload.identity}, settings, {
+    verifyOnly: true,
+    fetch: async () => ok({complete: false}),
+    fetchImage: async () => { images++; throw Error('unexpected image fetch'); },
+    download: async () => { downloads++; throw Error('unexpected download'); }
+  });
+  assert.deepEqual(result, {storage: 'receiver', status: 'missing'});
+  assert.equal(images, 0);
+  assert.equal(downloads, 0);
+});
+
 test('unreachable receiver uses Downloads fallback and never calls cloud', async () => {
   let attempts = 0;
   let downloaded = 0;
