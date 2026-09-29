@@ -677,7 +677,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }
     
-    console.log('Processing screenshot with current config:', CONFIG);
+    console.log('Processing screenshot with current config:', {...CONFIG,
+      receiver: CONFIG.receiver ? {...CONFIG.receiver, token: '[redacted]'} : CONFIG.receiver});
     
     const promises = [];
     
@@ -1023,7 +1024,8 @@ async function processImage(image, sourceInfo) {
       }
     }
     
-    console.log('Processing image with current config:', CONFIG);
+    console.log('Processing image with current config:', {...CONFIG,
+      receiver: CONFIG.receiver ? {...CONFIG.receiver, token: '[redacted]'} : CONFIG.receiver});
     
     const promises = [];
     

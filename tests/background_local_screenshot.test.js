@@ -20,6 +20,7 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
   const openedTabs = [];
   const responses = [];
   const notices = [];
+  const logs = [];
   const settings = {
     useS3: true,
     s3: {
@@ -44,6 +45,7 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
     useDomainFolders: true,
     progressUpdateInterval: 5
   };
+  settings.receiver = {enabled: true, url: 'http://127.0.0.1:8765', token: 'must-not-log-receiver-token'};
   const sandbox = {
     PageImageSaverHelpers: helpers,
     Blob,
@@ -54,7 +56,7 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
     btoa,
     decodeURIComponent,
     navigator: { userAgent: 'Chrome' },
-    console: { log() {}, warn() {}, error() {} },
+    console: { log(...items) { logs.push(items); }, warn() {}, error() {} },
     setTimeout: () => 1,
     clearTimeout() {},
     chrome: {
@@ -121,6 +123,12 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
   assert.deepEqual(JSON.parse(JSON.stringify(responses)), [
     { success: true, url: 'File saved' }
   ]);
+  sandbox.downloadImage = async () => new Blob(['image'], {type: 'image/png'});
+  const imageResult = await sandbox.processImage({url: 'https://shop.example.com/product.png'},
+    {url: 'https://shop.example.com/products/one'});
+  assert.equal(imageResult.success, true);
+  assert.ok(logs.some(items => items[0] === 'Processing image with current config:'));
+  assert.ok(!JSON.stringify(logs).includes(settings.receiver.token));
 
   for (const listener of listeners) {
     listener({ action: 'captureFailureNotice', reason: 'automatic product gallery readiness timeout' },

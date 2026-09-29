@@ -265,18 +265,61 @@
     const base = url.origin;
     const fetcher = io.fetch || globalThis.fetch;
     const delay = io.delay || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    const validTimestamp = value => typeof value === 'string' &&
+      /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value) &&
+      Number.isFinite(Date.parse(value));
+    const validateReply = (endpoint, result, body, extraHeaders) => {
+      if (!result || typeof result !== 'object' || Array.isArray(result)) {
+        throw new Error(`invalid receiver ${endpoint} response`);
+      }
+      if (endpoint === 'already' && (typeof result.complete !== 'boolean' ||
+          result.complete && !validTimestamp(result.captured_at))) {
+        throw new Error('invalid receiver already response');
+      }
+      if (endpoint === 'evidence' && (result.sha256 !== extraHeaders['X-Content-SHA256'] ||
+          result.bytes !== body.byteLength || !['stored', 'reused'].includes(result.status))) {
+        throw new Error('invalid receiver evidence response');
+      }
+      if (endpoint === 'completion' && (!['published', 'reused'].includes(result.status) ||
+          !validTimestamp(result.captured_at))) {
+        throw new Error('invalid receiver completion response');
+      }
+      return result;
+    };
     const request = async (endpoint, method, body, extraHeaders = {}) => {
+      const replyType = endpoint.slice('/v1/'.length);
       let lastNetworkError = null;
       for (let attempt = 0; attempt < 3; attempt++) {
-        let response;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), io.timeoutMs ?? 10000);
+        let timeout;
+        let response;
+        let result;
         try {
-          response = await fetcher(base + endpoint, {method, body,
-            credentials: 'omit', referrerPolicy: 'no-referrer', signal: controller.signal,
-            headers: {'X-Capture-Token': settings.token,
-              'Content-Type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json',
-              ...extraHeaders}});
+          [response, result] = await Promise.race([
+            (async () => {
+              const received = await fetcher(base + endpoint, {method, body,
+                credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: controller.signal,
+                headers: {'X-Capture-Token': settings.token,
+                  'Content-Type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json',
+                  ...extraHeaders}});
+              let parsed;
+              try {
+                parsed = await received.json();
+              } catch (error) {
+                if (controller.signal.aborted || error?.name === 'AbortError') throw error;
+                throw new Error('invalid receiver JSON response');
+              }
+              return [received, parsed];
+            })(),
+            new Promise((_resolve, reject) => {
+              timeout = setTimeout(() => {
+                controller.abort();
+                const error = new Error('receiver request timed out');
+                error.name = 'AbortError';
+                reject(error);
+              }, io.timeoutMs ?? 10000);
+            })
+          ]);
         } catch (error) {
           if (!(error instanceof TypeError) && error?.name !== 'AbortError') throw error;
           lastNetworkError = error;
@@ -286,21 +329,15 @@
         } finally {
           clearTimeout(timeout);
         }
-        let result;
-        try {
-          result = await response.json();
-        } catch (_) {
-          throw new Error('invalid receiver JSON response');
-        }
-        if (response.ok) return result;
+        if (response.ok) return validateReply(replyType, result, body, extraHeaders);
         if (![408, 429].includes(response.status) && response.status < 500) {
           throw new Error(`receiver HTTP ${response.status}: ${result.error || 'rejected'}`);
         }
         if (attempt === 2) throw new Error(`receiver HTTP ${response.status}: ${result.error || 'transient failure'}`);
         await delay(200 * (attempt + 1));
       }
-      const failure = new Error(`receiver unreachable: ${lastNetworkError?.message || 'network error'}`);
-      failure.receiverUnreachable = true;
+      const failure = new Error(`receiver transport unavailable: ${lastNetworkError?.message || 'network or redirect failure'}`);
+      failure.receiverTransportFailure = true;
       throw failure;
     };
     try {
@@ -327,9 +364,9 @@
       });
       return {storage: 'receiver', status: publication.status, captured_at: publication.captured_at};
     } catch (error) {
-      if (!error.receiverUnreachable) throw error;
+      if (!error.receiverTransportFailure) throw error;
       const record = await io.download();
-      return {storage: 'downloads', status: 'fallback', reason: 'receiver unreachable', record};
+      return {storage: 'downloads', status: 'fallback', reason: 'receiver transport unavailable', record};
     }
   }
 
@@ -341,7 +378,7 @@
       return 'Product saved to the local receiver. Run capture-index in WSL to update the viewer.';
     }
     if (result.status === 'fallback') {
-      return 'Receiver unreachable; product bundle saved to Downloads. Run capture-import in WSL.';
+      return 'Receiver transport unavailable; product bundle saved to Downloads. Run capture-import in WSL.';
     }
     return 'Local product bundle exported. Run capture-import to verify Downloads bytes.';
   }
