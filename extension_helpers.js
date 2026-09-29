@@ -295,21 +295,21 @@
         let response;
         let result;
         try {
-          [response, result] = await Promise.race([
+          result = await Promise.race([
             (async () => {
-              const received = await fetcher(base + endpoint, {method, body,
+              response = await fetcher(base + endpoint, {method, body,
                 credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: controller.signal,
                 headers: {'X-Capture-Token': settings.token,
                   'Content-Type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json',
                   ...extraHeaders}});
               let parsed;
               try {
-                parsed = await received.json();
+                parsed = await response.json();
               } catch (error) {
                 if (controller.signal.aborted || error?.name === 'AbortError') throw error;
                 throw new Error('invalid receiver JSON response');
               }
-              return [received, parsed];
+              return parsed;
             })(),
             new Promise((_resolve, reject) => {
               timeout = setTimeout(() => {
@@ -321,11 +321,16 @@
             })
           ]);
         } catch (error) {
-          if (!(error instanceof TypeError) && error?.name !== 'AbortError') throw error;
-          lastNetworkError = error;
-          if (attempt === 2) break;
-          await delay(200 * (attempt + 1));
-          continue;
+          if (response && !response.ok && (error instanceof TypeError || error?.name === 'AbortError')) {
+            // Headers establish an HTTP rejection even when its diagnostic body stalls.
+            result = {};
+          } else {
+            if (!(error instanceof TypeError) && error?.name !== 'AbortError') throw error;
+            lastNetworkError = error;
+            if (attempt === 2) break;
+            await delay(200 * (attempt + 1));
+            continue;
+          }
         } finally {
           clearTimeout(timeout);
         }

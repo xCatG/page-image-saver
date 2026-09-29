@@ -104,6 +104,34 @@ test('response body stall is covered by the receiver deadline', async () => {
   assert.ok(Date.now() - started < 1000);
 });
 
+test('known HTTP rejection headers stay explicit when the error body stalls', async () => {
+  for (const status of [401, 409]) {
+    let attempts = 0;
+    let downloads = 0;
+    await assert.rejects(() => helpers.captureWithReceiver(payload, settings, {
+      timeoutMs: 5,
+      fetch: async () => { attempts++; return {ok: false, status,
+        json: () => new Promise(() => {})}; },
+      download: async () => { downloads++; return {}; }, delay: async () => {}
+    }), new RegExp(`receiver HTTP ${status}`));
+    assert.equal(attempts, 1);
+    assert.equal(downloads, 0);
+  }
+});
+
+test('known retryable HTTP headers exhaust explicitly when the error body stalls', async () => {
+  let attempts = 0;
+  let downloads = 0;
+  await assert.rejects(() => helpers.captureWithReceiver(payload, settings, {
+    timeoutMs: 5,
+    fetch: async () => { attempts++; return {ok: false, status: 503,
+      json: () => new Promise(() => {})}; },
+    download: async () => { downloads++; return {}; }, delay: async () => {}
+  }), /receiver HTTP 503/);
+  assert.equal(attempts, 3);
+  assert.equal(downloads, 0);
+});
+
 test('syntactically valid but invalid receiver replies never announce success', async () => {
   for (const body of [{}, {complete: true}, {complete: 'false'}]) {
     await assert.rejects(() => helpers.captureWithReceiver(payload, settings, {
