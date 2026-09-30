@@ -96,30 +96,54 @@
   function captureProductFromJsonLd(scriptTexts) {
     const empty = {name: null, sku: null, product_id: null, color: null,
       offers: {price: null, currency: null}};
-    function findProduct(value) {
+    const candidates = [];
+    function collectProducts(value) {
       if (Array.isArray(value)) {
-        for (const item of value) {
-          const found = findProduct(item);
-          if (found) return found;
-        }
+        for (const item of value) collectProducts(item);
       } else if (value && typeof value === 'object') {
         const types = Array.isArray(value['@type']) ? value['@type'] : [value['@type']];
-        if (types.some(type => typeof type === 'string' && /(^|\/)Product$/i.test(type))) return value;
-        if (value['@graph']) return findProduct(value['@graph']);
+        if (types.some(type => typeof type === 'string' && /(^|\/)Product$/i.test(type)))
+          candidates.push(value);
+        if (value['@graph']) collectProducts(value['@graph']);
       }
-      return null;
     }
     for (const script of scriptTexts) {
       let parsed;
       try { parsed = JSON.parse(script); } catch (_) { continue; }
-      const raw = findProduct(parsed);
-      if (!raw) continue;
-      const offer = Array.isArray(raw.offers) ? raw.offers[0] : raw.offers;
-      const text = value => value == null ? null : String(value);
-      return {name: text(raw.name), sku: text(raw.sku), product_id: text(raw.productID),
-        color: text(raw.color), offers: {price: text(offer?.price), currency: text(offer?.priceCurrency)}};
+      collectProducts(parsed);
     }
-    return empty;
+    const raw = candidates.find(item => {
+      const offer = Array.isArray(item.offers) ? item.offers[0] : item.offers;
+      return item.name && offer?.price != null && offer?.priceCurrency;
+    }) || candidates[0];
+    if (!raw) return empty;
+    const offer = Array.isArray(raw.offers) ? raw.offers[0] : raw.offers;
+    const text = value => value == null ? null : String(value);
+    return {name: text(raw.name), sku: text(raw.sku), product_id: text(raw.productID),
+      color: text(raw.color), offers: {price: text(offer?.price), currency: text(offer?.priceCurrency)}};
+  }
+
+  function captureProductEvidence(jsonld = [], microdata = null, meta = null) {
+    const text = value => value == null || value === '' ? null : String(value).trim() || null;
+    const jsonFacts = captureProductFromJsonLd(jsonld.map(value => JSON.stringify(value)));
+    const microFacts = microdata ? {name: text(microdata.name), sku: text(microdata.sku),
+      product_id: text(microdata.productID), color: text(microdata.color),
+      offers: {price: text(microdata.offers?.price),
+        currency: text(microdata.offers?.priceCurrency)}} : null;
+    const metaFacts = meta?.['og:type']?.toLowerCase() === 'product' ? {
+      name: text(meta['og:title']), sku: null, product_id: null, color: null,
+      offers: {price: text(meta['product:price:amount']),
+        currency: text(meta['product:price:currency'])}} : null;
+    const hasFacts = facts => !!(facts && (facts.name || facts.sku || facts.product_id ||
+      facts.color || facts.offers.price));
+    const complete = facts => !!(facts?.name && facts.offers.price && facts.offers.currency);
+    const sources = [['jsonld', jsonFacts], ['microdata', microFacts], ['meta', metaFacts]];
+    const selected = sources.find(([, facts]) => complete(facts)) ||
+      sources.find(([, facts]) => hasFacts(facts)) || ['meta', metaFacts || {
+        name: null, sku: null, product_id: null, color: null,
+        offers: {price: null, currency: null}}];
+    return {format: 'page-image-saver-product-evidence/v1', fact_source: selected[0],
+      facts: selected[1], jsonld, microdata, meta};
   }
 
   function captureIdentity(pageUrl, colorKey, selectedColor) {
@@ -257,11 +281,12 @@
   async function exportProductCapture(payload, io) {
     const encode = value => new TextEncoder().encode(value);
     const identityHash = await captureSha256(encode(JSON.stringify(captureIdentityKey(payload.identity)) + '\n'));
-    const attempt = io.attemptId || globalThis.crypto.randomUUID();
-    if (!/^[a-zA-Z0-9_-]+$/.test(attempt)) throw new Error('unsafe capture attempt ID');
+    const attempt = io.attemptId || Array.from(globalThis.crypto.getRandomValues(new Uint8Array(8)),
+      byte => byte.toString(16).padStart(2, '0')).join('');
+    if (!/^[a-f0-9]{16}$/.test(attempt)) throw new Error('unsafe capture attempt ID');
     const domain = payload.identity.domain;
     if (!/^[a-z0-9.-]+$/.test(domain)) throw new Error('unsafe capture domain');
-    const base = `PageImageSaver/captures/${domain}/${identityHash}/${attempt}`;
+    const base = `PageImageSaver/captures/${identityHash.slice(0, 32)}/${attempt}`;
     const html = encode(payload.html);
     const jsonld = encode(JSON.stringify(payload.jsonld));
     const htmlRef = {path: 'page.html', sha256: await captureSha256(html), bytes: html.byteLength};
@@ -272,10 +297,10 @@
     for (const [index, requested] of payload.images.entries()) {
       const fetched = await io.fetchImage(requested.fetched_url);
       const bytes = fetched.bytes instanceof Uint8Array ? fetched.bytes : new Uint8Array(fetched.bytes);
-      if (!bytes.byteLength || bytes.byteLength > 25 * 1024 * 1024) throw new Error('invalid image byte count');
+      if (!bytes.byteLength || bytes.byteLength > 100 * 1024 * 1024) throw new Error('invalid image byte count');
       const digest = await captureSha256(bytes);
       const extension = captureImageExtension(bytes, fetched.contentType);
-      const path = `images/${index}-${digest}.${extension}`;
+      const path = `images/${index}.${extension}`;
       await io.saveBytes(`${base}/${path}`, bytes);
       images.push({path, sha256: digest, bytes: bytes.byteLength,
         original_url: requested.original_url, fetched_url: fetched.fetched_url || requested.fetched_url});
@@ -401,7 +426,8 @@
           }
           const digest = await captureSha256(bytes);
           await request('/v1/evidence', 'PUT', bytes, {
-            'X-Capture-Path': filename, 'X-Content-SHA256': digest});
+            'X-Capture-Path': filename, 'X-Capture-Domain': payload.identity.domain,
+            'X-Content-SHA256': digest});
         }
       });
       return {storage: 'receiver', status: publication.status, captured_at: publication.captured_at};
@@ -522,6 +548,7 @@
 
   const helpers = {
     captureProductFromJsonLd,
+    captureProductEvidence,
     captureIdentity,
     captureIdentityKey,
     captureImageUrls,

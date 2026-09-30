@@ -13,6 +13,7 @@
   "colorVariantStrategy": "separate-url",
   "imageUrlPattern": "/in/\\d+-large_default/[^/]+\\.jpg",
   "product": {
+    "pageSelector": "body#product .images-container .js-qv-product-cover",
     "variantTriggers": [
       {
         "label": "color",

@@ -39,7 +39,11 @@ test('receiver sends authenticated evidence before completion and returns verifi
   assert.equal(calls[0].options.headers['X-Capture-Token'], settings.token);
   assert.equal(calls.at(-1).url, settings.url + '/v1/completion');
   assert.equal(JSON.parse(calls.at(-1).options.body).record.scope.decision, 'review');
-  assert.equal(calls.filter(call => call.url.endsWith('/evidence')).length, 3);
+  const evidence = calls.filter(call => call.url.endsWith('/evidence'));
+  assert.equal(evidence.length, 3);
+  assert.ok(evidence.every(call => call.options.headers['X-Capture-Domain'] === payload.identity.domain));
+  assert.ok(evidence.every(call => /^PageImageSaver\/captures\/[a-f0-9]{32}\/[a-f0-9]{16}\//
+    .test(call.options.headers['X-Capture-Path'])));
 });
 
 test('transient receiver error retries a bounded number and then succeeds', async () => {

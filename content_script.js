@@ -2306,13 +2306,37 @@ function saveImagesToStorage(images) {
 const previousCaptureStates = new Map();
 const captureConfigCache = new Map();
 
+function showAutoCaptureToast(message, success) {
+  document.getElementById('auto-capture-toast')?.remove();
+  const toast = document.createElement('div');
+  toast.id = 'auto-capture-toast';
+  toast.setAttribute('role', success ? 'status' : 'alert');
+  toast.textContent = message;
+  toast.style.cssText = `position: fixed; bottom: 20px; right: 20px; z-index: 999999;
+    max-width: 90%; padding: 12px 16px; border-radius: 5px; color: white;
+    background: ${success ? '#34A853' : '#EA4335'}; font: 14px Arial, sans-serif;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), success ? 5000 : 8000);
+}
+
 async function loadCaptureSiteConfig() {
   const domain = window.location.hostname.toLowerCase();
   if (!captureConfigCache.has(domain)) {
-    captureConfigCache.set(domain, fetch(chrome.runtime.getURL(`site_config/${domain}.json`))
-      .then(response => response.ok ? response.json() : null)
-      .then(config => config?.domain === domain ? config : null)
-      .catch(() => null));
+    captureConfigCache.set(domain, (async () => {
+      const response = await fetch(chrome.runtime.getURL(`site_config/${domain}.json`));
+      if (response.ok) {
+        const config = await response.json();
+        return config?.domain === domain ? config : null;
+      }
+      if (response.status !== 404 || !domain.startsWith('www.')) return null;
+      const bare = domain.slice(4);
+      if (!bare || bare.startsWith('www.')) return null;
+      const fallback = await fetch(chrome.runtime.getURL(`site_config/${bare}.json`));
+      if (!fallback.ok) return null;
+      const config = await fallback.json();
+      return config?.domain === bare ? {...config, domain} : null;
+    })().catch(() => null));
   }
   return captureConfigCache.get(domain);
 }
@@ -2323,9 +2347,40 @@ function captureJsonLd() {
     .filter(value => value !== null);
 }
 
+function capturePageProductEvidence() {
+  const readItem = selector => {
+    const node = document.querySelector(selector);
+    return node?.getAttribute?.('content') || node?.textContent?.trim() || null;
+  };
+  let microdata = null;
+  if (document.querySelector('[itemscope][itemtype*="Product"]')) {
+    const sku = document.querySelector('form[data-product-sku]')?.getAttribute('data-product-sku') || null;
+    const productID = document.querySelector('input[name="product"]')?.value || null;
+    const color = document.querySelector('.product-colors .current-color img[alt]')?.getAttribute('alt') || null;
+    microdata = {name: readItem('[itemprop="name"]'), sku, productID, color,
+      offers: {price: readItem('[itemprop="price"]'),
+        priceCurrency: readItem('[itemprop="priceCurrency"]')},
+      field_sources: {sku: 'form[data-product-sku]', productID: 'input[name=product]',
+        color: '.product-colors .current-color img[alt]'}};
+  }
+  const meta = {};
+  for (const node of document.querySelectorAll('meta[property]')) {
+    const property = node.getAttribute('property');
+    if (['og:type', 'og:title', 'og:image', 'product:price:amount',
+      'product:price:currency'].includes(property)) meta[property] = node.getAttribute('content');
+  }
+  return globalThis.PageImageSaverHelpers.captureProductEvidence(captureJsonLd(), microdata,
+    Object.keys(meta).length ? meta : null);
+}
+
 function capturePageProduct() {
-  return globalThis.PageImageSaverHelpers.captureProductFromJsonLd(
-    Array.from(document.querySelectorAll('script[type="application/ld+json"]'), node => node.textContent));
+  return capturePageProductEvidence().facts;
+}
+
+function captureProductSeen(config, product = capturePageProduct()) {
+  if (config?.product?.pageSelector) return !!document.querySelector(config.product.pageSelector);
+  return !!(product.name || product.sku || product.product_id || product.color ||
+    document.querySelector('meta[property="og:type"][content="product"]'));
 }
 
 function captureGallery(config, mode) {
@@ -2413,10 +2468,10 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
   const previous = previousCaptureStates.get(url);
   const state = await globalThis.PageImageSaverHelpers.waitForCaptureState(readState, previous,
     {timeoutMs: 8000, pollMs: 200, allowSameColorGalleryChange: manual && allowSameColorGalleryChange});
-  const product = capturePageProduct();
+  const evidence = capturePageProductEvidence();
+  const product = evidence.facts;
   const color = policy === 'url' ? captureSelectedColor(product) : state.color;
   const identity = globalThis.PageImageSaverHelpers.captureIdentity(url, policy, color);
-  if (!product.color && color) product.color = color;
   const decision = scopeOverride?.decision || (manual ? document.getElementById('capture-scope').value : 'review');
   const customReason = manual ? document.getElementById('capture-scope-reason').value.trim() : '';
   const scope = {decision, reason: scopeOverride?.reason || customReason ||
@@ -2424,7 +2479,7 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
   const transform = config?.product?.highResTransform;
   const images = state.gallery.map(url => globalThis.PageImageSaverHelpers.captureImageUrls(url, transform));
   const payload = {identity, captured_at: new Date().toISOString(), scope, product,
-    html: capturePageHtml(), jsonld: captureJsonLd(), images};
+    html: capturePageHtml(), jsonld: evidence, images};
   assertTakeoverBinding(binding); // Guard before background image acquisition.
   const result = await new Promise((resolve, reject) => chrome.runtime.sendMessage(
     {action: 'captureProductLocal', payload, runBinding: binding, autoPageLoad}, response => {
@@ -2457,7 +2512,7 @@ async function refreshTakeoverProgress() {
         ` — ${page.products} product links, next ${page.next || 'absent'}, ` +
         `end ${JSON.stringify(page.end || 'unverified')}`));
     const end = run.preview?.endCheckConfigured ? 'Positive end check configured.' :
-      'No verified positive end check configured; discovery will report incomplete at the end.';
+      'No verified positive end check configured; discovered products will capture, then finish with gaps.';
     box.textContent = `Catalog ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n${end}\n` +
       `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; found ${summary.productsFound}; ` +
       `captured products ${summary.productsCaptured}; captured colors ${summary.colorsCaptured}; ` +
@@ -2490,7 +2545,7 @@ async function inspectTakeoverPage(config) {
     return {kind: 'challenge', url: window.location.href};
   }
   const product = capturePageProduct();
-  const productSeen = !!(product.name || product.sku || product.product_id || product.color);
+  const productSeen = captureProductSeen(config, product);
   if (productSeen) {
     await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
       let gallery = [];
@@ -2544,12 +2599,21 @@ setTimeout(async () => {
         const product = capturePageProduct();
         let gallery = [];
         try { gallery = captureGallery(config, 'site'); } catch (_) { /* Gallery may render later. */ }
-        return {productSeen: !!(product.name || product.sku || product.product_id || product.color), gallery};
+        return {productSeen: captureProductSeen(config, product), gallery};
       }, {timeoutMs: 8000, pollMs: 200});
       if (!ready) return;
       if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
-      await captureCurrentProduct({manual: false, autoPageLoad: true});
+      const capture = await captureCurrentProduct({manual: false, autoPageLoad: true});
+      if (capture?.storage === 'receiver' &&
+          ['published', 'reused', 'already'].includes(capture.status)) {
+        showAutoCaptureToast('Product capture verified locally.', true);
+      } else if (capture?.storage === 'downloads') {
+        showAutoCaptureToast('Product exported to Downloads; import to verify.', true);
+      } else {
+        throw new Error('local capture returned an unverified result');
+      }
     } catch (error) {
+      showAutoCaptureToast(`Automatic product capture failed: ${String(error?.message || error)}`, false);
       await recordCaptureFailure(error);
       console.warn('Automatic local product capture failed:', error);
     }

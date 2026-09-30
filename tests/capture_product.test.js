@@ -14,6 +14,57 @@ test('JSON-LD product extraction keeps recorded color, price, and currency', () 
     color: 'Black', offers: {price: '42.00', currency: 'USD'}});
 });
 
+test('priced Product JSON-LD wins over a partial review-widget Product', () => {
+  const result = helpers.captureProductFromJsonLd([
+    JSON.stringify({'@type': 'Product', name: 'Review widget',
+      sku: '4B26.EXCI.01,4B26.FLAE.01'}),
+    JSON.stringify({'@type': 'Product', name: 'Rules of Attraction Tanga Exciting Pink',
+      productID: 9773987070295, sku: '4B26.EXCI.01',
+      offers: [{price: 44.5, priceCurrency: 'CHF'}]})
+  ]);
+  assert.deepEqual(result, {name: 'Rules of Attraction Tanga Exciting Pink',
+    sku: '4B26.EXCI.01', product_id: '9773987070295', color: null,
+    offers: {price: '44.5', currency: 'CHF'}});
+});
+
+test('product evidence prefers priced microdata to partial JSON-LD and preserves source facts', () => {
+  const jsonld = [{'@type': 'Product', name: 'Review widget', sku: 'A,B'}];
+  const microdata = {name: 'Demi cup bra', sku: 'ACH3013_0005', productID: '66720',
+    color: 'Noir', offers: {price: '196', priceCurrency: 'USD'},
+    field_sources: {sku: 'form[data-product-sku]', productID: 'input[name=product]',
+      color: '.product-colors .current-color img[alt]'}};
+  const meta = {'og:type': 'product', 'og:title': 'Demi cup bra',
+    'product:price:amount': '196', 'product:price:currency': 'USD'};
+  const evidence = helpers.captureProductEvidence(jsonld, microdata, meta);
+  assert.equal(evidence.format, 'page-image-saver-product-evidence/v1');
+  assert.equal(evidence.fact_source, 'microdata');
+  assert.deepEqual(evidence.facts, {name: 'Demi cup bra', sku: 'ACH3013_0005',
+    product_id: '66720', color: 'Noir', offers: {price: '196', currency: 'USD'}});
+  assert.deepEqual(evidence.microdata, microdata);
+  assert.deepEqual(evidence.jsonld, jsonld);
+  assert.deepEqual(evidence.meta, meta);
+});
+
+test('OG-only product evidence records sourced price without inventing missing SKU or color', () => {
+  const evidence = helpers.captureProductEvidence([], null, {'og:type': 'product',
+    'og:title': 'Rules of Attraction Tanga Exciting Pink',
+    'product:price:amount': '44.50', 'product:price:currency': 'CHF'});
+  assert.equal(evidence.fact_source, 'meta');
+  assert.deepEqual(evidence.facts, {name: 'Rules of Attraction Tanga Exciting Pink',
+    sku: null, product_id: null, color: null, offers: {price: '44.50', currency: 'CHF'}});
+});
+
+test('complete JSON-LD remains preferred over other evidence', () => {
+  const product = {'@type': 'Product', name: 'Aubade Tanga', sku: '4B26.EXCI.01',
+    offers: {price: 44.5, priceCurrency: 'CHF'}};
+  const evidence = helpers.captureProductEvidence([product], {name: 'Another'},
+    {'og:type': 'product', 'og:title': 'Meta title', 'product:price:amount': '44.50',
+      'product:price:currency': 'CHF'});
+  assert.equal(evidence.fact_source, 'jsonld');
+  assert.equal(evidence.facts.name, 'Aubade Tanga');
+  assert.equal(evidence.facts.offers.price, '44.5');
+});
+
 test('unknown product facts remain explicit and per-URL identity keeps unknown color', () => {
   assert.deepEqual(helpers.captureProductFromJsonLd([]), {name: null, sku: null,
     product_id: null, color: null, offers: {price: null, currency: null}});
@@ -188,7 +239,7 @@ test('local export saves all evidence before publishing completion, with no clou
     images: [{original_url: 'https://cdn.example.test/1024.png', fetched_url: 'https://cdn.example.test/2048.png'}]
   };
   const record = await helpers.exportProductCapture(payload, {
-    attemptId: 'test-attempt',
+    attemptId: '1111111111111111',
     fetchImage: async () => ({bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
       fetched_url: 'https://cdn.example.test/2048.png'}),
     saveBytes: async (path, bytes) => saved.push({path, bytes})
@@ -196,10 +247,51 @@ test('local export saves all evidence before publishing completion, with no clou
   assert.equal(saved.length, 4);
   assert.equal(saved[0].path.endsWith('/page.html'), true);
   assert.equal(saved[1].path.endsWith('/product.json'), true);
-  assert.equal(saved[2].path.includes('/images/0-'), true);
+  assert.equal(saved[2].path.endsWith('/images/0.png'), true);
   assert.equal(saved[3].path.endsWith('/complete.json'), true);
   assert.equal(JSON.parse(new TextDecoder().decode(saved[3].bytes)).evidence.images[0].sha256,
     record.evidence.images[0].sha256);
+});
+
+test('capture export uses short transport paths without domain or digest filenames', async () => {
+  const domain = `${'a'.repeat(40)}.${'b'.repeat(40)}.${'c'.repeat(40)}.example.com`;
+  const saved = [];
+  const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0, 0, 0]);
+  const record = await helpers.exportProductCapture({
+    identity: {domain, product_url: `https://${domain}/bra`, selected_color: null,
+      color_key: 'url'},
+    captured_at: '2026-09-29T12:00:00Z', scope: {decision: 'review', reason: 'fixture'},
+    product: {name: 'Fixture bra'}, html: '<html></html>', jsonld: [],
+    images: [{original_url: 'https://cdn.example.test/bra.jpg',
+      fetched_url: 'https://cdn.example.test/bra.jpg'}]
+  }, {attemptId: '0123456789abcdef',
+    fetchImage: async () => ({bytes, contentType: 'image/jpeg'}),
+    saveBytes: async path => saved.push(path)});
+  assert.deepEqual(saved.map(path => path.slice(path.lastIndexOf('/') + 1)),
+    ['page.html', 'product.json', '0.jpg', 'complete.json']);
+  assert.ok(saved.every(path => /^PageImageSaver\/captures\/[a-f0-9]{32}\/0123456789abcdef\//.test(path)));
+  assert.ok(saved.every(path => path.length < 120));
+  assert.equal(record.evidence.images[0].path, 'images/0.jpg');
+  assert.equal(record.evidence.images[0].sha256, crypto.createHash('sha256').update(bytes).digest('hex'));
+});
+
+test('local export accepts a valid JPEG above the old 25 MiB cap', async () => {
+  const bytes = new Uint8Array(25 * 1024 * 1024 + 1);
+  bytes.set([0xff, 0xd8, 0xff]);
+  const saved = [];
+  const record = await helpers.exportProductCapture({
+    identity: {domain: 'shop.example.test', product_url: 'https://shop.example.test/bra',
+      selected_color: null, color_key: 'url'},
+    captured_at: '2026-09-29T12:00:00Z', scope: {decision: 'include', reason: 'Bra'},
+    product: {name: 'Fixture bra'}, html: '<html></html>', jsonld: [],
+    images: [{original_url: 'https://cdn.example.test/bra.jpg',
+      fetched_url: 'https://cdn.example.test/bra.jpg'}]
+  }, {attemptId: '2222222222222222',
+    fetchImage: async () => ({bytes, contentType: 'image/jpeg'}),
+    saveBytes: async filename => saved.push(filename)});
+  assert.equal(record.evidence.images[0].bytes, bytes.byteLength);
+  assert.equal(saved.length, 4);
+  assert.equal(saved[3].endsWith('/complete.json'), true);
 });
 
 async function exportImageFixture(fetchedUrl, bytes, contentType) {
@@ -211,7 +303,7 @@ async function exportImageFixture(fetchedUrl, bytes, contentType) {
     captured_at: '2026-09-29T12:00:00Z', scope: {decision: 'review', reason: 'fixture'},
     product: {name: 'Fixture bra'}, html: '<html></html>', jsonld: [],
     images: [{original_url: originalUrl, fetched_url: fetchedUrl}]
-  }, {attemptId: 'image-type',
+  }, {attemptId: '3333333333333333',
     fetchImage: async () => ({bytes, contentType, fetched_url: fetchedUrl}),
     saveBytes: async (filename, data) => saved.push({filename, data})});
   return {record, saved, originalUrl};
@@ -223,7 +315,7 @@ test('extensionless JPEG image keeps its actual format in saved filename and man
   const {record, saved, originalUrl} = await exportImageFixture(url, bytes, 'image/jpeg');
   const image = record.evidence.images[0];
   const digest = crypto.createHash('sha256').update(bytes).digest('hex');
-  assert.equal(image.path, `images/0-${digest}.jpg`);
+  assert.equal(image.path, 'images/0.jpg');
   assert.equal(image.original_url, originalUrl);
   assert.equal(image.fetched_url, url);
   assert.equal(image.sha256, digest);
@@ -237,7 +329,7 @@ test('misleading PNG URL and MIME cannot rename WebP bytes as PNG', async () => 
   const bytes = new Uint8Array([82, 73, 70, 70, 4, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 32]);
   const {record, saved} = await exportImageFixture(
     'https://cdn.example.test/bra.png', bytes, 'image/png');
-  assert.match(record.evidence.images[0].path, /^images\/0-[a-f0-9]{64}\.webp$/);
+  assert.equal(record.evidence.images[0].path, 'images/0.webp');
   assert.equal(saved[2].filename.endsWith('/' + record.evidence.images[0].path), true);
 });
 
@@ -250,7 +342,7 @@ test('failed image fetch leaves an uncompleted export', async () => {
     product: {name: null, sku: null, product_id: null, color: 'Black',
       offers: {price: null, currency: null}}, html: '<html></html>', jsonld: [],
     images: [{original_url: 'https://cdn.example.test/a.png', fetched_url: 'https://cdn.example.test/a.png'}]
-  }, {attemptId: 'failure', fetchImage: async () => { throw new Error('HTTP 429'); },
+  }, {attemptId: '4444444444444444', fetchImage: async () => { throw new Error('HTTP 429'); },
     saveBytes: async path => saved.push(path)}), /HTTP 429/);
   assert.equal(saved.some(path => path.endsWith('complete.json')), false);
 });
