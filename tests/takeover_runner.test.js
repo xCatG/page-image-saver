@@ -271,6 +271,25 @@ test('same-site product redirect to listing fails that item and continues', asyn
   assert.deepEqual(r.captureCalls.map(call => call.url), [red]);
 });
 
+test('listing redirect cannot overwrite a pause racing the load ownership read', async () => {
+  const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
+  const r = rig({[first]: {...listing1, products: [bra], next: null,
+    end: {type: 'explicit', present: true}},
+  [bra]: {kind: 'listing', url: first, products: [bra], next: null}});
+  await prepare(r, config); await r.runner().start();
+  await r.runner().tick(); r.advance(10000);
+  const originalRead = r.io.read;
+  let reads = 0;
+  r.io.read = async () => {
+    const snapshot = await originalRead();
+    if (++reads === 2) r.memory.run.status = 'paused';
+    return snapshot;
+  };
+  await r.runner().tick();
+  assert.equal(r.memory.run.status, 'paused');
+  assert.equal(r.memory.run.products[0].status, 'pending');
+});
+
 test('download fallback is counted unverified and never grants a complete catalog', async () => {
   const r = rig({[first]: {...listing1, products: [bra], next: null,
     end: {type: 'explicit', present: true}}, [bra]: {...braPage, colorLinks: []}},

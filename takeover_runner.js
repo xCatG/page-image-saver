@@ -208,6 +208,9 @@
         } catch (_) { /* Off-site redirects remain safety halts below. */ }
       }
       if (deadProductReason) {
+        const beforeFailureSave = await read();
+        if (beforeFailureSave?.status !== 'running' ||
+            beforeFailureSave.generation !== run.generation) return beforeFailureSave;
         item.status = 'failed'; item.reason = deadProductReason;
         run.current = null;
         await save(run);

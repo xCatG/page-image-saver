@@ -92,6 +92,17 @@ class SavedPageFixtures(unittest.TestCase):
         finally:
             page.close()
 
+    def test_product_microdata_on_listing_cards_is_not_a_product_page(self):
+        for config_file in ("us.chantelle.com.json", "int.aubade.com.json", "www.empreinte.eu.json"):
+            config = json.loads(source(f"site_config/{config_file}"))
+            page = self.open_fixture(config["domain"], "chantelle-listing.html")
+            try:
+                page.evaluate("""document.querySelector('article').innerHTML =
+                  '<div itemscope itemtype="https://schema.org/Product"><span itemprop="name">Card bra</span></div>'""")
+                self.assertFalse(page.evaluate("config => captureProductSeen(config)", config), config_file)
+            finally:
+                page.close()
+
 
 if __name__ == "__main__":
     unittest.main()
