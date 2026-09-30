@@ -133,6 +133,7 @@ const takeoverIo = {
     const run = await takeoverIo.read();
     if (completed.url && new URL(completed.url).hostname !== run.domain)
       return {status: 0, error: 'redirected outside configured site'};
+    if ([404, 410].includes(status)) return {status};
     const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect'});
     return {...reply.page, tabId: tab.id, status};
   },

@@ -9,15 +9,63 @@ const start = source.indexOf('setTimeout(async () => {', source.indexOf('// A si
 const end = source.indexOf('// Share the panel entry point', start);
 const callbackSource = source.slice(start, end);
 
-async function runAuto({allowedAt = [true, true], delayedReady = false} = {}) {
+async function configuredHost(hostname, fixtures) {
+  const requests = [];
+  const configStart = source.indexOf('async function loadCaptureSiteConfig()');
+  const configEnd = source.indexOf('function captureJsonLd()', configStart);
+  const sandbox = {window: {location: {hostname}}, Map,
+    captureConfigCache: new Map(),
+    chrome: {runtime: {getURL: file => file}},
+    fetch: async path => {
+      requests.push(path);
+      const config = fixtures[path];
+      return config ? {ok: true, status: 200, json: async () => config} : {ok: false, status: 404};
+    }};
+  vm.createContext(sandbox);
+  vm.runInContext(configStart < 0 ? '' : source.slice(configStart, configEnd), sandbox);
+  const config = await vm.runInContext('loadCaptureSiteConfig()', sandbox);
+  return {config, requests};
+}
+
+test('www Lise config falls back to the bare file with requested host identity', async () => {
+  const bare = require('../site_config/lisecharmel.com.json');
+  const result = await configuredHost('www.lisecharmel.com', {
+    'site_config/lisecharmel.com.json': bare});
+  assert.equal(result.config.domain, 'www.lisecharmel.com');
+  assert.equal(result.config.product.allImagesSelector, bare.product.allImagesSelector);
+  assert.deepEqual(result.requests, [
+    'site_config/www.lisecharmel.com.json', 'site_config/lisecharmel.com.json']);
+});
+
+test('exact site config wins and non-www subdomains do not inherit a bare config', async () => {
+  const bare = require('../site_config/lisecharmel.com.json');
+  const exact = {...bare, domain: 'www.lisecharmel.com', platform: 'exact-fixture'};
+  const matched = await configuredHost('www.lisecharmel.com', {
+    'site_config/www.lisecharmel.com.json': exact,
+    'site_config/lisecharmel.com.json': bare});
+  assert.equal(matched.config.platform, 'exact-fixture');
+  assert.deepEqual(matched.requests, ['site_config/www.lisecharmel.com.json']);
+  const other = await configuredHost('shop.lisecharmel.com', {
+    'site_config/lisecharmel.com.json': bare});
+  assert.equal(other.config, null);
+  assert.deepEqual(other.requests, ['site_config/shop.lisecharmel.com.json']);
+});
+
+async function runAuto({allowedAt = [true, true], delayedReady = false,
+  captureResult = {storage: 'receiver', status: 'published'}, captureError = null} = {}) {
   const requests = [];
   const captures = [];
+  const notices = [];
+  const failures = [];
   let callback;
   let release;
+  const body = {appendChild(element) { notices.push(element); }};
   const sandbox = {
     window: {location: {hostname: 'shop.example.test'}},
     console: {warn() {}},
     setTimeout(fn) { callback = fn; },
+    document: {body, createElement() { return {style: {}, textContent: '', id: '',
+      setAttribute() {}, remove() {}}; }, getElementById() { return null; }},
     loadCaptureSiteConfig: async () => ({product: {allImagesSelector: '.gallery img'}}),
     chrome: {storage: {local: {get(_defaults, cb) {
       cb({captureAutoDomains: {'shop.example.test': true}});
@@ -30,17 +78,36 @@ async function runAuto({allowedAt = [true, true], delayedReady = false} = {}) {
       if (delayedReady) await new Promise(resolve => { release = resolve; });
       return true;
     }},
-    captureCurrentProduct: async options => { captures.push(options); },
-    recordCaptureFailure: async () => {}
+    captureCurrentProduct: async options => {
+      captures.push(options);
+      if (captureError) throw captureError;
+      return captureResult;
+    },
+    recordCaptureFailure: async error => { failures.push(error.message); }
   };
   sandbox.globalThis = sandbox;
+  const noticeStart = source.indexOf('function showAutoCaptureToast(');
+  if (noticeStart >= 0) {
+    const noticeEnd = source.indexOf('async function loadCaptureSiteConfig()', noticeStart);
+    vm.runInNewContext(source.slice(noticeStart, noticeEnd), sandbox, {filename: 'content-toast.js'});
+  }
   vm.runInNewContext(callbackSource, sandbox, {filename: 'content-auto.js'});
   await callback();
   for (let i = 0; i < 5 && delayedReady && !release; i++) await new Promise(resolve => setImmediate(resolve));
   if (release) release();
   await new Promise(resolve => setImmediate(resolve));
-  return {requests, captures};
+  return {requests, captures, notices: notices.map(notice => notice.textContent), failures};
 }
+
+test('automatic capture shows distinct verified, exported, and failure on-page notices', async () => {
+  const published = await runAuto();
+  assert.deepEqual(published.notices, ['Product capture verified locally.']);
+  const exported = await runAuto({captureResult: {storage: 'downloads', status: 'fallback'}});
+  assert.deepEqual(exported.notices, ['Product exported to Downloads; import to verify.']);
+  const failed = await runAuto({captureError: new Error('receiver HTTP 409')});
+  assert.deepEqual(failed.notices, ['Automatic product capture failed: receiver HTTP 409']);
+  assert.deepEqual(failed.failures, ['receiver HTTP 409']);
+});
 
 test('page-load callback checks tab authority before and after delayed readiness', async () => {
   assert.deepEqual((await runAuto({allowedAt: [false]})).captures, []);
@@ -138,6 +205,8 @@ async function integratedAuto(stage) {
   const content = {
     URL, Date, Map, console: {warn() {}},
     window: {location: {hostname: 'shop.example.test'}},
+    document: {body: {appendChild() {}}, getElementById() { return null; },
+      createElement() { return {style: {}, setAttribute() {}, remove() {}}; }},
     setTimeout(fn) { callback = fn; },
     chrome: {
       runtime: {lastError: null, sendMessage(message, cb) { void send(message).then(cb); }},
@@ -166,6 +235,9 @@ async function integratedAuto(stage) {
   };
   content.globalThis = content;
   vm.createContext(content);
+  const noticeStart = source.indexOf('function showAutoCaptureToast(');
+  vm.runInContext(source.slice(noticeStart,
+    source.indexOf('async function loadCaptureSiteConfig()', noticeStart)), content);
   const captureStartContent = source.indexOf('async function captureCurrentProduct(');
   vm.runInContext(source.slice(captureStartContent, source.indexOf('function takeoverRequest(', captureStartContent)), content);
   const requestStart = source.indexOf('function takeoverRequest(');

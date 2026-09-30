@@ -176,6 +176,22 @@ test('known 429 main-frame response settles load while tab stays loading', async
   assert.equal((await loading).status, 429);
 });
 
+test('404 and 410 page loads report HTTP status without a content inspector', async () => {
+  for (const status of [404, 410]) {
+    const b = bridge();
+    b.tab.status = 'complete';
+    b.chrome.tabs.update = (_id, details, callback) => {
+      b.tab.url = details.url;
+      b.webCompleted[0]({type: 'main_frame', tabId: 7, statusCode: status});
+      callback({...b.tab});
+    };
+    b.chrome.tabs.sendMessage = (_id, _message, callback) => {
+      callback({success: false, error: 'content inspector unavailable'});
+    };
+    assert.equal((await b.io.load(black)).status, status);
+  }
+});
+
 test('take-over reuses its owned tab without activating it on later pages', async () => {
   const b = bridge();
   b.tab.status = 'complete';

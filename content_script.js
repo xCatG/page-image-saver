@@ -2241,13 +2241,37 @@ function saveImagesToStorage(images) {
 const previousCaptureStates = new Map();
 const captureConfigCache = new Map();
 
+function showAutoCaptureToast(message, success) {
+  document.getElementById('auto-capture-toast')?.remove();
+  const toast = document.createElement('div');
+  toast.id = 'auto-capture-toast';
+  toast.setAttribute('role', success ? 'status' : 'alert');
+  toast.textContent = message;
+  toast.style.cssText = `position: fixed; bottom: 20px; right: 20px; z-index: 999999;
+    max-width: 90%; padding: 12px 16px; border-radius: 5px; color: white;
+    background: ${success ? '#34A853' : '#EA4335'}; font: 14px Arial, sans-serif;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), success ? 5000 : 8000);
+}
+
 async function loadCaptureSiteConfig() {
   const domain = window.location.hostname.toLowerCase();
   if (!captureConfigCache.has(domain)) {
-    captureConfigCache.set(domain, fetch(chrome.runtime.getURL(`site_config/${domain}.json`))
-      .then(response => response.ok ? response.json() : null)
-      .then(config => config?.domain === domain ? config : null)
-      .catch(() => null));
+    captureConfigCache.set(domain, (async () => {
+      const response = await fetch(chrome.runtime.getURL(`site_config/${domain}.json`));
+      if (response.ok) {
+        const config = await response.json();
+        return config?.domain === domain ? config : null;
+      }
+      if (response.status !== 404 || !domain.startsWith('www.')) return null;
+      const bare = domain.slice(4);
+      if (!bare || bare.startsWith('www.')) return null;
+      const fallback = await fetch(chrome.runtime.getURL(`site_config/${bare}.json`));
+      if (!fallback.ok) return null;
+      const config = await fallback.json();
+      return config?.domain === bare ? {...config, domain} : null;
+    })().catch(() => null));
   }
   return captureConfigCache.get(domain);
 }
@@ -2392,7 +2416,7 @@ async function refreshTakeoverProgress() {
         ` — ${page.products} product links, next ${page.next || 'absent'}, ` +
         `end ${JSON.stringify(page.end || 'unverified')}`));
     const end = run.preview?.endCheckConfigured ? 'Positive end check configured.' :
-      'No verified positive end check configured; discovery will report incomplete at the end.';
+      'No verified positive end check configured; discovered products will capture, then finish with gaps.';
     box.textContent = `Catalog ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n${end}\n` +
       `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; found ${summary.productsFound}; ` +
       `captured products ${summary.productsCaptured}; captured colors ${summary.colorsCaptured}; ` +
@@ -2483,8 +2507,17 @@ setTimeout(async () => {
       }, {timeoutMs: 8000, pollMs: 200});
       if (!ready) return;
       if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
-      await captureCurrentProduct({manual: false, autoPageLoad: true});
+      const capture = await captureCurrentProduct({manual: false, autoPageLoad: true});
+      if (capture?.storage === 'receiver' &&
+          ['published', 'reused', 'already'].includes(capture.status)) {
+        showAutoCaptureToast('Product capture verified locally.', true);
+      } else if (capture?.storage === 'downloads') {
+        showAutoCaptureToast('Product exported to Downloads; import to verify.', true);
+      } else {
+        throw new Error('local capture returned an unverified result');
+      }
     } catch (error) {
+      showAutoCaptureToast(`Automatic product capture failed: ${String(error?.message || error)}`, false);
       await recordCaptureFailure(error);
       console.warn('Automatic local product capture failed:', error);
     }
