@@ -880,26 +880,33 @@ function createImageSelectionUI(images) {
       <button id="select-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #4285F4; color: white; cursor: pointer;">Select All</button>
       <button id="deselect-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Deselect All</button>
       <button id="save-page-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer;">Save Page Images</button>
-      <button id="capture-product-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #6b46a0; color: white; cursor: pointer;">Capture Product Locally</button>
-      <button id="takeover-preview-btn" type="button">Preview catalog</button>
-      <button id="takeover-start-btn" type="button">Take over</button>
-      <button id="takeover-pause-btn" type="button">Pause</button>
-      <button id="takeover-resume-btn" type="button">Resume</button>
-      <button id="takeover-stop-btn" type="button">Stop</button>
-      <button id="takeover-export-btn" type="button">Export run JSON</button>
       <button id="take-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Visible)</button>
       <button id="take-full-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Full Page)</button>
       <button id="close-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Close</button>
     </div>
-    <div style="display: grid; gap: 5px; margin-bottom: 8px; font-size: 12px;">
-      <label>Capture images <select id="capture-image-mode"><option value="selected">Selected checkboxes</option><option value="site">Site product selectors</option></select></label>
-      <label>Color identity <select id="capture-color-policy"><option value="color">Color on this URL</option><option value="url">Each color has its own URL</option></select></label>
-      <label>Selected color <input id="capture-color" type="text" placeholder="Required for same-URL colors"></label>
-      <label>Scope <select id="capture-scope"><option value="review">Review</option><option value="include">Include</option><option value="exclude">Exclude</option></select></label>
-      <label>Scope reason <input id="capture-scope-reason" type="text" placeholder="Why this scope decision?"></label>
-      <label><input id="capture-same-color-selection" type="checkbox"> I changed only the image selection, not the product/color (one capture only)</label>
-      <label><input id="capture-auto-site" type="checkbox"> Auto capture product pages on this site as review</label>
-    </div>
+    <details id="catalog-capture-section" style="margin-bottom: 8px; max-height: 35vh; overflow-y: auto; font-size: 12px;">
+      <summary style="cursor: pointer; padding: 6px 0; font-weight: bold;">Catalog capture</summary>
+      <div style="display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap;">
+        <button id="capture-product-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #6b46a0; color: white; cursor: pointer;">Capture Product Locally</button>
+        <button id="takeover-preview-btn" type="button">Preview catalog</button>
+        <button id="takeover-start-btn" type="button">Take over</button>
+        <button id="takeover-pause-btn" type="button">Pause</button>
+        <button id="takeover-resume-btn" type="button">Resume</button>
+        <button id="takeover-stop-btn" type="button">Stop</button>
+        <button id="takeover-export-btn" type="button">Export run JSON</button>
+      </div>
+      <div style="display: grid; gap: 5px; margin-bottom: 8px;">
+        <label>Capture images <select id="capture-image-mode"><option value="selected">Selected checkboxes</option><option value="site">Site product selectors</option></select></label>
+        <label>Color identity <select id="capture-color-policy"><option value="color">Color on this URL</option><option value="url">Each color has its own URL</option></select></label>
+        <label>Selected color <input id="capture-color" type="text" placeholder="Required for same-URL colors"></label>
+        <label>Scope <select id="capture-scope"><option value="review">Review</option><option value="include">Include</option><option value="exclude">Exclude</option></select></label>
+        <label>Scope reason <input id="capture-scope-reason" type="text" placeholder="Why this scope decision?"></label>
+        <label><input id="capture-same-color-selection" type="checkbox"> I changed only the image selection, not the product/color (one capture only)</label>
+        <label><input id="capture-auto-site" type="checkbox"> Auto capture product pages on this site as review</label>
+      </div>
+      <div id="capture-failures" style="margin: 8px 0; overflow-wrap: anywhere;"></div>
+      <div id="takeover-progress" role="status" style="font-size: 12px; white-space: pre-wrap;"></div>
+    </details>
     <div id="size-filter" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
       <div style="font-weight: bold; margin-bottom: 5px;">Settings for ${currentDomain}</div>
       <div id="folder-name-row" style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
@@ -922,7 +929,6 @@ function createImageSelectionUI(images) {
       </div>
     </div>
     <div id="status-message" style="margin-top: 10px;"></div>
-    <div id="takeover-progress" role="status" style="margin-top: 8px; font-size: 12px; white-space: pre-wrap;"></div>
   `;
   container.appendChild(header);
   
@@ -933,6 +939,7 @@ const imageList = document.createElement('div');
 imageList.id = 'image-list';
 imageList.style.cssText = `
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   margin-top: 15px;
   display: grid;
@@ -949,6 +956,63 @@ images.forEach((image, index) => {
 
 container.appendChild(imageList);
 document.body.appendChild(container);
+
+  const catalogSection = container.querySelector('#catalog-capture-section');
+  const catalogOpenKey = `catalogCaptureOpen:${currentDomain}`;
+  const catalogDomain = currentDomain;
+  let catalogStateLoaded = false;
+  let catalogToggledBeforeLoad = false;
+  function refreshCaptureFailures() {
+    const box = container.querySelector('#capture-failures');
+    try {
+      chrome.storage.local.get({captureFailures: []}, result => {
+        if (chrome.runtime.lastError) {
+          box.textContent = 'Recent capture failures unavailable.';
+          return;
+        }
+        const failures = (Array.isArray(result?.captureFailures) ? result.captureFailures : [])
+          .filter(row => {
+            try { return new URL(row.url).hostname === catalogDomain; }
+            catch { return false; }
+          }).slice(-5).reverse();
+        box.replaceChildren();
+        if (failures.length === 0) return;
+        const title = document.createElement('strong');
+        title.textContent = 'Recent capture failures';
+        const list = document.createElement('ol');
+        list.style.cssText = 'padding-left: 20px; margin: 4px 0;';
+        for (const failure of failures) {
+          const item = document.createElement('li');
+          item.textContent = `${failure.at || 'Unknown time'} — ${failure.reason || 'Unknown error'} (${failure.url})`;
+          list.appendChild(item);
+        }
+        box.append(title, list);
+      });
+    } catch (error) {
+      box.textContent = 'Recent capture failures unavailable.';
+    }
+  }
+  catalogSection.querySelector('summary').addEventListener('click', () => {
+    if (!catalogStateLoaded) catalogToggledBeforeLoad = true;
+  });
+  catalogSection.addEventListener('toggle', () => {
+    if (!catalogStateLoaded) catalogToggledBeforeLoad = true;
+    try { chrome.storage.local.set({[catalogOpenKey]: catalogSection.open}); }
+    catch (error) { console.warn('Could not save catalog panel state:', error); }
+    if (catalogSection.open) refreshCaptureFailures();
+  });
+  try {
+    chrome.storage.local.get(catalogOpenKey, result => {
+      if (!catalogToggledBeforeLoad && !chrome.runtime.lastError) {
+        catalogSection.open = result?.[catalogOpenKey] === true;
+      }
+      catalogStateLoaded = true;
+    });
+  } catch (error) {
+    catalogStateLoaded = true;
+    console.warn('Could not restore catalog panel state:', error);
+  }
+  refreshCaptureFailures();
 
   loadCaptureSiteConfig().then(config => {
     if (config) {
@@ -1019,7 +1083,7 @@ document.body.appendChild(container);
 
   // Add event listeners
   document.getElementById('select-all-btn').addEventListener('click', () => {
-    const checkboxes = document.querySelectorAll('#image-selector-container input[type="checkbox"]');
+    const checkboxes = document.querySelectorAll('#image-list input[type="checkbox"]');
     checkboxes.forEach(cb => {
       const idx = parseInt(cb.dataset.index);
       const img = currentFilteredImages[idx];
@@ -1028,7 +1092,7 @@ document.body.appendChild(container);
   });
   
   document.getElementById('deselect-all-btn').addEventListener('click', () => {
-    const checkboxes = document.querySelectorAll('#image-selector-container input[type="checkbox"]');
+    const checkboxes = document.querySelectorAll('#image-list input[type="checkbox"]');
     checkboxes.forEach(cb => cb.checked = false);
   });
   
@@ -1099,7 +1163,7 @@ document.body.appendChild(container);
   document.getElementById('save-selected-btn').addEventListener('click', async () => {
     const saveBtn = document.getElementById('save-selected-btn');
     const selectedImages = [];
-    const checkboxes = document.querySelectorAll('#image-selector-container input[type="checkbox"]:checked');
+    const checkboxes = document.querySelectorAll('#image-list input[type="checkbox"]:checked');
     
     checkboxes.forEach(cb => {
       try {
