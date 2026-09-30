@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const liseConfig = require('../site_config/lisecharmel.com.json');
 const {createTakeoverRunner, classifyTakeoverScope, summarizeTakeover,
   exportTakeoverReport} = require('../takeover_runner.js');
 
@@ -33,7 +34,7 @@ function rig(pages, captures = {}, opts = {}) {
       const reply = captures[url] || {storage: 'receiver', status: 'published'};
       if (reply instanceof Error) throw reply;
       if (failAfterCapture) { failAfterCapture = false; crashOnSave = true; }
-      return {...reply, identity: reply.identity || {domain: 'shop.example.test', product_url: url,
+      return {...reply, identity: reply.identity || {domain: new URL(url).hostname, product_url: url,
         selected_color: null, color_key: 'url'}};
     },
     verify: async identity => {
@@ -109,21 +110,55 @@ test('page-count evidence, unique URLs and exclusion accounting complete a run',
   assert.equal(r.captureCalls[0].scope.decision, 'include');
 });
 
-test('missing next on known nonfinal page is discovery_incomplete', async () => {
-  const r = rig({[first]: {...listing1, next: null}});
-  await prepare(r); await r.runner().start(); await r.runner().tick();
-  assert.equal(r.memory.run.status, 'discovery_incomplete');
-  assert.equal(r.memory.run.products.length, 2);
-  assert.equal(r.memory.run.reason.includes('end check'), true);
+test('missing next on known nonfinal page drains products with a discovery gap', async () => {
+  const r = rig({[first]: {...listing1, next: null}, [bra]: {...braPage, colorLinks: []},
+    [sleep]: sleepPage});
+  await prepare(r); await r.runner().start();
+  for (let i = 0; i < 4 && r.memory.run.status === 'running'; i++) {
+    await r.runner().tick(); r.advance(10000);
+  }
+  assert.equal(r.memory.run.status, 'finished_with_gaps');
+  assert.equal(r.memory.run.listings.discoveryComplete, false);
+  assert.match(r.memory.run.listings.discoveryReason, /end check/);
+  assert.deepEqual(r.captureCalls.map(call => call.url), [bra]);
 });
 
-test('page-count end check rejects repeated page numbers even when final count matches', async () => {
+test('Lise Charmel without endCheck captures discovered products then records a discovery gap', async () => {
+  const listingUrl = 'https://lisecharmel.com/lingerie/bras';
+  const firstProduct = 'https://lisecharmel.com/bra-black';
+  const secondProduct = 'https://lisecharmel.com/bra-red';
+  const listing = {kind: 'listing', url: listingUrl,
+    products: [firstProduct, secondProduct], next: null, end: null};
+  const products = {[firstProduct]: {kind: 'product', url: firstProduct,
+    product: {name: 'Lace Bra', category: 'Bras'}, colorLinks: []},
+  [secondProduct]: {kind: 'product', url: secondProduct,
+    product: {name: 'Lace Bra', category: 'Bras'}, colorLinks: []}};
+  const r = rig({[listingUrl]: listing, ...products});
+  await r.runner().preview(liseConfig, {...products[firstProduct], imageCount: 2});
+  await r.runner().preview(liseConfig, listing);
+  await r.runner().start();
+  for (let i = 0; i < 4 && r.memory.run.status === 'running'; i++) {
+    await r.runner().tick(); r.advance(10000);
+  }
+  assert.equal(r.memory.run.status, 'finished_with_gaps');
+  assert.equal(r.memory.run.listings.discoveryComplete, false);
+  assert.match(r.memory.run.listings.discoveryReason, /missing next page.*end check/);
+  assert.deepEqual(r.captureCalls.map(call => call.url), [firstProduct, secondProduct]);
+  assert.equal(summarizeTakeover(r.memory.run).productsCaptured, 2);
+});
+
+test('page-count end check records repeated page numbers as a gap after capture', async () => {
   const r = rig({[first]: {...listing1, end: {type: 'page-count', current: 2, total: 2}},
-    [second]: listing2});
-  await prepare(r); await r.runner().start(); await r.runner().tick();
-  r.advance(10000); await r.runner().tick();
-  assert.equal(r.memory.run.status, 'discovery_incomplete');
+    [second]: listing2, [bra]: braPage, [red]: redPage, [sleep]: sleepPage});
+  await prepare(r); await r.runner().start();
+  for (let i = 0; i < 6 && r.memory.run.status === 'running'; i++) {
+    await r.runner().tick(); r.advance(10000);
+  }
+  assert.equal(r.memory.run.status, 'finished_with_gaps');
   assert.equal(r.memory.run.listings.visited.length, 2);
+  assert.equal(r.memory.run.listings.discoveryComplete, false);
+  assert.match(r.memory.run.listings.discoveryReason, /end check/);
+  assert.deepEqual(r.captureCalls.map(call => call.url), [bra, red]);
 });
 
 test('first listing with zero products stops and a pagination cycle cannot finish', async () => {
@@ -202,6 +237,38 @@ test('challenge and 403/429 stop immediately; transient load failures are bounde
   for (let i = 0; i < 3; i++) { await r.runner().tick(); r.advance(10000); }
   assert.equal(r.memory.run.status, 'paused');
   assert.equal(r.visits.length, 3);
+});
+
+test('dead product 404 fails that item and still captures the next product', async () => {
+  const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
+  const r = rig({[first]: {...listing1, products: [bra, red], next: null,
+    end: {type: 'explicit', present: true}}, [bra]: {status: 404},
+  [red]: {...redPage, colorLinks: []}});
+  await prepare(r, config); await r.runner().start();
+  for (let i = 0; i < 4 && r.memory.run.status === 'running'; i++) {
+    await r.runner().tick(); r.advance(10000);
+  }
+  assert.equal(r.memory.run.status, 'finished_with_gaps');
+  assert.equal(r.memory.run.products[0].status, 'failed');
+  assert.match(r.memory.run.products[0].reason, /HTTP 404/);
+  assert.deepEqual(r.captureCalls.map(call => call.url), [red]);
+  assert.deepEqual(r.visits, [first, bra, red]);
+});
+
+test('same-site product redirect to listing fails that item and continues', async () => {
+  const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
+  const r = rig({[first]: {...listing1, products: [bra, red], next: null,
+    end: {type: 'explicit', present: true}},
+  [bra]: {kind: 'listing', url: first, products: [bra, red], next: null},
+  [red]: {...redPage, colorLinks: []}});
+  await prepare(r, config); await r.runner().start();
+  for (let i = 0; i < 4 && r.memory.run.status === 'running'; i++) {
+    await r.runner().tick(); r.advance(10000);
+  }
+  assert.equal(r.memory.run.status, 'finished_with_gaps');
+  assert.equal(r.memory.run.products[0].status, 'failed');
+  assert.match(r.memory.run.products[0].reason, /product structure mismatch/);
+  assert.deepEqual(r.captureCalls.map(call => call.url), [red]);
 });
 
 test('download fallback is counted unverified and never grants a complete catalog', async () => {

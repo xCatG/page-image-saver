@@ -272,7 +272,7 @@
     for (const [index, requested] of payload.images.entries()) {
       const fetched = await io.fetchImage(requested.fetched_url);
       const bytes = fetched.bytes instanceof Uint8Array ? fetched.bytes : new Uint8Array(fetched.bytes);
-      if (!bytes.byteLength || bytes.byteLength > 25 * 1024 * 1024) throw new Error('invalid image byte count');
+      if (!bytes.byteLength || bytes.byteLength > 100 * 1024 * 1024) throw new Error('invalid image byte count');
       const digest = await captureSha256(bytes);
       const extension = captureImageExtension(bytes, fetched.contentType);
       const path = `images/${index}-${digest}.${extension}`;

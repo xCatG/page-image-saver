@@ -31,6 +31,7 @@ function bridge() {
     }},
     tabs: {onUpdated: event(tabUpdated),
       create(_details, callback) { callback({...tab}); },
+      update(_id, details, callback) { tab.url = details.url; callback({...tab}); },
       get(_id, callback) { callback({...tab}); },
       remove(_id, callback) { callback?.(); },
       sendMessage(_id, message, callback) {
@@ -175,8 +176,33 @@ test('known 429 main-frame response settles load while tab stays loading', async
   assert.equal((await loading).status, 429);
 });
 
+test('take-over reuses its owned tab without activating it on later pages', async () => {
+  const b = bridge();
+  b.tab.status = 'complete';
+  const created = [];
+  const updated = [];
+  b.chrome.tabs.create = (details, callback) => {
+    created.push(details); callback({...b.tab});
+  };
+  b.chrome.tabs.update = (id, details, callback) => {
+    updated.push({id, ...details});
+    b.tab.url = details.url;
+    callback({...b.tab});
+  };
+  await b.io.load(black);
+  await b.io.load(red);
+  assert.deepEqual(created, []);
+  assert.equal(updated.length, 2);
+  assert.deepEqual(updated.map(entry => ({id: entry.id, url: entry.url, active: entry.active})), [
+    {id: 7, url: black, active: false},
+    {id: 7, url: red, active: false}
+  ]);
+  assert.equal(b.stored.catalogTakeoverTabId, 7);
+});
+
 test('blocked status survives later main-frame events before tab creation callback', async () => {
   const b = bridge();
+  b.stored.catalogTakeoverTabId = null;
   b.chrome.tabs.create = (_details, callback) => {
     b.webCompleted[0]({type: 'main_frame', tabId: 7, statusCode: 429});
     b.webCompleted[0]({type: 'main_frame', tabId: 7, statusCode: 200});

@@ -178,7 +178,8 @@
       if (!listingUrl && !item) {
         run.status = run.listings.discoveryComplete && !run.products.some(row => row.status === 'failed') ?
           'complete' : 'finished_with_gaps';
-        run.reason = run.status === 'complete' ? null : 'unverified or failed products remain';
+        run.reason = run.status === 'complete' ? null :
+          run.listings.discoveryReason || 'unverified or failed products remain';
         run.current = null;
         await save(run);
         await io.clearAlarm?.();
@@ -196,6 +197,22 @@
       if (afterLoad?.status !== 'running' || afterLoad.generation !== run.generation) return afterLoad;
       if (page?.status === 403 || page?.status === 429 || page?.kind === 'challenge') {
         return interrupt(run, 'paused', `challenge or HTTP ${page?.status || 'unknown'} at ${url}`);
+      }
+      let deadProductReason = null;
+      if (item && [404, 410].includes(page?.status)) {
+        deadProductReason = `HTTP ${page.status} at ${url}`;
+      } else if (item && page?.kind === 'listing') {
+        try {
+          canonical(page.url, run.domain);
+          deadProductReason = `product structure mismatch at ${url}`;
+        } catch (_) { /* Off-site redirects remain safety halts below. */ }
+      }
+      if (deadProductReason) {
+        item.status = 'failed'; item.reason = deadProductReason;
+        run.current = null;
+        await save(run);
+        await io.alarm(run.lastNavigationStarted + interval);
+        return run;
       }
       if (!page || page.status === 0 || page.status >= 400 || !['listing', 'product'].includes(page.kind)) {
         run.loadFailures[url] = (run.loadFailures[url] || 0) + 1;
@@ -241,7 +258,7 @@
         } else if (endCheckPasses(run.config, page, run.listings.visited, run.products.length)) {
           run.listings.discoveryComplete = true;
         } else {
-          return interrupt(run, 'discovery_incomplete', `missing next page without passing end check at ${url}`);
+          run.listings.discoveryReason = `missing next page without passing end check at ${url}`;
         }
       } else {
         if (page.kind !== 'product' || !page.product)

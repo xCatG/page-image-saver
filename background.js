@@ -111,7 +111,15 @@ const takeoverIo = {
   clearAlarm: async () => chrome.alarms.clear(TAKEOVER_ALARM),
   load: async url => {
     const old = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
-    const tab = await chromeCallback(callback => chrome.tabs.create({url, active: true}, callback));
+    let tab = null;
+    if (Number.isInteger(old.catalogTakeoverTabId)) {
+      try {
+        const existing = await chromeCallback(callback => chrome.tabs.get(old.catalogTakeoverTabId, callback));
+        if (existing) tab = await chromeCallback(callback =>
+          chrome.tabs.update(existing.id, {url, active: false}, callback));
+      } catch (_) { /* A closed take-over tab can be replaced. */ }
+    }
+    if (!tab) tab = await chromeCallback(callback => chrome.tabs.create({url, active: false}, callback));
     await chromeCallback(callback => chrome.storage.local.set({catalogTakeoverTabId: tab.id}, callback));
     if (old.catalogTakeoverTabId && old.catalogTakeoverTabId !== tab.id) {
       chrome.tabs.remove(old.catalogTakeoverTabId, () => { void chrome.runtime.lastError; });

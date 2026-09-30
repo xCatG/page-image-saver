@@ -202,6 +202,25 @@ test('local export saves all evidence before publishing completion, with no clou
     record.evidence.images[0].sha256);
 });
 
+test('local export accepts a valid JPEG above the old 25 MiB cap', async () => {
+  const bytes = new Uint8Array(25 * 1024 * 1024 + 1);
+  bytes.set([0xff, 0xd8, 0xff]);
+  const saved = [];
+  const record = await helpers.exportProductCapture({
+    identity: {domain: 'shop.example.test', product_url: 'https://shop.example.test/bra',
+      selected_color: null, color_key: 'url'},
+    captured_at: '2026-09-29T12:00:00Z', scope: {decision: 'include', reason: 'Bra'},
+    product: {name: 'Fixture bra'}, html: '<html></html>', jsonld: [],
+    images: [{original_url: 'https://cdn.example.test/bra.jpg',
+      fetched_url: 'https://cdn.example.test/bra.jpg'}]
+  }, {attemptId: 'large-image',
+    fetchImage: async () => ({bytes, contentType: 'image/jpeg'}),
+    saveBytes: async filename => saved.push(filename)});
+  assert.equal(record.evidence.images[0].bytes, bytes.byteLength);
+  assert.equal(saved.length, 4);
+  assert.equal(saved[3].endsWith('/complete.json'), true);
+});
+
 async function exportImageFixture(fetchedUrl, bytes, contentType) {
   const saved = [];
   const originalUrl = 'https://cdn.example.test/original/w=1024';
