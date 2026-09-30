@@ -14,6 +14,57 @@ test('JSON-LD product extraction keeps recorded color, price, and currency', () 
     color: 'Black', offers: {price: '42.00', currency: 'USD'}});
 });
 
+test('priced Product JSON-LD wins over a partial review-widget Product', () => {
+  const result = helpers.captureProductFromJsonLd([
+    JSON.stringify({'@type': 'Product', name: 'Review widget',
+      sku: '4B26.EXCI.01,4B26.FLAE.01'}),
+    JSON.stringify({'@type': 'Product', name: 'Rules of Attraction Tanga Exciting Pink',
+      productID: 9773987070295, sku: '4B26.EXCI.01',
+      offers: [{price: 44.5, priceCurrency: 'CHF'}]})
+  ]);
+  assert.deepEqual(result, {name: 'Rules of Attraction Tanga Exciting Pink',
+    sku: '4B26.EXCI.01', product_id: '9773987070295', color: null,
+    offers: {price: '44.5', currency: 'CHF'}});
+});
+
+test('product evidence prefers priced microdata to partial JSON-LD and preserves source facts', () => {
+  const jsonld = [{'@type': 'Product', name: 'Review widget', sku: 'A,B'}];
+  const microdata = {name: 'Demi cup bra', sku: 'ACH3013_0005', productID: '66720',
+    color: 'Noir', offers: {price: '196', priceCurrency: 'USD'},
+    field_sources: {sku: 'form[data-product-sku]', productID: 'input[name=product]',
+      color: '.product-colors .current-color img[alt]'}};
+  const meta = {'og:type': 'product', 'og:title': 'Demi cup bra',
+    'product:price:amount': '196', 'product:price:currency': 'USD'};
+  const evidence = helpers.captureProductEvidence(jsonld, microdata, meta);
+  assert.equal(evidence.format, 'page-image-saver-product-evidence/v1');
+  assert.equal(evidence.fact_source, 'microdata');
+  assert.deepEqual(evidence.facts, {name: 'Demi cup bra', sku: 'ACH3013_0005',
+    product_id: '66720', color: 'Noir', offers: {price: '196', currency: 'USD'}});
+  assert.deepEqual(evidence.microdata, microdata);
+  assert.deepEqual(evidence.jsonld, jsonld);
+  assert.deepEqual(evidence.meta, meta);
+});
+
+test('OG-only product evidence records sourced price without inventing missing SKU or color', () => {
+  const evidence = helpers.captureProductEvidence([], null, {'og:type': 'product',
+    'og:title': 'Rules of Attraction Tanga Exciting Pink',
+    'product:price:amount': '44.50', 'product:price:currency': 'CHF'});
+  assert.equal(evidence.fact_source, 'meta');
+  assert.deepEqual(evidence.facts, {name: 'Rules of Attraction Tanga Exciting Pink',
+    sku: null, product_id: null, color: null, offers: {price: '44.50', currency: 'CHF'}});
+});
+
+test('complete JSON-LD remains preferred over other evidence', () => {
+  const product = {'@type': 'Product', name: 'Aubade Tanga', sku: '4B26.EXCI.01',
+    offers: {price: 44.5, priceCurrency: 'CHF'}};
+  const evidence = helpers.captureProductEvidence([product], {name: 'Another'},
+    {'og:type': 'product', 'og:title': 'Meta title', 'product:price:amount': '44.50',
+      'product:price:currency': 'CHF'});
+  assert.equal(evidence.fact_source, 'jsonld');
+  assert.equal(evidence.facts.name, 'Aubade Tanga');
+  assert.equal(evidence.facts.offers.price, '44.5');
+});
+
 test('unknown product facts remain explicit and per-URL identity keeps unknown color', () => {
   assert.deepEqual(helpers.captureProductFromJsonLd([]), {name: null, sku: null,
     product_id: null, color: null, offers: {price: null, currency: null}});

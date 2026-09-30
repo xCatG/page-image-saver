@@ -1,0 +1,17 @@
+{
+  "domain": "aubade.com",
+  "platform": "shopify",
+  "botProtection": [],
+  "colorVariantStrategy": "separate-url",
+  "listing": {
+    "productLinkSelector": "product-card a.product-card__figure",
+    "pagination": {"type": "numbered", "nextSelector": ".pagination__link.pagination-next"}
+  },
+  "product": {
+    "pageSelector": "product-gallery",
+    "allImagesSelector": ".product-gallery__media img",
+    "imageSelector": ".product-gallery__media.is-initial img",
+    "highResTransform": {"type": "query-param", "name": "width", "value": "2400"},
+    "lazyLoad": true
+  }
+}

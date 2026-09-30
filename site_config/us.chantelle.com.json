@@ -3,7 +3,7 @@
     "platform": "custom",
     "botProtection": [],
     "listing": {
-      "productLinkSelector": "a.product-card__link",
+      "productLinkSelector": "a.product-card__link, a[data-testid='ProductCard_link'][href*='/product/']",
       "pagination": {
         "type": "numbered",
         "nextSelector": "a[data-testid='Pagination_next-button']"

@@ -12,6 +12,7 @@
       }
     },
     "product": {
+      "pageSelector": "form#product_addtocart_form",
       "colorLinkSelector": ".colors-container .color-item a",
       "variantTriggers": [
         {
@@ -43,8 +44,8 @@
           "waitForSelector": ".fotorama__stage__frame.fotorama__active img"
         }
       ],
-      "allImagesSelector": ".fotorama__stage__frame .fotorama__img",
-      "imageSelector": ".fotorama__stage__frame.fotorama__active .fotorama__img",
+      "allImagesSelector": ".fotorama__stage__frame .fotorama__img img",
+      "imageSelector": ".fotorama__stage__frame.fotorama__active .fotorama__img img",
       "imageUrlPattern": "/media/catalog/product/[a-z]/[a-z]/[^/]+\\.jpg",
       "highResTransform": {
         "description": "No resize/cache path used; full-res images served directly. Lightbox opens .fotorama__img--full at native resolution (up to 1875x2500). The full-res src is identical path to the regular img — no transform needed. Zoom in/out is CSS-only within the fotorama lightbox.",

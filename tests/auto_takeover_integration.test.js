@@ -51,6 +51,71 @@ test('exact site config wins and non-www subdomains do not inherit a bare config
   assert.deepEqual(other.requests, ['site_config/shop.lisecharmel.com.json']);
 });
 
+test('saved Lise-shaped microdata and OG-only Aubade facts enter the product evidence envelope', () => {
+  const begin = source.indexOf('function captureJsonLd()');
+  const finish = source.indexOf('function captureGallery(', begin);
+  const fields = new Map([
+    ['[itemscope][itemtype*="Product"]', {}],
+    ['[itemprop="name"]', {textContent: 'Demi cup bra'}],
+    ['[itemprop="price"]', {getAttribute: () => '196'}],
+    ['[itemprop="priceCurrency"]', {getAttribute: () => 'USD'}],
+    ['form[data-product-sku]', {getAttribute: () => 'ACH3013_0005'}],
+    ['input[name="product"]', {value: '66720'}],
+    ['.product-colors .current-color img[alt]', {getAttribute: () => 'Noir'}]
+  ]);
+  const metas = {'og:type': 'product', 'og:title': 'Demi cup bra',
+    'product:price:amount': '196', 'product:price:currency': 'USD'};
+  const helpers = require('../extension_helpers.js');
+  const document = {querySelector: selector => fields.get(selector) || null,
+    querySelectorAll: selector => selector === 'script[type="application/ld+json"]' ? [] :
+      selector === 'meta[property]' ? Object.entries(metas).map(([property, content]) => ({
+        getAttribute: name => name === 'property' ? property : content})) : []};
+  const sandbox = {document, PageImageSaverHelpers: helpers};
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(source.slice(begin, finish), sandbox);
+  const lise = vm.runInContext('capturePageProductEvidence()', sandbox);
+  assert.equal(lise.fact_source, 'microdata');
+  assert.equal(lise.facts.sku, 'ACH3013_0005');
+  assert.equal(lise.facts.color, 'Noir');
+  fields.clear();
+  metas['og:title'] = 'Rules of Attraction Tanga Exciting Pink';
+  metas['product:price:amount'] = '44.50';
+  metas['product:price:currency'] = 'CHF';
+  const aubade = vm.runInContext('capturePageProductEvidence()', sandbox);
+  assert.equal(aubade.fact_source, 'meta');
+  assert.equal(aubade.facts.offers.currency, 'CHF');
+});
+
+test('configured product marker reports a product even before facts load, while a listing stays quiet', () => {
+  const begin = source.indexOf('function captureProductSeen(');
+  const end = source.indexOf('function captureGallery(', begin);
+  const document = {querySelector: selector => selector === '.known-product' ? {} : null};
+  const sandbox = {document};
+  vm.createContext(sandbox);
+  vm.runInContext(source.slice(begin, end), sandbox);
+  const empty = {name: null, sku: null, product_id: null, color: null};
+  assert.equal(vm.runInContext('captureProductSeen({product: {pageSelector: ".known-product"}}, empty)',
+    Object.assign(sandbox, {empty})), true);
+  assert.equal(vm.runInContext('captureProductSeen({product: {pageSelector: ".other"}}, empty)', sandbox), false);
+  const cardFacts = {name: 'Listing card microdata', sku: 'CARD-1', product_id: null, color: null};
+  sandbox.cardFacts = cardFacts;
+  assert.equal(vm.runInContext('captureProductSeen({product: {pageSelector: ".other"}}, cardFacts)',
+    sandbox), false, 'listing Product microdata is not a PDP without its configured marker');
+});
+
+test('packaged site selectors target gallery IMG nodes and narrow Chantelle product cards', () => {
+  const lise = require('../site_config/lisecharmel.com.json');
+  const aubade = require('../site_config/aubade.com.json');
+  const chantelle = require('../site_config/us.chantelle.com.json');
+  assert.match(lise.product.allImagesSelector, /\.fotorama__img img/);
+  assert.equal(lise.product.pageSelector, 'form#product_addtocart_form');
+  assert.equal(aubade.domain, 'aubade.com');
+  assert.equal(aubade.product.allImagesSelector, '.product-gallery__media img');
+  assert.match(chantelle.listing.productLinkSelector, /data-testid=['"]ProductCard_link['"]/);
+  assert.doesNotMatch(chantelle.listing.productLinkSelector, /(^|,)\s*a\[href/);
+});
+
 async function runAuto({allowedAt = [true, true], delayedReady = false,
   captureResult = {storage: 'receiver', status: 'published'}, captureError = null} = {}) {
   const requests = [];
@@ -127,6 +192,8 @@ test('automatic product capture forwards its acquisition authority marker', asyn
     loadCaptureSiteConfig: async () => ({colorVariantStrategy: 'separate-url'}),
     captureCanonicalUrl: () => 'https://shop.example.test/bra',
     capturePageProduct: () => ({name: 'Bra', color: 'Black'}),
+    capturePageProductEvidence: () => ({format: 'page-image-saver-product-evidence/v1',
+      facts: {name: 'Bra', color: null}}),
     captureSelectedColor: () => 'Black',
     capturePageHtml: () => '<p>Bra</p>',
     captureJsonLd: () => [],
@@ -149,6 +216,9 @@ test('automatic product capture forwards its acquisition authority marker', asyn
   assert.equal(sent[0].action, 'captureProductLocal');
   assert.equal(sent[0].autoPageLoad, true);
   assert.equal(sent[0].runBinding, null);
+  assert.equal(sent[0].payload.identity.selected_color, 'Black');
+  assert.equal(sent[0].payload.product.color, null, 'UI-selected color cannot become a source-backed fact');
+  assert.equal(sent[0].payload.jsonld.facts.color, null);
 });
 
 async function integratedAuto(stage) {
@@ -216,6 +286,8 @@ async function integratedAuto(stage) {
       colorVariantStrategy: 'separate-url'}),
     assertTakeoverBinding() {}, captureCanonicalUrl: () => 'https://shop.example.test/bra',
     capturePageProduct: () => ({name: 'Bra', color: 'Black'}),
+    capturePageProductEvidence: () => ({format: 'page-image-saver-product-evidence/v1',
+      facts: {name: 'Bra', color: 'Black'}}),
     captureSelectedColor: () => 'Black', capturePageHtml: () => '<p>Bra</p>',
     captureJsonLd: () => [], previousCaptureStates: new Map(),
     recordCaptureFailure: async () => {},

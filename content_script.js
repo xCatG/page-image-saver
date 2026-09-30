@@ -2282,9 +2282,40 @@ function captureJsonLd() {
     .filter(value => value !== null);
 }
 
+function capturePageProductEvidence() {
+  const readItem = selector => {
+    const node = document.querySelector(selector);
+    return node?.getAttribute?.('content') || node?.textContent?.trim() || null;
+  };
+  let microdata = null;
+  if (document.querySelector('[itemscope][itemtype*="Product"]')) {
+    const sku = document.querySelector('form[data-product-sku]')?.getAttribute('data-product-sku') || null;
+    const productID = document.querySelector('input[name="product"]')?.value || null;
+    const color = document.querySelector('.product-colors .current-color img[alt]')?.getAttribute('alt') || null;
+    microdata = {name: readItem('[itemprop="name"]'), sku, productID, color,
+      offers: {price: readItem('[itemprop="price"]'),
+        priceCurrency: readItem('[itemprop="priceCurrency"]')},
+      field_sources: {sku: 'form[data-product-sku]', productID: 'input[name=product]',
+        color: '.product-colors .current-color img[alt]'}};
+  }
+  const meta = {};
+  for (const node of document.querySelectorAll('meta[property]')) {
+    const property = node.getAttribute('property');
+    if (['og:type', 'og:title', 'og:image', 'product:price:amount',
+      'product:price:currency'].includes(property)) meta[property] = node.getAttribute('content');
+  }
+  return globalThis.PageImageSaverHelpers.captureProductEvidence(captureJsonLd(), microdata,
+    Object.keys(meta).length ? meta : null);
+}
+
 function capturePageProduct() {
-  return globalThis.PageImageSaverHelpers.captureProductFromJsonLd(
-    Array.from(document.querySelectorAll('script[type="application/ld+json"]'), node => node.textContent));
+  return capturePageProductEvidence().facts;
+}
+
+function captureProductSeen(config, product = capturePageProduct()) {
+  if (config?.product?.pageSelector) return !!document.querySelector(config.product.pageSelector);
+  return !!(product.name || product.sku || product.product_id || product.color ||
+    document.querySelector('meta[property="og:type"][content="product"]'));
 }
 
 function captureGallery(config, mode) {
@@ -2372,10 +2403,10 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
   const previous = previousCaptureStates.get(url);
   const state = await globalThis.PageImageSaverHelpers.waitForCaptureState(readState, previous,
     {timeoutMs: 8000, pollMs: 200, allowSameColorGalleryChange: manual && allowSameColorGalleryChange});
-  const product = capturePageProduct();
+  const evidence = capturePageProductEvidence();
+  const product = evidence.facts;
   const color = policy === 'url' ? captureSelectedColor(product) : state.color;
   const identity = globalThis.PageImageSaverHelpers.captureIdentity(url, policy, color);
-  if (!product.color && color) product.color = color;
   const decision = scopeOverride?.decision || (manual ? document.getElementById('capture-scope').value : 'review');
   const customReason = manual ? document.getElementById('capture-scope-reason').value.trim() : '';
   const scope = {decision, reason: scopeOverride?.reason || customReason ||
@@ -2383,7 +2414,7 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
   const transform = config?.product?.highResTransform;
   const images = state.gallery.map(url => globalThis.PageImageSaverHelpers.captureImageUrls(url, transform));
   const payload = {identity, captured_at: new Date().toISOString(), scope, product,
-    html: capturePageHtml(), jsonld: captureJsonLd(), images};
+    html: capturePageHtml(), jsonld: evidence, images};
   assertTakeoverBinding(binding); // Guard before background image acquisition.
   const result = await new Promise((resolve, reject) => chrome.runtime.sendMessage(
     {action: 'captureProductLocal', payload, runBinding: binding, autoPageLoad}, response => {
@@ -2449,7 +2480,7 @@ async function inspectTakeoverPage(config) {
     return {kind: 'challenge', url: window.location.href};
   }
   const product = capturePageProduct();
-  const productSeen = !!(product.name || product.sku || product.product_id || product.color);
+  const productSeen = captureProductSeen(config, product);
   if (productSeen) {
     await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
       let gallery = [];
@@ -2503,7 +2534,7 @@ setTimeout(async () => {
         const product = capturePageProduct();
         let gallery = [];
         try { gallery = captureGallery(config, 'site'); } catch (_) { /* Gallery may render later. */ }
-        return {productSeen: !!(product.name || product.sku || product.product_id || product.color), gallery};
+        return {productSeen: captureProductSeen(config, product), gallery};
       }, {timeoutMs: 8000, pollMs: 200});
       if (!ready) return;
       if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
