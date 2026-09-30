@@ -858,35 +858,41 @@ function createImageSelectionUI(images) {
     position: fixed;
     top: 0;
     right: 0;
-    width: 350px;
+    width: 380px;
+    max-width: 100vw;
     height: 100vh;
+    box-sizing: border-box;
     background: white;
     box-shadow: -2px 0 5px rgba(0,0,0,0.2);
     z-index: 2147483647;
     display: flex;
     flex-direction: column;
-    padding: 15px;
+    padding: 10px;
     overflow: hidden;
     font-family: Arial, sans-serif;
+    font-size: 12px;
+    line-height: 18px;
+    color: #222;
   `;
   
   // Create header
   const header = document.createElement('div');
+  header.style.flexShrink = '0';
   header.innerHTML = `
-    <h2 style="margin-top: 0">Images Found (${images.length})</h2>
-    <p>Select images to save to your storage</p>
-    <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+    <h2 style="margin: 0 0 4px; font: bold 16px/20px Arial, sans-serif;">Images Found (${images.length})</h2>
+    <p style="margin: 0 0 6px; font: 12px/18px Arial, sans-serif;">Select images to save to your storage</p>
+    <div style="display: flex; gap: 4px; margin-bottom: 6px; flex-wrap: wrap;">
       <button id="save-selected-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer;">Save Selected</button>
       <button id="select-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #4285F4; color: white; cursor: pointer;">Select All</button>
       <button id="deselect-all-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Deselect All</button>
       <button id="save-page-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer;">Save Page Images</button>
-      <button id="take-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Visible)</button>
-      <button id="take-full-screenshot-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Take Screenshot (Full Page)</button>
+      <button id="take-screenshot-btn" title="Take screenshot of the visible page" style="border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Visible screenshot</button>
+      <button id="take-full-screenshot-btn" title="Take screenshot of the full page" style="border-radius: 4px; border: none; background: #EA4335; color: white; cursor: pointer;">Full-page screenshot</button>
       <button id="close-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #f5f5f5; border: 1px solid #ddd; cursor: pointer;">Close</button>
     </div>
-    <details id="catalog-capture-section" style="margin-bottom: 8px; max-height: 35vh; overflow-y: auto; font-size: 12px;">
-      <summary style="cursor: pointer; padding: 6px 0; font-weight: bold;">Catalog capture</summary>
-      <div style="display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap;">
+    <details id="catalog-capture-section" style="margin-bottom: 4px; max-height: 35vh; overflow-y: auto; font-size: 12px;">
+      <summary style="cursor: pointer; padding: 4px 0; font-weight: bold;">Catalog capture</summary>
+      <div style="display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap;">
         <button id="capture-product-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #6b46a0; color: white; cursor: pointer;">Capture Product Locally</button>
         <button id="takeover-preview-btn" type="button">Preview catalog</button>
         <button id="takeover-start-btn" type="button">Take over</button>
@@ -907,15 +913,15 @@ function createImageSelectionUI(images) {
       <div id="capture-failures" style="margin: 8px 0; overflow-wrap: anywhere;"></div>
       <div id="takeover-progress" role="status" style="font-size: 12px; white-space: pre-wrap;"></div>
     </details>
-    <div id="size-filter" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
-      <div style="font-weight: bold; margin-bottom: 5px;">Settings for ${currentDomain}</div>
-      <div id="folder-name-row" style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+    <div id="size-filter" style="margin-top: 4px; padding: 6px; background: #f5f5f5; border-radius: 4px;">
+      <div style="font-weight: bold; margin-bottom: 4px; overflow-wrap: anywhere;">Settings for ${currentDomain}</div>
+      <div id="folder-name-row" style="display: flex; gap: 4px; align-items: center; margin-bottom: 4px;">
         <div style="flex-grow: 1;">
           <label for="folder-name" style="display: block; font-size: 12px; margin-bottom: 2px;">Local Folder Name</label>
           <input type="text" id="folder-name" value="${domainSettings.folderName || currentDomain}" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
         </div>
       </div>
-      <div style="display: flex; gap: 10px; align-items: center;">
+      <div style="display: flex; gap: 4px; align-items: end; flex-wrap: wrap;">
         <div>
           <label for="min-width" style="display: block; font-size: 12px; margin-bottom: 2px;">Min Width (px)</label>
           <input type="number" id="min-width" value="${domainSettings.minWidth}" min="0" style="width: 70px; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
@@ -928,8 +934,36 @@ function createImageSelectionUI(images) {
         <button id="save-filter-btn" style="padding: 5px 10px; border-radius: 4px; border: none; background: #34A853; color: white; cursor: pointer; margin-top: 15px;">Save</button>
       </div>
     </div>
-    <div id="status-message" style="margin-top: 10px;"></div>
+    <div id="status-message" style="margin-top: 4px;"></div>
   `;
+  // Assign properties directly: storefront CSP can block inserted <style> elements.
+  // Scope to our header so host controls and thumbnail sizing stay untouched.
+  const compactControlStyle = {
+    'box-sizing': 'border-box', font: '12px/18px Arial, sans-serif',
+    'min-width': '0', 'max-width': '100%', height: '26px', 'min-height': '26px',
+    margin: '0',
+  };
+  for (const control of header.querySelectorAll('button, input:not([type="checkbox"]), select')) {
+    for (const [property, value] of Object.entries(compactControlStyle)) {
+      control.style.setProperty(property, value, 'important');
+    }
+    control.style.setProperty('padding', '2px 5px', 'important');
+  }
+  for (const button of header.querySelectorAll('button')) {
+    const buttonStyle = {
+      display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center',
+      'letter-spacing': 'normal', 'text-transform': 'none', 'white-space': 'nowrap',
+      width: 'auto', padding: '3px 6px', 'border-width': '1px',
+    };
+    for (const [property, value] of Object.entries(buttonStyle)) {
+      button.style.setProperty(property, value, 'important');
+    }
+  }
+  for (const control of header.querySelectorAll('button, input, select, summary')) {
+    // Restore the browser's keyboard focus indicator even if the host removes it.
+    control.style.setProperty('outline', 'revert', 'important');
+    control.style.setProperty('outline-offset', '2px', 'important');
+  }
   container.appendChild(header);
   
   //
@@ -941,7 +975,7 @@ imageList.style.cssText = `
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  margin-top: 15px;
+  margin-top: 6px;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 10px;

@@ -107,6 +107,64 @@ class CatalogPanelBrowserTest(unittest.TestCase):
         self.open_panel()
         self.assertFalse(self.page.locator("#catalog-capture-section").evaluate("element => element.open"))
 
+    def test_compact_controls_leave_most_of_short_windows_for_images(self):
+        for height in (600, 768, 900):
+            with self.subTest(height=height):
+                self.page.evaluate("document.querySelector('#image-selector-container')?.remove(); storageValues = {}")
+                self.page.set_viewport_size({"width": 1280, "height": height})
+                self.open_panel()
+                panel = self.page.locator("#image-selector-container")
+                grid = panel.locator("#image-list").bounding_box()
+                self.assertGreaterEqual(grid["height"], height * 0.55)
+                self.assertLessEqual(grid["y"] + grid["height"], height)
+                panel.locator("#catalog-capture-section summary").click()
+                for button in panel.locator("button").all():
+                    size = button.bounding_box()
+                    self.assertLessEqual(size["height"], 28, button.inner_text())
+                    self.assertGreaterEqual(size["height"], 24, button.inner_text())
+                    self.assertFalse(button.evaluate("el => el.scrollWidth > el.clientWidth"))
+                panel.locator("#close-btn").click()
+                self.page.evaluate("storageValues = {}")
+
+    def test_host_touch_button_styles_do_not_expand_panel_or_lose_focus_ring(self):
+        self.page.add_style_tag(content="""
+          button { min-height: 56px; padding: 20px; margin: 12px;
+                   font-size: 24px; line-height: 2; width: 100%; outline: none; }
+        """)
+        self.page.evaluate("document.body.innerHTML = '<button id=host-button>Host button</button>'")
+        self.open_panel()
+        panel = self.page.locator("#image-selector-container")
+        panel.locator("#catalog-capture-section summary").click()
+        for button in panel.locator("button").all():
+            self.assertLessEqual(button.bounding_box()["height"], 28, button.inner_text())
+        self.assertGreaterEqual(self.page.locator("#host-button").bounding_box()["height"], 56)
+        self.page.keyboard.press("Tab")
+        panel.locator("#save-selected-btn").focus()
+        self.assertTrue(panel.locator("#save-selected-btn").evaluate("el => el.matches(':focus-visible')"))
+        self.assertNotEqual(panel.locator("#save-selected-btn").evaluate(
+            "el => getComputedStyle(el).outlineStyle"), "none")
+
+    def test_local_folder_controls_still_leave_half_a_short_window_for_images(self):
+        self.page.set_viewport_size({"width": 1280, "height": 600})
+        self.page.evaluate("""() => { chrome.storage.sync.get = (_key, callback) =>
+            callback({imageUploaderSettings: {local: {enabled: true}}}); }""")
+        self.open_panel()
+        panel = self.page.locator("#image-selector-container")
+        self.assertTrue(panel.locator("#folder-name").is_visible())
+        self.assertGreaterEqual(panel.locator("#image-list").bounding_box()["height"], 300)
+        panel.locator("#catalog-capture-section summary").click()
+        self.assertGreaterEqual(panel.locator("#image-list").bounding_box()["height"], 100)
+
+    def test_compact_buttons_work_when_storefront_blocks_style_elements(self):
+        self.page.evaluate("""() => {
+          const policy = document.createElement('meta');
+          policy.httpEquiv = 'Content-Security-Policy';
+          policy.content = "style-src-elem 'none'; style-src-attr 'unsafe-inline'";
+          document.head.appendChild(policy);
+        }""")
+        self.open_panel()
+        self.assertLessEqual(self.page.locator("#save-selected-btn").bounding_box()["height"], 28)
+
     def test_user_toggle_wins_over_delayed_storage_restore(self):
         self.page.evaluate("""storageValues['catalogCaptureOpen:shop.example.test'] = false;
           const originalGet = chrome.storage.local.get;
@@ -119,6 +177,7 @@ class CatalogPanelBrowserTest(unittest.TestCase):
         self.page.locator("#catalog-capture-section summary").click()
         self.page.evaluate("releaseSavedState()")
         self.assertTrue(self.page.locator("#catalog-capture-section").evaluate("element => element.open"))
+        self.page.wait_for_function("storageValues['catalogCaptureOpen:shop.example.test'] === true")
         self.assertTrue(self.page.evaluate("storageValues['catalogCaptureOpen:shop.example.test']"))
 
     def test_recent_failures_are_scoped_to_domain_and_refresh_on_open(self):
