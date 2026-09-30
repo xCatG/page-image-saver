@@ -185,6 +185,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return takeoverRunner.preview(message.config, message.page);
     }
     if (message.action === 'takeoverStatus') return takeoverRunner.read();
+    if (message.domain) {
+      const run = await takeoverRunner.read();
+      if (run && run.domain !== message.domain)
+        throw new Error(`saved catalog run belongs to ${run.domain}`);
+    }
     if (message.action === 'takeoverExport') {
       const run = await takeoverRunner.read();
       const report = globalThis.PageImageSaverTakeover.exportTakeoverReport(run);

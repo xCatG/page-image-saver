@@ -49,7 +49,8 @@ function bridge() {
     setTimeout() { return 1; }, clearTimeout() {},
     PageImageSaverTakeover: {createTakeoverRunner(value) {
       io = value;
-      return {tick: async () => {}, read: async () => stored.catalogTakeoverRun};
+      return {tick: async () => {}, read: async () => stored.catalogTakeoverRun,
+        stop: async () => { stored.catalogTakeoverRun.status = 'stopped'; return stored.catalogTakeoverRun; }};
     }, summarizeTakeover() { return {}; }},
     PageImageSaverHelpers: {}};
   sandbox.globalThis = sandbox;
@@ -105,6 +106,17 @@ test('owned runner tab blocks page-load capture after pause, challenge, or stop'
     assert.deepEqual(b.acquisitions, []);
     assert.deepEqual(b.imageRequests, []);
   }
+});
+
+test('catalog action from another host cannot stop the saved run', async () => {
+  const b = captureBridge();
+  const foreign = await b.dispatch({action: 'takeoverStop', domain: 'other.example.test'});
+  assert.equal(foreign.success, false);
+  assert.match(foreign.error, /saved catalog run belongs to shop\.example\.test/);
+  assert.equal(b.stored.catalogTakeoverRun.status, 'running');
+  const owner = await b.dispatch({action: 'takeoverStop', domain: 'shop.example.test'});
+  assert.equal(owner.success, true);
+  assert.equal(b.stored.catalogTakeoverRun.status, 'stopped');
 });
 
 test('late pause is rechecked when automatic image acquisition begins', async () => {

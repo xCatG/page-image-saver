@@ -9,7 +9,7 @@ const start = source.indexOf('setTimeout(async () => {', source.indexOf('// A si
 const end = source.indexOf('// Share the panel entry point', start);
 const callbackSource = source.slice(start, end);
 
-async function configuredHost(hostname, fixtures) {
+async function configuredHost(hostname, fixtures, {rejectMissing = false} = {}) {
   const requests = [];
   const configStart = source.indexOf('async function loadCaptureSiteConfig()');
   const configEnd = source.indexOf('function captureJsonLd()', configStart);
@@ -19,7 +19,9 @@ async function configuredHost(hostname, fixtures) {
     fetch: async path => {
       requests.push(path);
       const config = fixtures[path];
-      return config ? {ok: true, status: 200, json: async () => config} : {ok: false, status: 404};
+      if (config) return {ok: true, status: 200, json: async () => config};
+      if (rejectMissing) throw new TypeError('Failed to fetch');
+      return {ok: false, status: 404};
     }};
   vm.createContext(sandbox);
   vm.runInContext(configStart < 0 ? '' : source.slice(configStart, configEnd), sandbox);
@@ -35,6 +37,25 @@ test('www Lise config falls back to the bare file with requested host identity',
   assert.equal(result.config.product.allImagesSelector, bare.product.allImagesSelector);
   assert.deepEqual(result.requests, [
     'site_config/www.lisecharmel.com.json', 'site_config/lisecharmel.com.json']);
+});
+
+test('missing packaged www config rejects, then loads only the matching bare file', async () => {
+  const bare = require('../site_config/lisecharmel.com.json');
+  const result = await configuredHost('www.lisecharmel.com', {
+    'site_config/lisecharmel.com.json': bare}, {rejectMissing: true});
+  assert.equal(result.config.domain, 'www.lisecharmel.com');
+  assert.equal(result.config.product.allImagesSelector, bare.product.allImagesSelector);
+  assert.deepEqual(result.requests, [
+    'site_config/www.lisecharmel.com.json', 'site_config/lisecharmel.com.json']);
+});
+
+test('a malformed exact-host config never falls through to the bare host', async () => {
+  const bare = require('../site_config/lisecharmel.com.json');
+  const result = await configuredHost('www.lisecharmel.com', {
+    'site_config/www.lisecharmel.com.json': {...bare, domain: 'wrong.example'},
+    'site_config/lisecharmel.com.json': bare}, {rejectMissing: true});
+  assert.equal(result.config, null);
+  assert.deepEqual(result.requests, ['site_config/www.lisecharmel.com.json']);
 });
 
 test('exact site config wins and non-www subdomains do not inherit a bare config', async () => {

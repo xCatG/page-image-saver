@@ -911,6 +911,7 @@ function createImageSelectionUI(images) {
         <label><input id="capture-auto-site" type="checkbox"> Auto capture product pages on this site as review</label>
       </div>
       <div id="capture-failures" style="margin: 8px 0; overflow-wrap: anywhere;"></div>
+      <div id="takeover-feedback" role="status" style="font-size: 12px; overflow-wrap: anywhere;"></div>
       <div id="takeover-progress" role="status" style="font-size: 12px; white-space: pre-wrap;"></div>
     </details>
     <div id="size-filter" style="margin-top: 4px; padding: 6px; background: #f5f5f5; border-radius: 4px;">
@@ -1080,21 +1081,36 @@ document.body.appendChild(container);
       button.disabled = false;
     }
   });
-  document.getElementById('takeover-preview-btn').addEventListener('click', async () => {
+  const previewButton = container.querySelector('#takeover-preview-btn');
+  const takeoverFeedback = container.querySelector('#takeover-feedback');
+  const takeoverProgress = container.querySelector('#takeover-progress');
+  previewButton.addEventListener('click', async () => {
+    previewButton.disabled = true;
+    takeoverProgress.dataset.previewPending = 'true';
+    takeoverRefreshSequence++;
+    takeoverFeedback.textContent = `Previewing ${catalogDomain}…`;
     try {
       const config = await loadCaptureSiteConfig();
       if (!config) throw new Error('No site config for catalog preview');
       const page = await inspectTakeoverPage(config);
       await takeoverRequest('takeoverPreview', {config, page});
+      delete takeoverProgress.dataset.previewPending;
       await refreshTakeoverProgress();
-    } catch (error) { showStatusMessage(`Catalog preview failed: ${error.message}`, 'error'); }
+      takeoverFeedback.textContent = `Preview ready for ${catalogDomain}.`;
+    } catch (error) {
+      takeoverFeedback.textContent = `Catalog preview failed: ${error.message}`;
+      showStatusMessage(takeoverFeedback.textContent, 'error');
+    } finally {
+      delete takeoverProgress.dataset.previewPending;
+      previewButton.disabled = false;
+    }
   });
   for (const [button, action] of [['takeover-start-btn', 'takeoverStart'],
     ['takeover-pause-btn', 'takeoverPause'], ['takeover-resume-btn', 'takeoverResume'],
     ['takeover-stop-btn', 'takeoverStop'], ['takeover-export-btn', 'takeoverExport']]) {
     document.getElementById(button).addEventListener('click', async () => {
       try {
-        await takeoverRequest(action);
+        await takeoverRequest(action, {domain: catalogDomain});
         if (action === 'takeoverExport') showStatusMessage('Catalog run JSON saved to Downloads.', 'success');
         await refreshTakeoverProgress();
       }
@@ -2358,19 +2374,27 @@ async function loadCaptureSiteConfig() {
   const domain = window.location.hostname.toLowerCase();
   if (!captureConfigCache.has(domain)) {
     captureConfigCache.set(domain, (async () => {
-      const response = await fetch(chrome.runtime.getURL(`site_config/${domain}.json`));
-      if (response.ok) {
-        const config = await response.json();
-        return config?.domain === domain ? config : null;
+      let response;
+      try { response = await fetch(chrome.runtime.getURL(`site_config/${domain}.json`)); }
+      catch (_) { response = null; } // A missing packaged extension resource rejects in Chromium.
+      if (response?.ok) {
+        try {
+          const config = await response.json();
+          return config?.domain === domain ? config : null;
+        } catch (_) { return null; }
       }
-      if (response.status !== 404 || !domain.startsWith('www.')) return null;
+      if ((response && response.status !== 404) || !domain.startsWith('www.')) return null;
       const bare = domain.slice(4);
       if (!bare || bare.startsWith('www.')) return null;
-      const fallback = await fetch(chrome.runtime.getURL(`site_config/${bare}.json`));
-      if (!fallback.ok) return null;
-      const config = await fallback.json();
-      return config?.domain === bare ? {...config, domain} : null;
-    })().catch(() => null));
+      let fallback;
+      try { fallback = await fetch(chrome.runtime.getURL(`site_config/${bare}.json`)); }
+      catch (_) { return null; }
+      if (!fallback?.ok) return null;
+      try {
+        const config = await fallback.json();
+        return config?.domain === bare ? {...config, domain} : null;
+      } catch (_) { return null; }
+    })());
   }
   return captureConfigCache.get(domain);
 }
@@ -2533,12 +2557,28 @@ function takeoverRequest(action, data = {}) {
   }));
 }
 
+let takeoverRefreshSequence = 0;
 async function refreshTakeoverProgress() {
   const box = document.getElementById('takeover-progress');
-  if (!box) return;
+  if (!box || box.dataset.previewPending === 'true') return;
+  const refreshSequence = ++takeoverRefreshSequence;
   try {
     const {run, summary} = await takeoverRequest('takeoverStatus');
+    if (refreshSequence !== takeoverRefreshSequence || box.dataset.previewPending === 'true') return;
+    const currentHost = window.location.hostname.toLowerCase();
+    const foreignRun = !!run && run.domain !== currentHost;
+    for (const id of ['takeover-start-btn', 'takeover-pause-btn', 'takeover-resume-btn',
+      'takeover-stop-btn', 'takeover-export-btn']) {
+      document.getElementById(id).disabled = foreignRun;
+    }
     if (!run) { box.textContent = 'No catalog preview yet. Browse listing and product pages, then preview each page.'; return; }
+    if (foreignRun) {
+      box.textContent = `Saved catalog ${run.status} belongs to ${run.domain}. This page is ${currentHost}. ` +
+        (['running', 'paused'].includes(run.status) ?
+          `That run must stop or finish before previewing this site.` :
+          `Preview this page to start a catalog preview here.`);
+      return;
+    }
     const samples = (run.previews || []).map(page => `${page.kind}: ${page.url}` +
       (page.products == null ? ` — ${page.product?.name || 'unknown product'}, ` +
         `${page.imageCount || 0} gallery images, ${page.colorLinks || 0} color links, ` +
@@ -2555,7 +2595,10 @@ async function refreshTakeoverProgress() {
       `exported/unverified ${summary.exportedUnverified}.\n` +
       (run.products || []).filter(row => row.status === 'failed').map(row => `${row.url}: ${row.reason}`).join('\n') +
       '\nVerified skips require the local receiver. Downloads exports are unverified until imported.';
-  } catch (error) { box.textContent = `Catalog status unavailable: ${error.message}`; }
+  } catch (error) {
+    if (refreshSequence === takeoverRefreshSequence && box.dataset.previewPending !== 'true')
+      box.textContent = `Catalog status unavailable: ${error.message}`;
+  }
 }
 
 function takeoverCategory() {
