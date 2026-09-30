@@ -97,6 +97,7 @@ class CatalogPanelBrowserTest(unittest.TestCase):
         self.open_panel()
         self.page.locator("#catalog-capture-section summary").click()
         self.assertTrue(self.page.locator("#catalog-capture-section").evaluate("element => element.open"))
+        self.page.wait_for_function("storageValues['catalogCaptureOpen:shop.example.test'] === true")
         self.assertTrue(self.page.evaluate("storageValues['catalogCaptureOpen:shop.example.test']"))
         self.page.locator("#close-btn").click()
         self.open_panel()
@@ -167,6 +168,31 @@ class CatalogPanelBrowserTest(unittest.TestCase):
             self.page.locator(f"#{button}").click()
         self.assertEqual(self.page.evaluate("actions"), ["capture", "takeoverStart", "takeoverPause",
                                                      "takeoverResume", "takeoverStop", "takeoverExport"])
+
+    def test_toolbar_does_not_change_host_page_checkboxes_with_same_id(self):
+        self.page.evaluate("""document.body.innerHTML = '<div id="image-list"><input type="checkbox" data-index="0" checked></div>'""")
+        self.open_panel()
+        self.page.evaluate("""currentFilteredImages = [{url: 'https://shop.example.test/bra.png'}];
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox'; checkbox.dataset.index = '0';
+          document.querySelector('#image-selector-container #image-list').appendChild(checkbox);""")
+        host = self.page.locator("body > #image-list input")
+        own = self.page.locator("#image-selector-container #image-list input")
+        self.page.locator("#select-all-btn").click()
+        self.assertTrue(own.is_checked())
+        self.page.locator("#deselect-all-btn").click()
+        self.assertFalse(own.is_checked())
+        self.assertTrue(host.is_checked())
+
+    def test_new_manual_failure_appears_while_catalog_stays_open(self):
+        self.page.evaluate("""(() => { captureCurrentProduct = async () => { throw Error('receiver unreachable'); };
+          recordCaptureFailure = async error => { storageValues.captureFailures = [{
+            url: 'https://shop.example.test/bra', at: 'now', reason: error.message}]; }; })()""")
+        self.open_panel()
+        self.page.locator("#catalog-capture-section summary").click()
+        self.page.locator("#capture-product-btn").click()
+        self.page.wait_for_function("document.querySelector('#capture-failures').textContent.includes('receiver unreachable')")
+        self.assertIn("receiver unreachable", self.page.locator("#capture-failures").inner_text())
 
 
 if __name__ == "__main__":

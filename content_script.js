@@ -1040,6 +1040,7 @@ document.body.appendChild(container);
       showStatusMessage(globalThis.PageImageSaverHelpers.captureResultMessage(result), 'success');
     } catch (error) {
       await recordCaptureFailure(error);
+      refreshCaptureFailures();
       showStatusMessage(`Product capture failed: ${error.message}`, 'error');
     } finally {
       button.disabled = false;
@@ -1083,7 +1084,7 @@ document.body.appendChild(container);
 
   // Add event listeners
   document.getElementById('select-all-btn').addEventListener('click', () => {
-    const checkboxes = document.querySelectorAll('#image-list input[type="checkbox"]');
+    const checkboxes = imageList.querySelectorAll('input[type="checkbox"]');
     checkboxes.forEach(cb => {
       const idx = parseInt(cb.dataset.index);
       const img = currentFilteredImages[idx];
@@ -1092,7 +1093,7 @@ document.body.appendChild(container);
   });
   
   document.getElementById('deselect-all-btn').addEventListener('click', () => {
-    const checkboxes = document.querySelectorAll('#image-list input[type="checkbox"]');
+    const checkboxes = imageList.querySelectorAll('input[type="checkbox"]');
     checkboxes.forEach(cb => cb.checked = false);
   });
   
@@ -1163,7 +1164,7 @@ document.body.appendChild(container);
   document.getElementById('save-selected-btn').addEventListener('click', async () => {
     const saveBtn = document.getElementById('save-selected-btn');
     const selectedImages = [];
-    const checkboxes = document.querySelectorAll('#image-list input[type="checkbox"]:checked');
+    const checkboxes = imageList.querySelectorAll('input[type="checkbox"]:checked');
     
     checkboxes.forEach(cb => {
       try {
