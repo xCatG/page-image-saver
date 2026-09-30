@@ -257,11 +257,12 @@
   async function exportProductCapture(payload, io) {
     const encode = value => new TextEncoder().encode(value);
     const identityHash = await captureSha256(encode(JSON.stringify(captureIdentityKey(payload.identity)) + '\n'));
-    const attempt = io.attemptId || globalThis.crypto.randomUUID();
-    if (!/^[a-zA-Z0-9_-]+$/.test(attempt)) throw new Error('unsafe capture attempt ID');
+    const attempt = io.attemptId || Array.from(globalThis.crypto.getRandomValues(new Uint8Array(8)),
+      byte => byte.toString(16).padStart(2, '0')).join('');
+    if (!/^[a-f0-9]{16}$/.test(attempt)) throw new Error('unsafe capture attempt ID');
     const domain = payload.identity.domain;
     if (!/^[a-z0-9.-]+$/.test(domain)) throw new Error('unsafe capture domain');
-    const base = `PageImageSaver/captures/${domain}/${identityHash}/${attempt}`;
+    const base = `PageImageSaver/captures/${identityHash.slice(0, 32)}/${attempt}`;
     const html = encode(payload.html);
     const jsonld = encode(JSON.stringify(payload.jsonld));
     const htmlRef = {path: 'page.html', sha256: await captureSha256(html), bytes: html.byteLength};
@@ -275,7 +276,7 @@
       if (!bytes.byteLength || bytes.byteLength > 100 * 1024 * 1024) throw new Error('invalid image byte count');
       const digest = await captureSha256(bytes);
       const extension = captureImageExtension(bytes, fetched.contentType);
-      const path = `images/${index}-${digest}.${extension}`;
+      const path = `images/${index}.${extension}`;
       await io.saveBytes(`${base}/${path}`, bytes);
       images.push({path, sha256: digest, bytes: bytes.byteLength,
         original_url: requested.original_url, fetched_url: fetched.fetched_url || requested.fetched_url});
@@ -401,7 +402,8 @@
           }
           const digest = await captureSha256(bytes);
           await request('/v1/evidence', 'PUT', bytes, {
-            'X-Capture-Path': filename, 'X-Content-SHA256': digest});
+            'X-Capture-Path': filename, 'X-Capture-Domain': payload.identity.domain,
+            'X-Content-SHA256': digest});
         }
       });
       return {storage: 'receiver', status: publication.status, captured_at: publication.captured_at};
