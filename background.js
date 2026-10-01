@@ -169,6 +169,12 @@ chrome.runtime.onStartup.addListener(() => {
     if (run?.status === 'running') return tickAfterSettingsReady();
   }).catch(console.error);
 });
+let takeoverControlTail = Promise.resolve();
+function queueTakeoverControl(action) {
+  const result = takeoverControlTail.then(action);
+  takeoverControlTail = result.then(() => {}, () => {});
+  return result;
+}
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'autoCaptureAllowed') {
     assertAutoCaptureAllowed(sender)
@@ -178,13 +184,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (!['takeoverPreview', 'takeoverStart', 'takeoverPause', 'takeoverStop',
     'takeoverResume', 'takeoverStatus', 'takeoverExport'].includes(message.action)) return false;
-  (async () => {
+  const handle = async () => {
     if (message.action === 'takeoverPreview') {
       if (!sender.tab || new URL(sender.tab.url).hostname !== message.config?.domain)
         throw new Error('preview must come from the configured site tab');
       return takeoverRunner.preview(message.config, message.page);
     }
     if (message.action === 'takeoverStatus') return takeoverRunner.read();
+    if (message.domain) {
+      const run = await takeoverRunner.read();
+      if (run && run.domain !== message.domain)
+        throw new Error(`saved catalog run belongs to ${run.domain}`);
+    }
     if (message.action === 'takeoverExport') {
       const run = await takeoverRunner.read();
       const report = globalThis.PageImageSaverTakeover.exportTakeoverReport(run);
@@ -210,7 +221,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const run = await takeoverRunner.start();
     void tickAfterSettingsReady().catch(console.error);
     return run;
-  })().then(run => sendResponse({success: true, run, summary: globalThis.PageImageSaverTakeover.summarizeTakeover(run)}))
+  };
+  // The host check and the runner's read/write must be one ordered transition.
+  const request = message.action === 'takeoverStatus' ? handle() : queueTakeoverControl(handle);
+  request.then(run => sendResponse({success: true, run, summary: globalThis.PageImageSaverTakeover.summarizeTakeover(run)}))
     .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
   return true;
 });

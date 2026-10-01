@@ -16,6 +16,7 @@ function bridge() {
   const tab = {id: 7, status: 'loading', url: black};
   const stored = {catalogTakeoverRun: {domain: 'shop.example.test', status: 'running', generation: 2,
     current: {phase: 'product', url: black}}, catalogTakeoverTabId: 7};
+  const controls = {beforeStop: null};
   let io;
   const event = listeners => ({addListener(fn) { listeners.push(fn); },
     removeListener(fn) { const index = listeners.indexOf(fn); if (index >= 0) listeners.splice(index, 1); }});
@@ -49,7 +50,15 @@ function bridge() {
     setTimeout() { return 1; }, clearTimeout() {},
     PageImageSaverTakeover: {createTakeoverRunner(value) {
       io = value;
-      return {tick: async () => {}, read: async () => stored.catalogTakeoverRun};
+      return {tick: async () => {}, read: async () => stored.catalogTakeoverRun,
+        preview: async config => {
+          stored.catalogTakeoverRun = {domain: config.domain, status: 'preview', generation: 3};
+          return stored.catalogTakeoverRun;
+        },
+        stop: async () => {
+          await controls.beforeStop?.();
+          stored.catalogTakeoverRun.status = 'stopped'; return stored.catalogTakeoverRun;
+        }};
     }, summarizeTakeover() { return {}; }},
     PageImageSaverHelpers: {}};
   sandbox.globalThis = sandbox;
@@ -59,7 +68,7 @@ function bridge() {
     .replace("import './takeover_runner.js';", '');
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, {filename: 'background.js'});
-  return {io, tab, stored, chrome, messages, webCompleted, webHeaders, tabUpdated,
+  return {io, tab, stored, controls, chrome, messages, webCompleted, webHeaders, tabUpdated,
     runtimeMessages, sandbox};
 }
 
@@ -83,9 +92,9 @@ function captureBridge() {
     return {storage: 'receiver', status: 'published'};
   };
   vm.runInContext(captureSource, b.sandbox, {filename: 'background-capture.js'});
-  const dispatch = (message, tabId = 7) => new Promise(resolve => {
+  const dispatch = (message, tabId = 7, tabUrl = black) => new Promise(resolve => {
     for (const listener of b.runtimeMessages) {
-      if (listener(message, {tab: {id: tabId, url: black}, url: black}, resolve) === true) return;
+      if (listener(message, {tab: {id: tabId, url: tabUrl}, url: tabUrl}, resolve) === true) return;
     }
     resolve(null);
   });
@@ -105,6 +114,42 @@ test('owned runner tab blocks page-load capture after pause, challenge, or stop'
     assert.deepEqual(b.acquisitions, []);
     assert.deepEqual(b.imageRequests, []);
   }
+});
+
+test('catalog action from another host cannot stop the saved run', async () => {
+  const b = captureBridge();
+  const foreign = await b.dispatch({action: 'takeoverStop', domain: 'other.example.test'});
+  assert.equal(foreign.success, false);
+  assert.match(foreign.error, /saved catalog run belongs to shop\.example\.test/);
+  assert.equal(b.stored.catalogTakeoverRun.status, 'running');
+  const owner = await b.dispatch({action: 'takeoverStop', domain: 'shop.example.test'});
+  assert.equal(owner.success, true);
+  assert.equal(b.stored.catalogTakeoverRun.status, 'stopped');
+});
+
+test('old-site stop cannot overwrite a new-site preview during an async control action', async () => {
+  const b = captureBridge();
+  b.stored.catalogTakeoverRun.status = 'preview';
+  let enteredStop;
+  const stopEntered = new Promise(resolve => { enteredStop = resolve; });
+  let releaseStop;
+  b.controls.beforeStop = async () => {
+    enteredStop();
+    await new Promise(resolve => { releaseStop = resolve; });
+  };
+  const stopping = b.dispatch({action: 'takeoverStop', domain: 'shop.example.test'});
+  await stopEntered;
+  const otherUrl = 'https://other.example.test/product';
+  const previewing = b.dispatch({action: 'takeoverPreview',
+    config: {domain: 'other.example.test'}, page: {kind: 'product', url: otherUrl}}, 8, otherUrl);
+  await new Promise(resolve => setImmediate(resolve));
+  releaseStop();
+  const [stopResult, previewResult] = await Promise.all([stopping, previewing]);
+  assert.equal(stopResult.success, true);
+  assert.equal(stopResult.run.domain, 'shop.example.test');
+  assert.equal(previewResult.success, true);
+  assert.equal(b.stored.catalogTakeoverRun.domain, 'other.example.test');
+  assert.equal(b.stored.catalogTakeoverRun.status, 'preview');
 });
 
 test('late pause is rechecked when automatic image acquisition begins', async () => {
