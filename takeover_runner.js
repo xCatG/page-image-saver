@@ -40,10 +40,13 @@
       exportedUnverified: products.filter(item => item.status === 'failed' && item.reason === 'exported_unverified').length};
   }
 
-  function exportTakeoverReport(run) {
+  function exportTakeoverReport(run, context = {}) {
     if (!run || run.version !== KEY_VERSION) throw new Error('no saved catalog run to export');
     if (run.mode === 'discovery') return {
       schema_version: 1, format: 'page-image-saver-discovery/v1', mode: 'discovery',
+      started_utc: run.startedAt || null,
+      exported_utc: context.exportedUtc || null,
+      extension_version: context.extensionVersion || null,
       site: run.domain, locale: run.locale || null,
       selectors: {productLinkSelector: run.config.listing.productLinkSelector,
         nextSelector: run.config.listing.pagination.nextSelector,

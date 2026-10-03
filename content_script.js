@@ -2450,7 +2450,7 @@ function captureGallery(config, mode) {
     const selector = config?.product?.allImagesSelector || config?.allImagesSelector || config?.product?.imageSelector;
     if (!selector) throw new Error('No product image selector in this site config');
     urls = Array.from(document.querySelectorAll(selector), node => config?.product?.lazyLoad ?
-      node.currentSrc || node.getAttribute('src') :
+      node.getAttribute('src') || node.currentSrc :
       node.getAttribute('data-src') || node.currentSrc || node.getAttribute('src') || node.getAttribute('href'));
   } else {
     const checked = document.querySelectorAll('#image-selector-container input[type="checkbox"]:checked');

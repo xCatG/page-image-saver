@@ -24,6 +24,9 @@ statuses include `preview`, `running`, `paused`, `stopped`, and `discovery_incom
   "schema_version": 1,
   "format": "page-image-saver-discovery/v1",
   "mode": "discovery",
+  "started_utc": "2026-10-03T18:00:00.000Z",
+  "exported_utc": "2026-10-03T18:05:00.000Z",
+  "extension_version": "1.0",
   "site": "us.chantelle.com",
   "locale": "en-US",
   "selectors": {
@@ -46,6 +49,10 @@ statuses include `preview`, `running`, `paused`, `stopped`, and `discovery_incom
 
 - `site` is the configured hostname. `locale` is the preview page's observed HTML `lang`,
   or null; it is language evidence, not proof of market, currency or shipping destination.
+- `started_utc` is the saved run start time, or null for an unstarted preview.
+  `exported_utc` records this export's UTC time; `extension_version` comes from the installed
+  extension manifest. The background export handler supplies both to the report builder;
+  direct callers that omit export context receive null values instead of invented provenance.
 - `listings` contains successfully inspected, accepted listing pages. `url` is the queued
   URL and `final_url` the inspected page URL. Unexpected redirects retain the existing
   stop behavior, with the reason recorded rather than accepting redirected page evidence.
@@ -70,10 +77,14 @@ to eight seconds and reports the ready/total shortfall instead of accepting a pa
 gallery. Scroll position is restored. Non-lazy configurations and the ordinary toolbar
 retain their existing behavior. No mouse events are synthesized.
 Selected image URLs and their panel checkbox mapping survive capture-triggered rescans;
-lazy site capture uses the actual source that passed readiness instead of stale `data-src`.
+Lazy site capture uses the same stable `src` attribute preferred by readiness, falling back
+to `currentSrc` only when `src` is absent/empty. This avoids viewport-dependent srcset URLs
+and preserves the configured `/w=1024` to `/w=2048` high-resolution transform. Stale `data-src`
+does not override this source.
 
 Offline Chromium fixtures cover IntersectionObserver-only loading and installed extension
 listing discovery. **Live Chantelle validation in the user's Windows Chrome is still
-unverified**: compare configured image counts, matching source URLs and blur state before
+unverified**: log `src` versus `currentSrc` for a few gallery images, and compare configured
+image counts, matching source URLs and blur state before
 and after scrolling/capture on a real PDP, and verify listing selectors/end evidence on a
 real listing. The live prerequisite was explicitly deferred by the user.

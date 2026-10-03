@@ -101,6 +101,29 @@ function captureBridge() {
   return {...b, acquisitions, imageRequests, dispatch};
 }
 
+test('background discovery export records actual export time and manifest version in downloaded JSON', async () => {
+  const b = captureBridge();
+  b.stored.catalogTakeoverRun = {version: 1, mode: 'discovery', domain: 'shop.example.test',
+    status: 'stopped', startedAt: '2026-10-01T10:20:30.000Z', products: [],
+    config: {listing: {productLinkSelector: 'a.card', pagination: {nextSelector: 'a.next'}}},
+    listings: {visited: []}, reason: 'stopped by user'};
+  b.sandbox.PageImageSaverTakeover.exportTakeoverReport = require('../takeover_runner.js').exportTakeoverReport;
+  b.chrome.runtime.getManifest = () => ({version: '7.8.9'});
+  b.sandbox.Blob = Blob;
+  b.sandbox.blobToDataUrl = async blob => 'data:application/json,' + encodeURIComponent(await blob.text());
+  let downloaded;
+  b.sandbox.PageImageSaverHelpers.saveCaptureDownload = async (_chrome, url) => {
+    downloaded = JSON.parse(decodeURIComponent(url.split(',')[1]));
+  };
+  const before = Date.now();
+  const reply = await b.dispatch({action: 'takeoverExport', domain: 'shop.example.test'});
+  assert.equal(reply.success, true, reply.error);
+  assert.equal(downloaded.started_utc, '2026-10-01T10:20:30.000Z');
+  assert.equal(downloaded.extension_version, '7.8.9');
+  assert.ok(Date.parse(downloaded.exported_utc) >= before);
+  assert.ok(Date.parse(downloaded.exported_utc) <= Date.now());
+});
+
 test('owned runner tab blocks page-load capture after pause, challenge, or stop', async () => {
   for (const status of ['paused', 'stopped']) {
     const b = captureBridge();

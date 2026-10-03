@@ -198,7 +198,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.action === 'takeoverExport') {
       const run = await takeoverRunner.read();
-      const report = globalThis.PageImageSaverTakeover.exportTakeoverReport(run);
+      const report = globalThis.PageImageSaverTakeover.exportTakeoverReport(run, {
+        exportedUtc: new Date().toISOString(), extensionVersion: chrome.runtime.getManifest().version
+      });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `PageImageSaver/catalog-runs/${run.domain}/${stamp}-run.json`;
       const dataUrl = await blobToDataUrl(new Blob([JSON.stringify(report, null, 2)],

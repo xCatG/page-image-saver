@@ -32,6 +32,7 @@ class LazyGalleryTest(unittest.TestCase):
               entry.target.parentElement.classList.remove('frame--blurring');
             }
           }));
+          window.fixtureObserver = observer;
           document.querySelectorAll('img').forEach(img => observer.observe(img));
         }''')
         return page
@@ -142,6 +143,35 @@ class LazyGalleryTest(unittest.TestCase):
               catch (error) { return {captured: error.message, displayed: captureGallery(config, 'selected')}; }
             }''')
             self.assertEqual(result, {'captured': 'https://example.test/chosen', 'displayed': ['https://example.test/chosen']})
+        finally:
+            page.close()
+
+    def test_stable_src_wins_over_responsive_candidate_for_readiness_and_high_res(self):
+        page = self.fixture()
+        source = (ROOT / 'content_script.js').read_text()
+        page.add_script_tag(content=source[source.index('function captureGallery('):source.index('function captureSwatchColor(')])
+        page.route('https://imagedelivery.net/**', lambda route: route.fulfill(
+            content_type='image/svg+xml', body='<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'))
+        try:
+            page.evaluate('''() => {
+              fixtureObserver.disconnect();
+              document.querySelectorAll('img').forEach((img, i) => {
+                img.src = 'https://imagedelivery.net/stable/' + i + '/w=1024';
+                img.srcset = 'https://imagedelivery.net/responsive/' + i + '/w=640 1x';
+                img.parentElement.classList.remove('frame--blurring');
+              });
+              config.product.imageUrlPattern = '/w=1024$';
+            }''')
+            page.wait_for_function("[...document.images].every(img => img.currentSrc.endsWith('/w=640'))")
+            result = page.evaluate('''async () => {
+              try {
+                await PageImageSaverHelpers.prepareLazyGallery(config, document, {timeoutMs:250, pollMs:20});
+                return captureGallery(config, 'site').map(url => PageImageSaverHelpers.captureImageUrls(
+                  url, {find:'/w=1024', replace:'/w=2048'}));
+              } catch (error) { return error.message; }
+            }''')
+            self.assertEqual(result, [{'original_url': f'https://imagedelivery.net/stable/{i}/w=1024',
+                                       'fetched_url': f'https://imagedelivery.net/stable/{i}/w=2048'} for i in range(4)])
         finally:
             page.close()
 

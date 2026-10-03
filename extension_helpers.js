@@ -559,7 +559,7 @@
     const view = doc.defaultView;
     const position = [view.scrollX, view.scrollY];
     let images = [], ready = [];
-    const isReady = img => pattern.test(img.currentSrc || img.getAttribute('src') || '') &&
+    const isReady = img => pattern.test(img.getAttribute('src') || img.currentSrc || '') &&
       !img.closest('[class*="--blurring"]');
     try {
       do {

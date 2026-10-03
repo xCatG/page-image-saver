@@ -115,6 +115,23 @@ test('discovery rejects product previews and does not inherit capture previews',
   assert.equal(r.memory.run.previews.length, 1);
 });
 
+test('discovery export carries supplied provenance and an unstarted preview has no invented start', async () => {
+  const r = rig({});
+  await r.runner().preview(site, listing1, 'discovery');
+  const context = {exportedUtc: '2026-10-03T19:00:00.000Z', extensionVersion: '2.3.4'};
+  const preview = exportTakeoverReport(r.memory.run, context);
+  assert.equal(preview.started_utc, null);
+  assert.equal(preview.exported_utc, '2026-10-03T19:00:00.000Z');
+  assert.equal(preview.extension_version, '2.3.4');
+  await r.runner().start();
+  const started = exportTakeoverReport(r.memory.run, context);
+  assert.equal(started.started_utc, '1970-01-01T00:01:40.000Z');
+  const capture = exportTakeoverReport({...r.memory.run, mode: 'capture'}, context);
+  assert.equal(capture.format, 'page-image-saver-takeover-run/v1');
+  assert.equal(capture.started_utc, undefined);
+  assert.equal(capture.extension_version, undefined);
+});
+
 test('preview stores observations but only explicit take over starts navigation', async () => {
   const r = rig({[first]: listing1});
   await r.runner().preview(site, listing1);
