@@ -69,6 +69,52 @@ async function prepare(r, config = site, listing = listing1) {
   await r.runner().preview(config, listing);
 }
 
+test('discovery requires only a listing preview, never visits PDPs, and exports listing evidence', async () => {
+  const r = rig({[first]: {...listing1, cards: [{url: bra, card_text: 'Lace Bra $42'}]}, [second]: listing2});
+  await r.runner().preview({...site, colorVariantStrategy: undefined}, {...listing1, locale: 'en-US'}, 'discovery');
+  await r.runner().start();
+  for (let i = 0; i < 4; i++) { await r.runner().tick(); r.advance(10000); }
+  assert.deepEqual(r.visits, [first, second]);
+  assert.equal(r.captureCalls.length, 0);
+  const report = exportTakeoverReport(r.memory.run);
+  assert.equal(report.mode, 'discovery');
+  assert.equal(report.locale, 'en-US');
+  assert.equal(report.status, 'complete');
+  assert.deepEqual(report.totals, {listing_pages: 2, product_urls: 3});
+  assert.deepEqual(report.listings[0].products, [{url: bra, card_text: 'Lace Bra $42'}, {url: sleep, card_text: ''}]);
+  assert.equal(report.listings[0].final_url, first);
+  assert.equal(report.listings[0].next_url, second);
+  assert.deepEqual(report.listings[1].end_check, {observed: listing2.end, passed: true});
+  assert.equal(report.site, site.domain);
+  assert.equal(report.config, undefined);
+  assert.equal(report.products, undefined);
+});
+
+test('discovery without positive end evidence finishes with gaps and can pause/resume', async () => {
+  const listing = {...listing1, next: null, end: null};
+  const r = rig({[first]: listing});
+  await r.runner().preview({...site, listing: {...site.listing, endCheck: null}}, listing, 'discovery');
+  await r.runner().start();
+  await r.runner().pause();
+  await r.runner().tick();
+  assert.deepEqual(r.visits, []);
+  await r.runner().resume();
+  await r.runner().tick(); r.advance(10000); await r.runner().tick();
+  const report = exportTakeoverReport(r.memory.run);
+  assert.equal(report.status, 'finished_with_gaps');
+  assert.match(report.stop_reason, /without passing end check/);
+  assert.equal(report.listings[0].end_check.passed, false);
+  assert.equal(r.captureCalls.length, 0);
+});
+
+test('discovery rejects product previews and does not inherit capture previews', async () => {
+  const r = rig({});
+  await prepare(r);
+  await assert.rejects(r.runner().preview(site, braPage, 'discovery'), /listing/);
+  await r.runner().preview(site, listing1, 'discovery');
+  assert.equal(r.memory.run.previews.length, 1);
+});
+
 test('preview stores observations but only explicit take over starts navigation', async () => {
   const r = rig({[first]: listing1});
   await r.runner().preview(site, listing1);

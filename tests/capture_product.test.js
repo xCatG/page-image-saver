@@ -5,6 +5,16 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const helpers = require('../extension_helpers.js');
 
+test('auto readiness prepares a recognized lazy product before the old gallery timeout', async () => {
+  let prepared = false;
+  const ready = await helpers.waitForAutoCaptureReady(() => ({productSeen: true, gallery: []}), {
+    timeoutMs: 0, delay: async () => {},
+    prepare: async () => { prepared = true; }
+  });
+  assert.equal(ready, true);
+  assert.equal(prepared, true);
+});
+
 test('JSON-LD product extraction keeps recorded color, price, and currency', () => {
   const value = helpers.captureProductFromJsonLd([
     JSON.stringify({'@graph': [{'@type': 'BreadcrumbList'}, {'@type': 'Product', name: 'Fixture bra',

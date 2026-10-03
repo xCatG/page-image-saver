@@ -228,6 +228,10 @@
     while (now() - start <= timeout) {
       const evidence = readEvidence();
       productSeen ||= evidence.productSeen === true;
+      if (evidence.productSeen === true && options.prepare) {
+        await options.prepare();
+        return true;
+      }
       if (evidence.productSeen === true && Array.isArray(evidence.gallery) && evidence.gallery.length > 0) return true;
       await delay(poll);
     }
@@ -546,7 +550,39 @@
     };
   }
 
+  async function prepareLazyGallery(config, doc, options = {}) {
+    if (!config?.product?.lazyLoad) return;
+    const selector = config.product.allImagesSelector || config.allImagesSelector;
+    const pattern = new RegExp(config.product.imageUrlPattern || config.imageUrlPattern || '.');
+    const deadline = Date.now() + (options.timeoutMs ?? 8000);
+    const pollMs = options.pollMs ?? 100;
+    const view = doc.defaultView;
+    const position = [view.scrollX, view.scrollY];
+    let images = [], ready = [];
+    const isReady = img => pattern.test(img.currentSrc || img.getAttribute('src') || '') &&
+      !img.closest('[class*="--blurring"]');
+    try {
+      do {
+        images = Array.from(doc.querySelectorAll(selector));
+        for (const img of images) {
+          if (isReady(img)) continue;
+          img.scrollIntoView({block: 'center', behavior: 'instant'});
+          await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, Math.max(0, deadline - Date.now()))));
+          if (Date.now() >= deadline) break;
+        }
+        images = Array.from(doc.querySelectorAll(selector));
+        ready = images.filter(isReady);
+        if (images.length && ready.length === images.length) return;
+        await new Promise(resolve => setTimeout(resolve, pollMs));
+      } while (Date.now() < deadline);
+      throw new Error(`Lazy gallery shortfall: ${ready.length}/${images.length} configured images ready (URL pattern and blur check)`);
+    } finally {
+      view.scrollTo({left: position[0], top: position[1], behavior: 'instant'});
+    }
+  }
+
   const helpers = {
+    prepareLazyGallery,
     captureProductFromJsonLd,
     captureProductEvidence,
     captureIdentity,

@@ -42,6 +42,18 @@
 
   function exportTakeoverReport(run) {
     if (!run || run.version !== KEY_VERSION) throw new Error('no saved catalog run to export');
+    if (run.mode === 'discovery') return {
+      schema_version: 1, format: 'page-image-saver-discovery/v1', mode: 'discovery',
+      site: run.domain, locale: run.locale || null,
+      selectors: {productLinkSelector: run.config.listing.productLinkSelector,
+        nextSelector: run.config.listing.pagination.nextSelector,
+        endCheck: run.config.listing.endCheck || null},
+      listings: run.listings.visited.map(row => ({url: row.url, final_url: row.final_url,
+        products: row.products, next_url: row.next_url,
+        end_check: {observed: row.end, passed: row.endPassed}})),
+      totals: {listing_pages: run.listings.visited.length, product_urls: run.products.length},
+      status: run.status, stop_reason: run.reason || null
+    };
     return {...run, schema_version: 1, format: 'page-image-saver-takeover-run/v1',
       accounting: summarizeTakeover(run)};
   }
@@ -65,29 +77,33 @@
     const verifiedHere = new Set();
     async function save(run) { await io.save(run); return run; }
     async function read() { return io.read(); }
-    async function preview(config, page) {
+    async function preview(config, page, mode = 'capture') {
+      if (!['capture', 'discovery'].includes(mode)) throw new Error('unknown catalog mode');
       if (!config?.domain || !config.listing?.productLinkSelector || !config.listing?.pagination?.nextSelector)
         throw new Error('site needs explicit listing selectors');
-      if (config.colorVariantStrategy !== 'separate-url')
+      if (mode === 'capture' && config.colorVariantStrategy !== 'separate-url')
         throw new Error('take-over currently requires separate-URL color identity');
       if (page?.kind !== 'listing' && page?.kind !== 'product') throw new Error('preview needs a listing or product page');
+      if (mode === 'discovery' && page.kind !== 'listing') throw new Error('discovery preview needs a listing page');
       const existing = await read();
       if (['running', 'paused'].includes(existing?.status))
         throw new Error('stop or finish the current run before previewing a new one');
       const domain = config.domain.toLowerCase();
       const url = canonical(page.url, domain);
-      const previews = existing?.status === 'preview' && existing.domain === domain ? existing.previews : [];
+      const samePreview = existing?.status === 'preview' && existing.domain === domain &&
+        (existing.mode || 'capture') === mode;
+      const previews = samePreview ? existing.previews : [];
       const entry = {url, kind: page.kind, products: page.kind === 'listing' ? page.products.length : undefined,
         next: page.next || null, end: page.end || null, product: page.product || null,
         imageCount: page.kind === 'product' ? page.imageCount : undefined,
         colorLinks: page.kind === 'product' ? (page.colorLinks || []).length : undefined,
         scope: page.kind === 'product' ? classifyTakeoverScope(page.product) : undefined};
       const run = {version: KEY_VERSION, generation: (existing?.generation || 0) + 1,
-        status: 'preview', domain, config, previews: [...previews.filter(x => x.url !== url), entry],
+        status: 'preview', domain, mode, locale: page.locale || null, config, previews: [...previews.filter(x => x.url !== url), entry],
         preview: {endCheckConfigured: !!config.listing.endCheck,
           receiverRequired: 'Verified skip and catalog completion require a configured reachable local receiver.'},
         seedUrl: page.kind === 'listing' ? url :
-          existing?.status === 'preview' && existing.domain === domain ? existing.seedUrl : null,
+          samePreview ? existing.seedUrl : null,
         listings: {queue: [], visited: [], discoveryComplete: false}, products: [],
         current: null, lastNavigationStarted: null, loadFailures: {}, reason: null};
       return save(run);
@@ -95,7 +111,7 @@
     async function start() {
       const run = await read();
       if (!run || run.status !== 'preview' || !run.seedUrl) throw new Error('preview a listing before Take over');
-      if (!run.previews.some(page => page.kind === 'product' && page.imageCount > 0))
+      if (run.mode !== 'discovery' && !run.previews.some(page => page.kind === 'product' && page.imageCount > 0))
         throw new Error('preview a product page with gallery images before Take over');
       run.status = 'running';
       run.listings.queue = [run.seedUrl];
@@ -174,7 +190,7 @@
         await io.alarm(due); return run;
       }
       const listingUrl = run.listings.queue[0];
-      const item = !listingUrl ? run.products.find(row => row.status === 'pending') : null;
+      const item = !listingUrl && run.mode !== 'discovery' ? run.products.find(row => row.status === 'pending') : null;
       if (!listingUrl && !item) {
         run.status = run.listings.discoveryComplete && !run.products.some(row => row.status === 'failed') ?
           'complete' : 'finished_with_gaps';
@@ -246,14 +262,26 @@
         if (run.listings.visited.length >= MAX_LISTINGS || run.products.length + found.length > MAX_PRODUCTS)
           return interrupt(run, 'discovery_incomplete', 'catalog safety bound reached');
         run.listings.queue.shift();
-        run.listings.visited.push({url, found: found.length, end: page.end || null});
+        const listing = {url, found: found.length, end: page.end || null};
+        if (run.mode === 'discovery') Object.assign(listing, {
+          final_url: page.url, next_url: page.next || null, endPassed: false,
+          products: found.map(productUrl => ({url: productUrl,
+            card_text: (page.cards || []).find(card => {
+              try { return canonical(card.url, run.domain) === productUrl; } catch (_) { return false; }
+            })?.card_text || ''}))
+        });
+        run.listings.visited.push(listing);
         const known = new Set(run.products.map(row => row.url));
         for (const productUrl of found) if (!known.has(productUrl)) {
-          run.products.push({url: productUrl, status: 'pending'}); known.add(productUrl);
+          run.products.push({url: productUrl, status: run.mode === 'discovery' ? 'discovered' : 'pending'}); known.add(productUrl);
         }
         let next = null;
         try { if (page.next) next = canonical(page.next, run.domain); }
         catch (_) { return interrupt(run, 'discovery_incomplete', `invalid next page at ${url}`); }
+        if (run.mode === 'discovery') {
+          listing.next_url = next;
+          listing.endPassed = !next && endCheckPasses(run.config, page, run.listings.visited, run.products.length);
+        }
         if (next) {
           if (run.listings.visited.some(row => row.url === next) || run.listings.queue.includes(next))
             return interrupt(run, 'discovery_incomplete', `pagination cycle at ${url}`);

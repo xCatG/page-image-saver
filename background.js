@@ -134,7 +134,7 @@ const takeoverIo = {
     if (completed.url && new URL(completed.url).hostname !== run.domain)
       return {status: 0, error: 'redirected outside configured site'};
     if ([404, 410].includes(status)) return {status};
-    const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect'});
+    const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect', mode: run.mode || 'capture'});
     return {...reply.page, tabId: tab.id, status};
   },
   capture: async (url, scope, binding) => {
@@ -188,7 +188,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'takeoverPreview') {
       if (!sender.tab || new URL(sender.tab.url).hostname !== message.config?.domain)
         throw new Error('preview must come from the configured site tab');
-      return takeoverRunner.preview(message.config, message.page);
+      return takeoverRunner.preview(message.config, message.page, message.mode);
     }
     if (message.action === 'takeoverStatus') return takeoverRunner.read();
     if (message.domain) {
@@ -215,7 +215,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return run;
     }
     await requireSettingsReady();
-    if (CONFIG.receiver?.enabled !== true) {
+    const preview = await takeoverRunner.read();
+    if (message.mode && message.mode !== (preview?.mode || 'capture'))
+      throw new Error('Please preview the selected mode before Take over.');
+    if (preview?.mode !== 'discovery' && CONFIG.receiver?.enabled !== true) {
       throw new Error('Configure the local receiver before Take over; verified skips require it.');
     }
     const run = await takeoverRunner.start();

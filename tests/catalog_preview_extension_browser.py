@@ -56,6 +56,11 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
             route.fulfill(status=200, content_type="text/html", body=LISE_HTML)
         elif url.startswith("https://unknown.example.test/"):
             route.fulfill(status=200, content_type="text/html", body="<html><body>Unknown site</body></html>")
+        elif url.startswith("https://us.chantelle.com/list"):
+            route.fulfill(status=200, content_type="text/html", body='''<html lang="en-US"><body>
+              <article class="product-card"><a class="product-card__link" href="/product/bra-black">Lace Bra</a> <span>$42</span></article>
+              <article class="product-card"><a class="product-card__link" href="/product/brief-black">Brief</a> <span>$18</span></article>
+              </body></html>''')
         else:
             route.fulfill(status=404, body="")
 
@@ -63,7 +68,13 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
         self.page.goto(url, wait_until="domcontentloaded")
         self.worker.evaluate("""async url => {
           const [tab] = await chrome.tabs.query({url});
-          return chrome.tabs.sendMessage(tab.id, {action: 'findImages'});
+          for (let attempt = 0; attempt < 30; attempt++) {
+            try { return await chrome.tabs.sendMessage(tab.id, {action: 'findImages'}); }
+            catch (error) {
+              if (!String(error).includes('Receiving end does not exist') || attempt === 29) throw error;
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+          }
         }""", url)
         self.page.locator("#catalog-capture-section").wait_for(timeout=5000)
         self.page.locator("#catalog-capture-section summary").click()
@@ -85,6 +96,55 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
         self.assertNotIn(EMPREINTE_URL, progress.inner_text())
         self.assertEqual(self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun.domain)"),
                          "www.lisecharmel.com")
+
+    def test_listing_discovery_uses_real_background_without_receiver_or_pdp(self):
+        # Extension-created tabs can race Playwright's initial request routing.
+        # Route an existing owned tab before the real runner navigates it.
+        runner_page = self.context.new_page()
+        runner_page.route('**/*', self.route_fixture)
+        runner_page.goto('https://us.chantelle.com/list-runner')
+        self.worker.evaluate('''async () => {
+          const [tab] = await chrome.tabs.query({url: 'https://us.chantelle.com/list-runner'});
+          await chrome.storage.local.set({catalogTakeoverTabId: tab.id});
+        }''')
+        try:
+            self.open_panel('https://us.chantelle.com/list')
+            self.assertEqual(self.page.locator('#takeover-mode').count(), 1)
+            self.page.locator('#takeover-mode').select_option('discovery')
+            self.page.locator('#takeover-preview-btn').click()
+            self.page.wait_for_function("document.querySelector('#takeover-feedback').textContent.includes('Preview ready')")
+            run = self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun)")
+            self.assertEqual(run['mode'], 'discovery')
+            self.page.locator('#takeover-mode').select_option('capture')
+            self.page.locator('#takeover-start-btn').click()
+            self.page.wait_for_timeout(200)
+            self.assertIn('preview the selected mode', self.page.locator('#status-message').inner_text())
+            self.page.locator('#takeover-mode').select_option('discovery')
+            self.worker.evaluate('''async () => {
+              const {catalogTakeoverRun: run} = await chrome.storage.local.get('catalogTakeoverRun');
+              run.config.takeover = {intervalMs: 0};
+              await chrome.storage.local.set({catalogTakeoverRun: run});
+            }''')
+            self.page.locator('#takeover-start-btn').click()
+            for _ in range(100):
+                run = self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun)")
+                if run['status'] in ['finished_with_gaps', 'complete', 'paused']:
+                    break
+                self.page.wait_for_timeout(100)
+            self.assertEqual(len(run['listings']['visited']), 1, run)
+            report = self.worker.evaluate('''async () => PageImageSaverTakeover.exportTakeoverReport(
+              (await chrome.storage.local.get('catalogTakeoverRun')).catalogTakeoverRun)''')
+            self.assertEqual(report['format'], 'page-image-saver-discovery/v1')
+            self.assertEqual(report['status'], 'finished_with_gaps')
+            self.assertEqual(report['totals'], {'listing_pages': 1, 'product_urls': 2})
+            self.assertEqual(report['locale'], 'en-US')
+            self.assertEqual(report['listings'][0]['products'][0]['card_text'], 'Lace Bra $42')
+            owned = self.worker.evaluate("chrome.storage.local.get('catalogTakeoverTabId').then(x => chrome.tabs.get(x.catalogTakeoverTabId))")
+            self.assertEqual(owned['url'], 'https://us.chantelle.com/list')
+            self.worker.evaluate('chrome.tabs.remove(' + str(owned['id']) + ')')
+        finally:
+            if not runner_page.is_closed():
+                runner_page.close()
 
     def test_unknown_site_failure_is_visible_and_cannot_control_foreign_run(self):
         self.worker.evaluate("""url => chrome.storage.local.set({catalogTakeoverRun: {
