@@ -183,11 +183,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (!['takeoverPreview', 'takeoverStart', 'takeoverPause', 'takeoverStop',
-    'takeoverResume', 'takeoverStatus', 'takeoverExport'].includes(message.action)) return false;
+    'takeoverResume', 'takeoverStatus', 'takeoverExport', 'takeoverImportDiscovery'].includes(message.action)) return false;
   const handle = async () => {
-    if (message.action === 'takeoverPreview') {
+    if (['takeoverPreview', 'takeoverImportDiscovery'].includes(message.action)) {
       if (!sender.tab || new URL(sender.tab.url).hostname !== message.config?.domain)
         throw new Error('preview must come from the configured site tab');
+      if (message.action === 'takeoverImportDiscovery') {
+        if (message.reuse !== true && !Array.isArray(message.sources)) throw new Error('discovery sources are missing');
+        return takeoverRunner.importDiscovery(message.config, message.reuse === true ? undefined : message.sources);
+      }
       return takeoverRunner.preview(message.config, message.page, message.mode);
     }
     if (message.action === 'takeoverStatus') return takeoverRunner.read();
@@ -220,7 +224,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const preview = await takeoverRunner.read();
     if (message.mode && message.mode !== (preview?.mode || 'capture'))
       throw new Error('Please preview the selected mode before Take over.');
-    if (preview?.mode !== 'discovery' && CONFIG.receiver?.enabled !== true) {
+    if (!['discovery', 'capture-discovery'].includes(preview?.mode) && CONFIG.receiver?.enabled !== true) {
       throw new Error('Configure the local receiver before Take over; verified skips require it.');
     }
     const run = await takeoverRunner.start();
@@ -280,7 +284,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         throw new Error('take-over capture sender or identity mismatch');
       }
       await takeoverOwnedTab(binding);
-      if (CONFIG.receiver?.enabled !== true) throw new Error('take-over receiver is not configured');
+      if (CONFIG.receiver?.enabled !== true && (await takeoverIo.read())?.mode !== 'capture-discovery')
+        throw new Error('take-over receiver is not configured');
     }
     return CONFIG.receiver?.enabled === true
       ? helpers.captureWithReceiver(message.payload, CONFIG.receiver, {

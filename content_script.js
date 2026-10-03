@@ -892,7 +892,10 @@ function createImageSelectionUI(images) {
     </div>
     <details id="catalog-capture-section" style="margin-bottom: 4px; max-height: 35vh; overflow-y: auto; font-size: 12px;">
       <summary style="cursor: pointer; padding: 4px 0; font-weight: bold;">Catalog capture</summary>
-      <label>Run mode <select id="takeover-mode"><option value="capture">Product capture</option><option value="discovery">Listing discovery only</option></select></label>
+      <label>Run mode <select id="takeover-mode"><option value="capture">Product capture</option><option value="discovery">Listing discovery only</option><option value="capture-discovery">Capture discovery queue</option></select></label>
+      <label style="display:block;">Discovery exports <input id="takeover-discovery-files" type="file" multiple accept=".json,application/json" style="width:100%;"></label>
+      <button id="takeover-reuse-discovery-btn" type="button">Reuse current discovery</button>
+      <div id="takeover-start-url" style="overflow-wrap:anywhere;">Start URL: no preview yet</div>
       <div style="display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap;">
         <button id="capture-product-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #6b46a0; color: white; cursor: pointer;">Capture Product Locally</button>
         <button id="takeover-preview-btn" type="button">Preview catalog</button>
@@ -1085,6 +1088,43 @@ document.body.appendChild(container);
   const previewButton = container.querySelector('#takeover-preview-btn');
   const takeoverFeedback = container.querySelector('#takeover-feedback');
   const takeoverProgress = container.querySelector('#takeover-progress');
+  const modeControl = container.querySelector('#takeover-mode');
+  modeControl.addEventListener('change', () => { modeControl.dataset.userChanged = 'true'; });
+  const discoveryFiles = container.querySelector('#takeover-discovery-files');
+  const reuseDiscovery = container.querySelector('#takeover-reuse-discovery-btn');
+  async function prepareDiscoveryCapture(files) {
+    discoveryFiles.disabled = reuseDiscovery.disabled = true;
+    takeoverProgress.dataset.previewPending = 'true';
+    takeoverRefreshSequence++;
+    takeoverFeedback.textContent = 'Preparing discovery capture…';
+    try {
+      const config = await loadCaptureSiteConfig();
+      if (!config) throw new Error('No site config for discovery capture');
+      const sources = [];
+      for (const file of files || []) {
+        const bytes = await file.arrayBuffer();
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+        sources.push({sha256, report: JSON.parse(new TextDecoder().decode(bytes))});
+      }
+      await takeoverRequest('takeoverImportDiscovery', {config, sources, reuse: files === null});
+      modeControl.value = 'capture-discovery';
+      modeControl.dataset.userChanged = 'true';
+      delete takeoverProgress.dataset.previewPending;
+      await refreshTakeoverProgress();
+      takeoverFeedback.textContent = 'Fixed queue ready. Take over starts at the URL shown.';
+    } catch (error) {
+      takeoverFeedback.textContent = `Discovery import failed: ${error.message}`;
+    } finally {
+      delete takeoverProgress.dataset.previewPending;
+      discoveryFiles.disabled = reuseDiscovery.disabled = false;
+      discoveryFiles.value = '';
+    }
+  }
+  discoveryFiles.addEventListener('change', () => {
+    if (discoveryFiles.files.length) void prepareDiscoveryCapture(Array.from(discoveryFiles.files));
+  });
+  reuseDiscovery.addEventListener('click', () => { void prepareDiscoveryCapture(null); });
   previewButton.addEventListener('click', async () => {
     previewButton.disabled = true;
     takeoverProgress.dataset.previewPending = 'true';
@@ -1094,6 +1134,7 @@ document.body.appendChild(container);
       const config = await loadCaptureSiteConfig();
       if (!config) throw new Error('No site config for catalog preview');
       const mode = container.querySelector('#takeover-mode').value;
+      if (mode === 'capture-discovery') throw new Error('Load discovery exports or reuse current discovery to prepare this queue');
       const page = await inspectTakeoverPage(config, mode);
       await takeoverRequest('takeoverPreview', {config, page, mode});
       delete takeoverProgress.dataset.previewPending;
@@ -2585,11 +2626,15 @@ async function refreshTakeoverProgress() {
     if (refreshSequence !== takeoverRefreshSequence || box.dataset.previewPending === 'true') return;
     const currentHost = window.location.hostname.toLowerCase();
     const foreignRun = !!run && run.domain !== currentHost;
+    const startUrl = document.getElementById('takeover-start-url');
+    startUrl.textContent = `Start URL: ${!foreignRun && run?.seedUrl || 'preview a listing or load a discovery queue'}`;
+    const modeControl = document.getElementById('takeover-mode');
+    if (run && !foreignRun && !modeControl.dataset.userChanged) modeControl.value = run.mode || 'capture';
     for (const id of ['takeover-start-btn', 'takeover-pause-btn', 'takeover-resume-btn',
       'takeover-stop-btn', 'takeover-export-btn']) {
       document.getElementById(id).disabled = foreignRun;
     }
-    if (!run) { box.textContent = 'No catalog preview yet. Browse listing and product pages, then preview each page.'; return; }
+    if (!run) { box.textContent = 'Preview a listing or load discovery exports to prepare a run.'; return; }
     if (foreignRun) {
       box.textContent = `Saved catalog ${run.status} belongs to ${run.domain}. This page is ${currentHost}. ` +
         (['running', 'paused'].includes(run.status) ?
@@ -2603,6 +2648,13 @@ async function refreshTakeoverProgress() {
         `${page.scope?.decision || 'review'} (${page.scope?.reason || 'unclassified'})` :
         ` — ${page.products} product links, next ${page.next || 'absent'}, ` +
         `end ${JSON.stringify(page.end || 'unverified')}`));
+    if (run.mode === 'capture-discovery') {
+      box.textContent = `Fixed discovery queue ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n` +
+        `Targets ${summary.productsFound}; captured ${summary.productsCaptured}; skipped ${summary.skipped || 0}; ` +
+        `failed ${summary.failed}; pending ${summary.pending}; exported/unverified ${summary.exportedUnverified}.\n` +
+        'Only these product URLs will be visited. Skips require receiver verification; Downloads are unverified.';
+      return;
+    }
     if (run.mode === 'discovery') {
       box.textContent = `Listing discovery ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n` +
         `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; unique product URLs ${summary.productsFound}.\n` +

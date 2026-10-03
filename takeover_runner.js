@@ -37,6 +37,7 @@
       excluded: products.filter(item => item.status === 'excluded').length,
       failed: products.filter(item => item.status === 'failed').length,
       pending: products.filter(item => item.status === 'pending').length,
+      ...(run?.mode === 'capture-discovery' ? {skipped: products.filter(item => item.status === 'skipped').length} : {}),
       exportedUnverified: products.filter(item => item.status === 'failed' && item.reason === 'exported_unverified').length};
   }
 
@@ -93,31 +94,77 @@
         throw new Error('stop or finish the current run before previewing a new one');
       const domain = config.domain.toLowerCase();
       const url = canonical(page.url, domain);
-      const samePreview = existing?.status === 'preview' && existing.domain === domain &&
-        (existing.mode || 'capture') === mode;
-      const previews = samePreview ? existing.previews : [];
       const entry = {url, kind: page.kind, products: page.kind === 'listing' ? page.products.length : undefined,
         next: page.next || null, end: page.end || null, product: page.product || null,
         imageCount: page.kind === 'product' ? page.imageCount : undefined,
         colorLinks: page.kind === 'product' ? (page.colorLinks || []).length : undefined,
         scope: page.kind === 'product' ? classifyTakeoverScope(page.product) : undefined};
       const run = {version: KEY_VERSION, generation: (existing?.generation || 0) + 1,
-        status: 'preview', domain, mode, locale: page.locale || null, config, previews: [...previews.filter(x => x.url !== url), entry],
+        status: 'preview', domain, mode, locale: page.locale || null, config, previews: [entry],
         preview: {endCheckConfigured: !!config.listing.endCheck,
           receiverRequired: 'Verified skip and catalog completion require a configured reachable local receiver.'},
-        seedUrl: page.kind === 'listing' ? url :
-          samePreview ? existing.seedUrl : null,
+        seedUrl: page.kind === 'listing' ? url : null,
         listings: {queue: [], visited: [], discoveryComplete: false}, products: [],
+        current: null, lastNavigationStarted: null, loadFailures: {}, reason: null};
+      return save(run);
+    }
+    async function importDiscovery(config, sources) {
+      const existing = await read();
+      if (['running', 'paused'].includes(existing?.status))
+        throw new Error('stop or finish the current run before importing discovery');
+      if (!config?.domain || config.colorVariantStrategy !== 'separate-url' || !config.product?.allImagesSelector)
+        throw new Error('capture needs a configured site with separate-URL product images');
+      const domain = config.domain.toLowerCase();
+      const reuse = sources === undefined;
+      if (reuse) {
+        if (existing?.mode !== 'discovery' || existing.domain !== domain)
+          throw new Error('no current discovery run for this site');
+        sources = [{report: exportTakeoverReport(existing)}];
+      }
+      if (!Array.isArray(sources) || !sources.length || sources.length > MAX_LISTINGS)
+        throw new Error('discovery exports are missing or exceed the safety bound');
+      const products = new Map();
+      let listingCount = 0;
+      for (const source of sources) {
+        const report = source?.report;
+        if (report?.format !== 'page-image-saver-discovery/v1' || report.schema_version !== 1 ||
+            report.mode !== 'discovery' || report.site !== domain || !Array.isArray(report.listings))
+          throw new Error('invalid or mixed-host discovery export');
+        const provenance = reuse ? {run_started_utc: report.started_utc} : {file_sha256: source.sha256};
+        if (reuse ? typeof report.started_utc !== 'string' || !Number.isFinite(Date.parse(report.started_utc)) :
+            typeof source.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(source.sha256))
+          throw new Error('discovery source provenance is missing or invalid');
+        for (const listing of report.listings) {
+          if (++listingCount > MAX_LISTINGS) throw new Error('listing safety bound reached');
+          const listingUrl = canonical(listing?.url, domain);
+          canonical(listing?.final_url, domain);
+          if (!Array.isArray(listing.products) || listing.products.length > MAX_PRODUCTS)
+            throw new Error('invalid discovery products or product safety bound reached');
+          for (const product of listing.products) {
+            if (typeof product?.url !== 'string') throw new Error('invalid discovery product URL');
+            const url = canonical(product.url, domain);
+            if (!products.has(url)) products.set(url, {url, status: 'pending', origins: []});
+            if (products.size > MAX_PRODUCTS) throw new Error('product safety bound reached');
+            const origin = {...provenance, listing_url: listingUrl};
+            const row = products.get(url);
+            if (!row.origins.some(prior => JSON.stringify(prior) === JSON.stringify(origin))) row.origins.push(origin);
+          }
+        }
+      }
+      if (!products.size) throw new Error('discovery exports contain no product URLs');
+      // Validate every source before replacing the saved run.
+      const run = {version: KEY_VERSION, generation: (existing?.generation || 0) + 1,
+        status: 'preview', domain, mode: 'capture-discovery', config,
+        seedUrl: products.keys().next().value, previews: [], products: [...products.values()],
+        preview: {fixedQueue: true}, listings: {queue: [], visited: [], discoveryComplete: true},
         current: null, lastNavigationStarted: null, loadFailures: {}, reason: null};
       return save(run);
     }
     async function start() {
       const run = await read();
       if (!run || run.status !== 'preview' || !run.seedUrl) throw new Error('preview a listing before Take over');
-      if (run.mode !== 'discovery' && !run.previews.some(page => page.kind === 'product' && page.imageCount > 0))
-        throw new Error('preview a product page with gallery images before Take over');
       run.status = 'running';
-      run.listings.queue = [run.seedUrl];
+      run.listings.queue = run.mode === 'capture-discovery' ? [] : [run.seedUrl];
       run.startedAt = new Date(io.now()).toISOString();
       await save(run);
       await io.alarm(io.now() + 30000);
@@ -159,7 +206,7 @@
       const run = await read();
       if (!run || run.status !== 'running') return run;
       for (const row of run.products) {
-        if (row.status !== 'captured') continue;
+        if (!['captured', 'skipped'].includes(row.status)) continue;
         const key = `${run.generation}|${row.url}`;
         if (verifiedHere.has(key)) continue;
         try {
@@ -180,7 +227,9 @@
           const afterFailure = await read();
           if (afterFailure?.status !== 'running' ||
               afterFailure.generation !== run.generation) return afterFailure;
-          row.status = 'failed';
+          if (run.mode === 'capture-discovery' && /\b(403|429|captcha|challenge)\b/i.test(String(error?.message || error)))
+            return interrupt(run, 'paused', String(error?.message || error));
+          row.status = run.mode === 'capture-discovery' ? 'pending' : 'failed';
           row.reason = `saved completion verification failed: ${String(error?.message || error)}`;
           await save(run);
         }
@@ -205,6 +254,25 @@
         return run;
       }
       const url = listingUrl || item.url;
+      if (item && run.mode === 'capture-discovery') {
+        const identity = {domain: run.domain, product_url: url, selected_color: null, color_key: 'url'};
+        let verification;
+        try { verification = await io.verify(identity); }
+        catch (error) {
+          if (/\b(403|429|captcha|challenge)\b/i.test(String(error?.message || error)))
+            return interrupt(run, 'paused', String(error?.message || error));
+          // Missing/unreachable receiver cannot grant a skip; normal capture may export Downloads.
+        }
+        const afterVerification = await read();
+        if (afterVerification?.status !== 'running' || afterVerification.generation !== run.generation) return afterVerification;
+        if (verification?.storage === 'receiver' && verification.status === 'already') {
+          item.status = 'skipped'; item.identity = identity; item.captureStatus = 'already'; delete item.reason;
+          verifiedHere.add(`${run.generation}|${url}`);
+          run.current = null;
+          await save(run); await io.alarm(io.now());
+          return run;
+        }
+      }
       run.current = {phase: listingUrl ? 'listing' : 'product', url};
       run.lastNavigationStarted = io.now();
       await save(run); // Intent and pace precede browser navigation.
@@ -297,7 +365,7 @@
       } else {
         if (page.kind !== 'product' || !page.product)
           return interrupt(run, 'paused', `product structure mismatch at ${url}`);
-        if (run.config.colorVariantStrategy === 'separate-url' && Array.isArray(page.colorLinks)) {
+        if (run.mode !== 'capture-discovery' && run.config.colorVariantStrategy === 'separate-url' && Array.isArray(page.colorLinks)) {
           let links;
           try { links = [...new Set(page.colorLinks.map(link => canonical(link, run.domain)))]; }
           catch (_) { return interrupt(run, 'paused', `invalid color link at ${url}`); }
@@ -309,7 +377,7 @@
         }
         const scope = classifyTakeoverScope(page.product);
         item.scope = scope;
-        if (scope.decision === 'exclude') {
+        if (scope.decision === 'exclude' && run.mode !== 'capture-discovery') {
           item.status = 'excluded'; item.reason = scope.reason;
         } else {
           try {
@@ -327,7 +395,8 @@
               return interrupt(run, 'paused', `capture identity does not match queued URL at ${url}`);
             }
             if (result.storage === 'receiver' && ['published', 'reused', 'already'].includes(result.status)) {
-              item.status = 'captured'; item.captureStatus = result.status;
+              item.status = run.mode === 'capture-discovery' && result.status === 'already' ? 'skipped' : 'captured';
+              item.captureStatus = result.status; delete item.reason;
               item.identity = result.identity;
               verifiedHere.add(`${run.generation}|${item.url}`);
             } else if (result.storage === 'downloads') {
@@ -352,7 +421,7 @@
       inFlight = tickUnlocked().finally(() => { inFlight = null; });
       return inFlight;
     }
-    return {preview, start, pause, stop, resume, tick, read};
+    return {preview, importDiscovery, start, pause, stop, resume, tick, read};
   }
   const api = {createTakeoverRunner, classifyTakeoverScope, summarizeTakeover,
     exportTakeoverReport, endCheckPasses};

@@ -8,6 +8,8 @@ import os
 import shutil
 import tempfile
 import unittest
+import json
+import hashlib
 
 from playwright.sync_api import sync_playwright
 
@@ -61,6 +63,12 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
               <article class="product-card"><a class="product-card__link" href="/product/bra-black">Lace Bra</a> <span>$42</span></article>
               <article class="product-card"><a class="product-card__link" href="/product/brief-black">Brief</a> <span>$18</span></article>
               </body></html>''')
+        elif url.startswith('https://us.chantelle.com/product/'):
+            route.fulfill(status=200, content_type='text/html', body='''<html><body>
+              <script type="application/ld+json">{"@type":"Product","name":"Fixture Bra","color":"Black","offers":{"price":"42","priceCurrency":"USD"}}</script>
+              <div class="pdp-product-images__image"><img class="main-pdp-image" src="https://imagedelivery.net/fixture/prod/production/P/STYLE/BLACK/w=1024"></div>
+              <a class="variant-picker__variant-link" href="/product/extra-color">Red</a>
+              </body></html>''')
         else:
             route.fulfill(status=404, body="")
 
@@ -77,7 +85,8 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
           }
         }""", url)
         self.page.locator("#catalog-capture-section").wait_for(timeout=5000)
-        self.page.locator("#catalog-capture-section summary").click()
+        if not self.page.locator("#catalog-capture-section").evaluate('node => node.open'):
+            self.page.locator("#catalog-capture-section summary").click()
 
     def test_real_missing_config_rejection_falls_back_and_replaces_foreign_preview(self):
         self.worker.evaluate("""url => chrome.storage.local.set({catalogTakeoverRun: {
@@ -167,6 +176,89 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
         self.assertTrue(self.page.locator("#takeover-stop-btn").is_disabled())
         self.assertEqual(self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun.domain)"),
                          "www.empreinte.eu")
+
+    def test_discovery_files_prepare_fixed_queue_and_downloads_remain_unverified(self):
+        self.open_panel('https://us.chantelle.com/list')
+        self.assertEqual(self.page.locator('#takeover-discovery-files').count(), 1)
+        def source(listing, urls):
+            return json.dumps({'schema_version':1, 'format':'page-image-saver-discovery/v1',
+                'mode':'discovery', 'site':'us.chantelle.com', 'started_utc':'2026-10-03T10:00:00.000Z',
+                'listings':[{'url':listing, 'final_url':listing,
+                    'products':[{'url':url,'card_text':'Fixture card'} for url in urls]}]}).encode()
+        bra = 'https://us.chantelle.com/product/bra-black'
+        brief = 'https://us.chantelle.com/product/brief-black'
+        first = source('https://us.chantelle.com/list-bras', [bra])
+        second = source('https://us.chantelle.com/list-panties', [bra, brief])
+        self.page.locator('#takeover-discovery-files').set_input_files([
+            {'name':'bras.json','mimeType':'application/json','buffer':first},
+            {'name':'panties.json','mimeType':'application/json','buffer':second}])
+        self.page.wait_for_function("document.querySelector('#takeover-feedback').textContent.includes('Fixed queue ready')")
+        run = self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun)")
+        self.assertEqual([row['url'] for row in run['products']], [bra,brief])
+        self.assertEqual(run['products'][0]['origins'], [
+            {'file_sha256':hashlib.sha256(first).hexdigest(),'listing_url':'https://us.chantelle.com/list-bras'},
+            {'file_sha256':hashlib.sha256(second).hexdigest(),'listing_url':'https://us.chantelle.com/list-panties'}])
+        self.assertIn(bra, self.page.locator('#takeover-start-url').inner_text())
+        runner_page = self.context.new_page()
+        runner_page.route('**/*', self.route_fixture)
+        runner_page.goto('https://us.chantelle.com/list-runner')
+        self.worker.evaluate('''async () => {
+          const [tab] = await chrome.tabs.query({url:'https://us.chantelle.com/list-runner'});
+          const {catalogTakeoverRun:run} = await chrome.storage.local.get('catalogTakeoverRun');
+          run.config.takeover = {intervalMs:0};
+          await chrome.storage.local.set({catalogTakeoverRun:run,catalogTakeoverTabId:tab.id});
+          await chrome.storage.sync.set({imageUploaderSettings:{receiver:{enabled:false}}});
+          globalThis.fixtureFetch = globalThis.fetch;
+          globalThis.fixtureSave = PageImageSaverHelpers.saveCaptureDownload;
+          globalThis.fixtureDownloads = [];
+          globalThis.fetch = async url => {
+            if (!String(url).startsWith('https://imagedelivery.net/')) throw new Error('Unexpected fixture request: ' + url);
+            return new Response(new Uint8Array([137,80,78,71,13,10,26,10]), {headers:{'content-type':'image/png'}});
+          };
+          PageImageSaverHelpers.saveCaptureDownload = async (_chrome,url,filename) => fixtureDownloads.push({url,filename});
+        }''')
+        try:
+            self.page.locator('#takeover-start-btn').click()
+            for _ in range(150):
+                run = self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun)")
+                if run['status'] in ['finished_with_gaps','complete','paused']:
+                    break
+                self.page.wait_for_timeout(100)
+            self.assertEqual(run['status'],'finished_with_gaps',run)
+            self.assertEqual([row['url'] for row in run['products']],[bra,brief])
+            self.assertEqual([row['reason'] for row in run['products']],['exported_unverified','exported_unverified'])
+            self.assertEqual(run['listings']['visited'],[])
+            self.assertEqual(self.worker.evaluate("fixtureDownloads.filter(x => x.filename.endsWith('/complete.json')).length"),2)
+        finally:
+            self.worker.evaluate('() => { globalThis.fetch = fixtureFetch; PageImageSaverHelpers.saveCaptureDownload = fixtureSave; }')
+            runner_page.close()
+
+    def test_latest_preview_seed_and_current_discovery_reuse_are_visible(self):
+        self.open_panel('https://us.chantelle.com/list-first')
+        self.page.locator('#takeover-mode').select_option('discovery')
+        self.page.locator('#takeover-preview-btn').click()
+        self.page.wait_for_function("document.querySelector('#takeover-feedback').textContent.includes('Preview ready')")
+        self.open_panel('https://us.chantelle.com/list-latest')
+        self.page.locator('#takeover-mode').select_option('discovery')
+        self.page.locator('#takeover-preview-btn').click()
+        self.page.wait_for_function("document.querySelector('#takeover-feedback').textContent.includes('Preview ready')")
+        self.assertEqual(self.page.locator('#takeover-start-url').count(),1)
+        self.assertIn('https://us.chantelle.com/list-latest',self.page.locator('#takeover-start-url').inner_text())
+        run = self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun)")
+        self.assertEqual([row['url'] for row in run['previews']],['https://us.chantelle.com/list-latest'])
+        self.worker.evaluate('''async () => {
+          const {catalogTakeoverRun:run} = await chrome.storage.local.get('catalogTakeoverRun');
+          run.status='finished_with_gaps'; run.startedAt='2026-10-03T10:00:00.000Z';
+          run.listings.visited=[{url:run.seedUrl,final_url:run.seedUrl,
+            products:[{url:'https://us.chantelle.com/product/bra-black',card_text:'Bra'}],next_url:null,end:null,endPassed:false}];
+          await chrome.storage.local.set({catalogTakeoverRun:run});
+        }''')
+        self.page.locator('#takeover-reuse-discovery-btn').click()
+        self.page.wait_for_function("document.querySelector('#takeover-feedback').textContent.includes('Fixed queue ready')")
+        run = self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun)")
+        self.assertEqual(run['products'][0]['origins'],[{'run_started_utc':'2026-10-03T10:00:00.000Z',
+            'listing_url':'https://us.chantelle.com/list-latest'}])
+        self.assertIn('/product/bra-black',self.page.locator('#takeover-start-url').inner_text())
 
 
 if __name__ == "__main__":
