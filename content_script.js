@@ -2694,14 +2694,21 @@ function takeoverCategory() {
   return document.querySelector('[itemprop="category"], nav.breadcrumbs, .breadcrumbs')?.textContent?.trim() || '';
 }
 
-async function inspectTakeoverPage(config, mode = 'capture') {
+async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   const challengeText = `${document.title} ${document.body?.innerText?.slice(0, 2000) || ''}`;
   if (/verify you are human|unusual traffic|access denied|captcha|bot challenge/i.test(challengeText) ||
       document.querySelector('iframe[src*="captcha"], .g-recaptcha, [data-sitekey]')) {
     return {kind: 'challenge', url: window.location.href};
   }
-  const product = capturePageProduct();
-  const productSeen = captureProductSeen(config, product);
+  let product = capturePageProduct();
+  let productSeen = captureProductSeen(config, product);
+  // A product URL from a fixed queue may still be hydrating at tab "complete"; give it time
+  // before reading the page as a listing (which the runner treats as a structure mismatch).
+  for (const deadline = Date.now() + 8000; expect === 'product' && !productSeen && Date.now() < deadline;) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    product = capturePageProduct();
+    productSeen = captureProductSeen(config, product);
+  }
   if (productSeen) {
     if (mode === 'discovery') throw new Error('Listing discovery needs a listing page');
     if (config?.product?.lazyLoad) {
@@ -2820,7 +2827,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'takeoverInspect') {
     loadCaptureSiteConfig().then(config => {
       if (!config) throw new Error('site config unavailable');
-      return inspectTakeoverPage(config, message.mode);
+      return inspectTakeoverPage(config, message.mode, message.expect || null);
     }).then(page => sendResponse({success: true, page}))
       .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
     return true;

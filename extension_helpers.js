@@ -559,8 +559,10 @@
     const view = doc.defaultView;
     const position = [view.scrollX, view.scrollY];
     let images = [], ready = [];
+    // Ready = a matching URL that has either finished loading or lost its placeholder state.
+    // Chantelle leaves --blurring on some frames whose image has fully loaded.
     const isReady = img => pattern.test(img.getAttribute('src') || img.currentSrc || '') &&
-      !img.closest('[class*="--blurring"]');
+      ((img.complete && img.naturalWidth > 0) || !img.closest('[class*="--blurring"]'));
     try {
       do {
         images = Array.from(doc.querySelectorAll(selector));

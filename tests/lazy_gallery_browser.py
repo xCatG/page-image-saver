@@ -50,6 +50,25 @@ class LazyGalleryTest(unittest.TestCase):
         finally:
             page.close()
 
+    def test_loaded_image_in_frame_that_keeps_blurring_is_ready(self):
+        # Chantelle leaves --blurring on some frames after their image has loaded.
+        page = self.browser.new_page(viewport={"width": 900, "height": 600})
+        try:
+            pixel = ("data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+            page.set_content(''.join(f'<div class="frame--blurring"><img class="gallery" src="{pixel}"></div>'
+                                     for _ in range(2)))
+            page.add_script_tag(path=str(ROOT / 'extension_helpers.js'))
+            page.wait_for_function("[...document.images].every(i => i.complete && i.naturalWidth > 0)")
+            result = page.evaluate("""async () => {
+              await PageImageSaverHelpers.prepareLazyGallery({product: {lazyLoad: true,
+                allImagesSelector: 'img.gallery', imageUrlPattern: '^data:image/gif'}}, document,
+                {timeoutMs: 1500, pollMs: 40});
+              return document.querySelectorAll('[class*="--blurring"]').length;
+            }""")
+            self.assertEqual(result, 2)  # resolved without waiting for the class to go
+        finally:
+            page.close()
+
     def test_shortfall_rejects_and_nonlazy_is_untouched(self):
         page = self.fixture()
         try:

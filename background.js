@@ -109,7 +109,7 @@ const takeoverIo = {
     setTimeout(() => { void tickAfterSettingsReady().catch(console.error); }, Math.max(0, when - Date.now()));
   },
   clearAlarm: async () => chrome.alarms.clear(TAKEOVER_ALARM),
-  load: async url => {
+  load: async (url, options = {}) => {
     const old = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
     let tab = null;
     if (Number.isInteger(old.catalogTakeoverTabId)) {
@@ -134,7 +134,8 @@ const takeoverIo = {
     if (completed.url && new URL(completed.url).hostname !== run.domain)
       return {status: 0, error: 'redirected outside configured site'};
     if ([404, 410].includes(status)) return {status};
-    const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect', mode: run.mode || 'capture'});
+    const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect', mode: run.mode || 'capture',
+      expect: options.expect || null});
     return {...reply.page, tabId: tab.id, status};
   },
   capture: async (url, scope, binding) => {

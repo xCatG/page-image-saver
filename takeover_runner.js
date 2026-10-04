@@ -278,7 +278,7 @@
       await save(run); // Intent and pace precede browser navigation.
       await io.alarm(io.now() + 30000); // Repeating alarm revives a terminated MV3 worker.
       let page;
-      try { page = await io.load(url); }
+      try { page = await io.load(url, {expect: listingUrl ? 'listing' : 'product'}); }
       catch (error) { page = {status: 0, error: String(error?.message || error)}; }
       const afterLoad = await read();
       if (afterLoad?.status !== 'running' || afterLoad.generation !== run.generation) return afterLoad;
