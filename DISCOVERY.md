@@ -1,5 +1,21 @@
 # Listing discovery pilot
 
+## Updating the unpacked extension
+
+After updating these files, open `chrome://extensions`, press **Reload** on Page Image Saver,
+then refresh the storefront tabs before importing. Reopening the browser or seeing new files
+on disk is insufficient: Chrome can execute a cached old service worker while the page uses
+the new content script. Version `1.0.1` identifies this release but does not by itself force
+the cached unpacked worker to refresh. Reload explicitly when no capture is in progress;
+the extension never reloads itself automatically.
+
+If import reports a closed message port, the panel gives this same reload/refresh guidance.
+For Playwright persistent profiles, call `chrome.runtime.reload()` explicitly in the extension
+worker, then reopen the same profile if no replacement worker event appears. Refresh/open the
+page and retry import; do not infer executed worker code from fetching `background.js`.
+
+## Listing discovery
+
 Open a configured listing page, open **Catalog capture**, choose **Listing discovery only**,
 then **Preview catalog**, **Take over**. A listing preview is sufficient. The run follows
 listing pagination only; it does not visit product URLs, acquire product media, classify

@@ -20,6 +20,14 @@ This guide will walk you through setting up and configuring the Page Image Saver
 
 At this point, the extension will work for finding images, but won't actually upload them until you configure a storage backend.
 
+## Updating an unpacked installation
+
+After updating the files, press **Reload** on the extension at `chrome://extensions/`, then
+refresh existing storefront tabs. A browser restart or manifest version change alone may
+leave an older service worker cached while new page scripts load. Perform the explicit
+reload when no capture is in progress. See [DISCOVERY.md](DISCOVERY.md) for discovery import
+recovery and persistent-profile test guidance.
+
 ## Configuring Storage Backend
 
 ### Option 1: AWS S3

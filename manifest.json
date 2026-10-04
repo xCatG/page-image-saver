@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Page Image Saver",
-  "version": "1.0",
+  "version": "1.0.1",
   "description": "Save images from web pages to your S3/R2 storage and capture full-page screenshots",
   "permissions": [
     "activeTab",

@@ -1114,7 +1114,9 @@ document.body.appendChild(container);
       await refreshTakeoverProgress();
       takeoverFeedback.textContent = 'Fixed queue ready. Take over starts at the URL shown.';
     } catch (error) {
-      takeoverFeedback.textContent = `Discovery import failed: ${error.message}`;
+      const reloadHint = /message port closed|message channel closed|Receiving end does not exist/i.test(error.message) ?
+        ' Reload the extension in chrome://extensions, then refresh this page and import again.' : '';
+      takeoverFeedback.textContent = `Discovery import failed: ${error.message}${reloadHint}`;
     } finally {
       delete takeoverProgress.dataset.previewPending;
       discoveryFiles.disabled = reuseDiscovery.disabled = false;
