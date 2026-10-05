@@ -286,9 +286,16 @@
         return interrupt(run, 'paused', `challenge or HTTP ${page?.status || 'unknown'} at ${url}`);
       }
       let deadProductReason = null;
+      if (item && run.mode === 'capture-discovery' && page?.url) {
+        try {
+          if (canonical(page.url, run.domain) !== url) deadProductReason = `redirected:${page.url}`;
+        } catch (_) {
+          deadProductReason = `invalid inspected page URL:${page.url}`;
+        }
+      }
       if (item && [404, 410].includes(page?.status)) {
         deadProductReason = `HTTP ${page.status} at ${url}`;
-      } else if (item && page?.kind === 'listing') {
+      } else if (!deadProductReason && item && page?.kind === 'listing') {
         try {
           canonical(page.url, run.domain);
           deadProductReason = `product structure mismatch at ${url}`;

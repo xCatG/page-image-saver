@@ -556,6 +556,35 @@ test('pause during saved completion verification cannot be overwritten by late r
   assert.equal(r.memory.run.status, 'paused');
 });
 
+test('fixed queue redirects fail only the source and capture the destination once at its own turn', async () => {
+  for (const destination of [red, 'https://other.test/product', 'not a URL']) {
+    const r = rig({[bra]: {...redPage, url: destination}, [red]: redPage}, {},
+      {verifyResult: {storage:'receiver', status:'missing'}});
+    await r.runner().importDiscovery(site, [discoverySource([bra, red])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.status, 'running');
+    assert.equal(r.memory.run.products[0].status, 'failed');
+    assert.match(r.memory.run.products[0].reason, /redirected:|invalid inspected page URL/);
+    assert.equal(r.captureCalls.length, 0);
+    r.advance(10000); await r.runner().tick();
+    assert.deepEqual(r.captureCalls.map(row => row.url), [red]);
+    assert.equal(r.memory.run.products[1].status, 'captured');
+    assert.deepEqual(r.visits, [bra, red]);
+  }
+});
+
+test('fixed queue redirect with challenge or HTTP block still pauses without failing the product', async () => {
+  for (const page of [{status:403}, {status:429}, {status:200, kind:'challenge'}]) {
+    const r = rig({[bra]: {...redPage, ...page}}, {},
+      {verifyResult:{storage:'receiver', status:'missing'}});
+    await r.runner().importDiscovery(site, [discoverySource([bra, red])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.status, 'paused');
+    assert.equal(r.memory.run.products[0].status, 'pending');
+    assert.equal(r.captureCalls.length, 0);
+  }
+});
+
 test('same-site product redirect cannot satisfy a different queued URL', async () => {
   const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
   const r = rig({[first]: {...listing1, products: [bra], next: null,
