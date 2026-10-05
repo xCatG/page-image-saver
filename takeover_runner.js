@@ -15,6 +15,15 @@
     return url.href;
   }
 
+  function addedQueryOnly(actual, expected) {
+    const a = new URL(actual), e = new URL(expected);
+    if (a.origin !== e.origin || a.pathname !== e.pathname || a.username || a.password) return false;
+    for (const key of new Set(e.searchParams.keys())) {
+      if (JSON.stringify(a.searchParams.getAll(key)) !== JSON.stringify(e.searchParams.getAll(key))) return false;
+    }
+    return true;
+  }
+
   function classifyTakeoverScope(product) {
     const name = String(product?.name || '').trim();
     const category = String(product?.category || '').trim();
@@ -267,6 +276,7 @@
         if (afterVerification?.status !== 'running' || afterVerification.generation !== run.generation) return afterVerification;
         if (verification?.storage === 'receiver' && verification.status === 'already') {
           item.status = 'skipped'; item.identity = identity; item.captureStatus = 'already'; delete item.reason;
+          run.consecutiveFailures = 0;
           verifiedHere.add(`${run.generation}|${url}`);
           run.current = null;
           await save(run); await io.alarm(io.now());
@@ -286,9 +296,11 @@
         return interrupt(run, 'paused', `challenge or HTTP ${page?.status || 'unknown'} at ${url}`);
       }
       let deadProductReason = null;
+      let queryEquivalent = false;
       if (item && run.mode === 'capture-discovery' && page?.url) {
         try {
-          if (canonical(page.url, run.domain) !== url) deadProductReason = `redirected:${page.url}`;
+          queryEquivalent = addedQueryOnly(canonical(page.url, run.domain), url);
+          if (!queryEquivalent) deadProductReason = `redirected:${page.url}`;
         } catch (_) {
           deadProductReason = `invalid inspected page URL:${page.url}`;
         }
@@ -307,6 +319,8 @@
             beforeFailureSave.generation !== run.generation) return beforeFailureSave;
         item.status = 'failed'; item.reason = deadProductReason;
         run.current = null;
+        run.consecutiveFailures = (run.consecutiveFailures || 0) + 1;
+        if (run.consecutiveFailures >= 5) return interrupt(run, 'paused', `5 consecutive product failures: ${item.reason}`);
         await save(run);
         await io.alarm(run.lastNavigationStarted + interval);
         return run;
@@ -320,7 +334,7 @@
         return run;
       }
       try {
-        if (canonical(page.url, run.domain) !== url) {
+        if (!queryEquivalent && canonical(page.url, run.domain) !== url) {
           return interrupt(run, listingUrl ? 'discovery_incomplete' : 'paused',
             `inspected page URL does not match queued URL at ${url}`);
         }
@@ -393,6 +407,7 @@
             }
             const binding = {generation: run.generation, tabId: page.tabId,
               documentId: page.documentId, expectedUrl: url};
+            if (queryEquivalent && canonical(page.url, run.domain) !== url) binding.documentUrl = canonical(page.url, run.domain);
             run.current.binding = binding;
             await save(run); // Bind this document before any image acquisition.
             const result = await io.capture(url, scope, binding);
@@ -419,6 +434,10 @@
       run.current = null;
       const beforeSave = await read();
       if (beforeSave?.status !== 'running' || beforeSave.generation !== run.generation) return beforeSave;
+      if (item) {
+        run.consecutiveFailures = item.status === 'failed' ? (run.consecutiveFailures || 0) + 1 : 0;
+        if (run.consecutiveFailures >= 5) return interrupt(run, 'paused', `5 consecutive product failures: ${item.reason}`);
+      }
       await save(run);
       await io.alarm(run.lastNavigationStarted + interval);
       return run;

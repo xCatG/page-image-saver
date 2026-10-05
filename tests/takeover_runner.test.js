@@ -556,6 +556,61 @@ test('pause during saved completion verification cannot be overwritten by late r
   assert.equal(r.memory.run.status, 'paused');
 });
 
+test('fixed queue accepts added query parameters but preserves queued identity and inspected binding', async () => {
+  const r = rig({[bra]: {...braPage, url:bra+'?size=OS'}}, {},
+    {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource([bra])]);
+  await r.runner().start(); await r.runner().tick();
+  assert.equal(r.memory.run.products[0].status,'captured');
+  assert.equal(r.memory.run.products[0].identity.product_url,bra);
+  assert.equal(r.captureCalls[0].binding.documentUrl,bra+'?size=OS');
+});
+
+test('fixed queue rejects changed or removed existing query parameters', async () => {
+  for (const final of [bra, bra+'?color=red', bra+'?color=black&color=red']) {
+    const queued=bra+'?color=black';
+    const r=rig({[queued]:{...braPage,url:final}}, {}, {verifyResult:{storage:'receiver',status:'missing'}});
+    await r.runner().importDiscovery(site,[discoverySource([queued])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.products[0].status,'failed');
+    assert.equal(r.captureCalls.length,0);
+  }
+});
+
+test('five consecutive fixed queue failures pause across worker restarts', async () => {
+  const urls=Array.from({length:6},(_,i)=>bra+'/'+i);
+  const pages=Object.fromEntries(urls.map(url=>[url,{...redPage}]));
+  const r=rig(pages,{}, {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource(urls)]);
+  await r.runner().start();
+  for(let i=0;i<5;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'paused');
+  assert.match(r.memory.run.reason,/5 consecutive/);
+  assert.equal(r.memory.run.products[5].status,'pending');
+  assert.equal(r.visits.length,5);
+});
+
+test('capture errors trigger the five-failure guard and verified skips reset it', async () => {
+  const urls=Array.from({length:6},(_,i)=>bra+'/'+i);
+  const pages=Object.fromEntries(urls.map(url=>[url,{...braPage,url}]));
+  const failures=Object.fromEntries(urls.map(url=>[url,new Error('image decode failed')]));
+  const r=rig(pages,failures,{verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource(urls)]);
+  await r.runner().start();
+  for(let i=0;i<4;i++){await r.runner().tick();r.advance(10000);}
+  r.io.verify=async identity=>({storage:'receiver',status:identity.product_url===urls[4]?'already':'missing'});
+  await r.runner().tick(); r.advance(10000); await r.runner().tick();
+  assert.equal(r.memory.run.status,'running');
+  assert.equal(r.memory.run.consecutiveFailures,1);
+  assert.equal(r.memory.run.products[4].status,'skipped');
+  const s=rig(pages,failures,{verifyResult:{storage:'receiver',status:'missing'}});
+  await s.runner().importDiscovery(site,[discoverySource(urls)]);
+  await s.runner().start();
+  for(let i=0;i<5;i++){await s.runner().tick();s.advance(10000);}
+  assert.equal(s.memory.run.status,'paused');
+  assert.match(s.memory.run.reason,/5 consecutive.*image decode failed/);
+});
+
 test('fixed queue redirects fail only the source and capture the destination once at its own turn', async () => {
   for (const destination of [red, 'https://other.test/product', 'not a URL']) {
     const r = rig({[bra]: {...redPage, url: destination}, [red]: redPage}, {},

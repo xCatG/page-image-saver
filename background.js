@@ -76,11 +76,12 @@ async function takeoverOwnedTab(binding) {
       run.generation !== binding.generation || run.current?.phase !== 'product' ||
       run.current.url !== binding.expectedUrl ||
       run.current.binding?.documentId !== binding.documentId ||
+      run.current.binding?.documentUrl !== binding.documentUrl ||
       run.current.binding.tabId !== binding.tabId) {
     throw new Error('take-over run/tab binding changed');
   }
   const tab = await chromeCallback(callback => chrome.tabs.get(binding.tabId, callback));
-  if (!takeoverSameUrl(tab?.url, binding.expectedUrl)) {
+  if (!takeoverSameUrl(tab?.url, binding.documentUrl || binding.expectedUrl)) {
     throw new Error('take-over tab URL changed');
   }
   return tab;
@@ -144,7 +145,7 @@ const takeoverIo = {
     const reply = await takeoverMessage(binding.tabId, {action: 'takeoverCapture', scope, binding});
     await takeoverOwnedTab(binding);
     const current = await takeoverMessage(binding.tabId, {action: 'takeoverDocumentCheck'});
-    if (current.documentId !== binding.documentId || !takeoverSameUrl(current.url, url)) {
+    if (current.documentId !== binding.documentId || !takeoverSameUrl(current.url, binding.documentUrl || url)) {
       throw new Error('take-over document changed during capture');
     }
     return reply.result;
@@ -278,7 +279,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const binding = message.runBinding;
       const identity = message.payload?.identity;
       if (sender.tab?.id !== binding.tabId ||
-          !takeoverSameUrl(sender.url || sender.tab?.url, binding.expectedUrl) ||
+          !takeoverSameUrl(sender.url || sender.tab?.url, binding.documentUrl || binding.expectedUrl) ||
           identity?.domain !== new URL(binding.expectedUrl).hostname ||
           identity?.color_key !== 'url' ||
           !takeoverSameUrl(identity.product_url, binding.expectedUrl)) {

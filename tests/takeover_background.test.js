@@ -312,6 +312,19 @@ test('tab navigation after inspection rejects capture before media acquisition',
   assert.equal(b.messages.length, before, 'no capture message may reach the changed tab');
 });
 
+test('query-added document binding permits capture but stays pinned to the inspected URL', async () => {
+  const b=bridge();
+  const binding={tabId:7,documentId:'doc-black',generation:2,expectedUrl:black,documentUrl:black+'?size=OS'};
+  b.stored.catalogTakeoverRun.current.binding=binding;
+  b.tab.url=binding.documentUrl;
+  b.chrome.tabs.sendMessage=(_id,message,callback)=>callback(message.action==='takeoverDocumentCheck'
+    ? {success:true,documentId:'doc-black',url:b.tab.url}
+    : {success:true,result:{identity:{product_url:black}}});
+  assert.equal((await b.io.capture(black,{},binding)).identity.product_url,black);
+  b.tab.url=black+'?size=M';
+  await assert.rejects(()=>b.io.capture(black,{},binding),/URL changed/);
+});
+
 test('navigation during capture prevents accepting a receiver result for the old document', async () => {
   const b = bridge();
   b.tab.status = 'complete';

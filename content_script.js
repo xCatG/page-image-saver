@@ -2544,8 +2544,8 @@ function assertTakeoverBinding(binding) {
   visited.hash = '';
   const canonical = new URL(captureCanonicalUrl());
   canonical.hash = '';
-  if (binding.documentId !== takeoverDocumentId || visited.href !== binding.expectedUrl ||
-      canonical.href !== binding.expectedUrl) {
+  if (binding.documentId !== takeoverDocumentId || visited.href !== (binding.documentUrl || binding.expectedUrl) ||
+      (canonical.href !== binding.expectedUrl && canonical.href !== binding.documentUrl)) {
     throw new Error('take-over document or product URL changed');
   }
 }
@@ -2583,7 +2583,7 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
     return {color: policy === 'url' ? captureCanonicalUrl() : captureSelectedColor(product), gallery,
       colorConflict: !!(product.color && swatchColor && product.color !== swatchColor)};
   };
-  const url = captureCanonicalUrl();
+  const url = binding?.expectedUrl || captureCanonicalUrl();
   const previous = previousCaptureStates.get(url);
   const state = await globalThis.PageImageSaverHelpers.waitForCaptureState(readState, previous,
     {timeoutMs: 8000, pollMs: 200, allowSameColorGalleryChange: manual && allowSameColorGalleryChange});
