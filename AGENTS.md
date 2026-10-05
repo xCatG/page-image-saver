@@ -1,6 +1,7 @@
 # Agent Notes (page-image-saver)
 
 Chrome MV3 extension, no build step. Architecture and loading: `CLAUDE.md`. Tests: `npm test`.
+The manifest public key fixes the unpacked ID; the private packing key is stored only at `~/.config/page-image-saver/extension-key.pem` (mode 600), is not needed for unpacked loading, and must never be committed.
 It feeds the local `lingerie_trends` catalog archive (~/src/lingerie_trends); see that repo's AGENTS.md.
 
 ## Catalog collection: settled policy

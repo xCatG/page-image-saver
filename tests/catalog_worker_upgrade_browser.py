@@ -27,6 +27,13 @@ class CatalogWorkerUpgradeTest(unittest.TestCase):
             for filename in release_files:
                 (extension / filename).write_bytes(subprocess.check_output(
                     ['git', 'show', f'{OLD_RELEASE}:{filename}'], cwd=ROOT))
+            # Keep identity constant: this tests a worker upgrade, not installing
+            # a new extension ID when a manifest key is introduced.
+            old_manifest = json.loads((extension / 'manifest.json').read_text())
+            current_manifest = json.loads((ROOT / 'manifest.json').read_text())
+            if 'key' in current_manifest:
+                old_manifest['key'] = current_manifest['key']
+            (extension / 'manifest.json').write_text(json.dumps(old_manifest))
 
             def launch():
                 return pw.chromium.launch_persistent_context(str(directory / 'profile'), headless=True,
