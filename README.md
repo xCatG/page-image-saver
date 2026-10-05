@@ -15,7 +15,7 @@ A Chrome extension to find and save images from web pages to your S3 or R2 stora
 - User-friendly settings UI for configuring storage credentials
 - Preserve original filenames when possible
 - Keyboard shortcuts:
-  - Alt+Shift+P to find images (Alt+Shift+I is reserved by Chrome on Windows; set or change keys at chrome://extensions/shortcuts)
+  - Alt+Shift+I to find images
   - Alt+Shift+S to take a screenshot
 
 ## Installation

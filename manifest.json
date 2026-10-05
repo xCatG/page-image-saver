@@ -48,7 +48,7 @@
   "commands": {
     "find_images": {
       "suggested_key": {
-        "default": "Alt+Shift+P"
+        "default": "Alt+Shift+I"
       },
       "description": "Find images on the current page"
     },
