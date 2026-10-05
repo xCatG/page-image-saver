@@ -43,6 +43,7 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
 
     def setUp(self):
         self.worker.evaluate("chrome.storage.local.clear()")
+        self.worker.evaluate("chrome.storage.session.clear()")
         self.page = self.context.new_page()
         self.page.route("**/*", self.route_fixture)
 
@@ -105,6 +106,49 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
         self.assertNotIn(EMPREINTE_URL, progress.inner_text())
         self.assertEqual(self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun.domain)"),
                          "www.lisecharmel.com")
+
+    def test_shopify_feed_real_panel_bridge_and_duplicate_guard(self):
+        requests = []
+        def saved_shopify(route):
+            if '/products.json?' in route.request.url:
+                requests.append(route.request.url)
+                count = 250 if len(requests) == 1 else 1
+                route.fulfill(status=200, content_type='application/json',
+                    body=json.dumps({'products': [{'id': n} for n in range(count)]}))
+            else:
+                route.fulfill(status=200, content_type='text/html', body='<html><body>Saved storefront</body></html>')
+        self.page.route('https://www.sanscomplexe.com/**', saved_shopify)
+        self.worker.evaluate("""() => {
+          globalThis.feedDownloads = [];
+          globalThis.savedFeedDownload = PageImageSaverHelpers.saveCaptureDownload;
+          PageImageSaverHelpers.saveCaptureDownload = async (_chrome, data, filename) => {
+            feedDownloads.push({filename, report: JSON.parse(atob(data.split(',')[1]))});
+          };
+        }""")
+        try:
+            url = 'https://www.sanscomplexe.com/en/collections/soutien-gorge'
+            self.open_panel(url)
+            self.assertTrue(self.page.locator('#shopify-feed-btn').is_visible())
+            self.page.locator('#shopify-feed-btn').click()
+            self.page.wait_for_function("document.querySelector('#takeover-feedback').textContent.includes('1 pages')")
+            self.page.locator('#close-btn').click()
+            self.worker.evaluate("""async url => {
+              const [tab] = await chrome.tabs.query({url});
+              await chrome.tabs.sendMessage(tab.id, {action:'findImages'});
+            }""", url)
+            self.page.locator('#shopify-feed-btn').click()
+            self.page.wait_for_function("document.querySelector('#takeover-feedback').textContent.includes('already active')")
+            self.page.locator('#takeover-start-btn').click()
+            self.page.wait_for_function("document.body.innerText.includes('wait for it to finish before take-over')")
+            # The first operation survives its panel being closed; only the browser boundary is stubbed.
+            self.page.wait_for_function("document.body.innerText.includes('Shopify feed saved to Downloads')", timeout=20000)
+            downloaded = self.worker.evaluate('feedDownloads[0]')
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(downloaded['report']['prefix'], '/en')
+            self.assertEqual([p['product_count'] for p in downloaded['report']['fetched']], [250, 1])
+            self.assertTrue(downloaded['filename'].startswith('www.sanscomplexe.com-products-feed-'))
+        finally:
+            self.worker.evaluate('() => { PageImageSaverHelpers.saveCaptureDownload = savedFeedDownload; }')
 
     def test_listing_discovery_uses_real_background_without_receiver_or_pdp(self):
         # Extension-created tabs can race Playwright's initial request routing.

@@ -259,7 +259,7 @@ async function integratedAuto(stage) {
       storage: {local: {get(key, cb) { cb({[key]: stored[key]}); }, set(value, cb) {
         Object.assign(stored, value); cb?.();
       }}},
-      tabs: {onUpdated: passive()}
+      tabs: {onUpdated: passive(), onRemoved: passive()}
     },
     PageImageSaverTakeover: {createTakeoverRunner() {
       return {read: async () => stored.catalogTakeoverRun};

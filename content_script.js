@@ -895,6 +895,7 @@ function createImageSelectionUI(images) {
       <label>Run mode <select id="takeover-mode"><option value="capture">Product capture</option><option value="discovery">Listing discovery only</option><option value="capture-discovery">Capture discovery queue</option></select></label>
       <label style="display:block;">Discovery exports <input id="takeover-discovery-files" type="file" multiple accept=".json,application/json" style="width:100%;"></label>
       <button id="takeover-reuse-discovery-btn" type="button">Reuse current discovery</button>
+      <button id="shopify-feed-btn" type="button" hidden>Save Shopify feed</button>
       <div id="takeover-start-url" style="overflow-wrap:anywhere;">Start URL: no preview yet</div>
       <div style="display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap;">
         <button id="capture-product-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #6b46a0; color: white; cursor: pointer;">Capture Product Locally</button>
@@ -1054,6 +1055,7 @@ document.body.appendChild(container);
   refreshCaptureFailures();
 
   loadCaptureSiteConfig().then(config => {
+    container.querySelector('#shopify-feed-btn').hidden = config?.platform !== 'shopify';
     if (config) {
       document.getElementById('capture-image-mode').value = 'site';
       document.getElementById('capture-color-policy').value =
@@ -1086,6 +1088,36 @@ document.body.appendChild(container);
     }
   });
   const previewButton = container.querySelector('#takeover-preview-btn');
+  container.querySelector('#shopify-feed-btn').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    const feedback = container.querySelector('#takeover-feedback');
+    let acquired = false;
+    try {
+      await takeoverRequest('shopifyFeedAcquire');
+      acquired = true;
+      if (/verify you are human|unusual traffic|access denied|captcha|bot challenge/i.test(
+          `${document.title} ${document.body?.innerText?.slice(0, 2000) || ''}`))
+        throw new Error('Page challenge detected; feed not requested');
+      feedback.textContent = 'Saving Shopify feed… Keep this tab open and do not navigate.';
+      const config = await loadCaptureSiteConfig();
+      const report = await globalThis.PageImageSaverHelpers.collectShopifyFeed(config, window.location.href, {
+        progress: (pages, products) => { feedback.textContent = `Shopify feed: ${pages} pages, ${products} products…`; }
+      });
+      await takeoverRequest('saveShopifyFeedDownload', {report});
+      feedback.textContent = `Shopify feed saved to Downloads (${report.pages.length} pages).`;
+      showStatusMessage(feedback.textContent, 'success');
+    } catch (error) {
+      feedback.textContent = `Shopify feed failed: ${error.message}. No automatic retry or partial export.`;
+      showStatusMessage(feedback.textContent, 'error');
+    } finally {
+      if (acquired) {
+        try { await takeoverRequest('shopifyFeedRelease'); }
+        catch (error) { showStatusMessage(`Feed reservation not released: ${error.message}. Close this tab before restarting.`, 'error'); }
+      }
+      button.disabled = false;
+    }
+  });
   const takeoverFeedback = container.querySelector('#takeover-feedback');
   const takeoverProgress = container.querySelector('#takeover-progress');
   const modeControl = container.querySelector('#takeover-mode');

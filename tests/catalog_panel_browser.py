@@ -93,6 +93,15 @@ class CatalogPanelBrowserTest(unittest.TestCase):
         print(f"Collapsed catalog: image grid is {grid_height:.0f}px tall in a 900px viewport")
         self.assertGreater(grid_height, 180, f"image grid height: {grid_height}")
 
+    def test_feed_button_is_hidden_except_for_shopify(self):
+        self.open_panel()
+        self.assertEqual(self.page.locator('#shopify-feed-btn').count(), 1)
+        self.assertTrue(self.page.locator('#shopify-feed-btn').evaluate('n => n.hidden'))
+        self.page.locator('#close-btn').click()
+        self.page.evaluate("loadCaptureSiteConfig = async () => ({platform:'shopify'})")
+        self.open_panel()
+        self.assertFalse(self.page.locator('#shopify-feed-btn').evaluate('n => n.hidden'))
+
     def test_open_state_persists_per_domain_after_reopening(self):
         self.open_panel()
         self.page.locator("#catalog-capture-section summary").click()

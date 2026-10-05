@@ -7,7 +7,33 @@ const vm = require('node:vm');
 const black = 'https://shop.example.test/bra-black';
 const red = 'https://shop.example.test/bra-red';
 
+test('Shopify feed download message keeps the port open and writes exactly one Downloads file', async () => {
+  const b = bridge();
+  const downloads = [];
+  b.sandbox.Blob = Blob;
+  b.sandbox.blobToDataUrl = async blob => 'data:application/json,' + await blob.text();
+  b.sandbox.PageImageSaverHelpers.saveCaptureDownload = async (_chrome, data, filename) => {
+    downloads.push({data, filename});
+  };
+  const report = {version: 1, host: 'shop.example.test', prefix: '',
+    fetched: [{status: 200}], pages: [{products: [{id: 1}]}]};
+  const response = await new Promise(resolve => {
+    assert.equal(b.runtimeMessages[0]({action: 'saveShopifyFeedDownload', report},
+      {tab: {id: 7, url: black}, url: black}, resolve), true);
+  });
+  assert.equal(response.success, true);
+  assert.equal(downloads.length, 1);
+  assert.match(downloads[0].filename, /^shop\.example\.test-products-feed-.*\.json$/);
+  assert.deepEqual(JSON.parse(downloads[0].data.split(',').slice(1).join(',')), report);
+  const rejected = await new Promise(resolve => b.runtimeMessages[0](
+    {action: 'saveShopifyFeedDownload', report: {...report, host: 'other.test'}},
+    {tab: {id: 7, url: black}, url: black}, resolve));
+  assert.equal(rejected.success, false);
+  assert.equal(downloads.length, 1);
+});
+
 function bridge() {
+  const tabRemoved = [];
   const webCompleted = [];
   const webHeaders = [];
   const tabUpdated = [];
@@ -30,7 +56,7 @@ function bridge() {
       get(key, callback) { callback({[key]: stored[key]}); },
       set(value, callback) { Object.assign(stored, value); callback?.(); }
     }},
-    tabs: {onUpdated: event(tabUpdated),
+    tabs: {onUpdated: event(tabUpdated), onRemoved: event(tabRemoved),
       create(_details, callback) { callback({...tab}); },
       update(_id, details, callback) { tab.url = details.url; callback({...tab}); },
       get(_id, callback) { callback({...tab}); },
@@ -45,6 +71,12 @@ function bridge() {
             selected_color: 'Red', color_key: 'url'}}});
       }
     }
+  };
+  const session = {};
+  chrome.storage.session = {
+    get(key, callback) { callback({[key]: session[key]}); },
+    set(value, callback) { Object.assign(session, value); callback?.(); },
+    remove(key, callback) { delete session[key]; callback?.(); }
   };
   const sandbox = {chrome, URL, Date, Promise, console,
     setTimeout() { return 1; }, clearTimeout() {},
@@ -69,8 +101,41 @@ function bridge() {
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, {filename: 'background.js'});
   return {io, tab, stored, controls, chrome, messages, webCompleted, webHeaders, tabUpdated,
-    runtimeMessages, sandbox};
+    runtimeMessages, sandbox, tabRemoved, session};
 }
+
+test('feed reservation prevents duplicate starts and takeover until completion or tab loss', async () => {
+  const b = bridge();
+  b.stored.catalogTakeoverRun.status = 'paused';
+  const dispatch = (action, id = 7, documentId = 'doc-a') => new Promise(resolve => {
+    const handled = b.runtimeMessages[0]({action}, {tab: {id, url: black}, url: black, documentId}, resolve);
+    if (!handled) resolve({success: false, error: 'unhandled'});
+  });
+  assert.equal((await dispatch('shopifyFeedAcquire')).success, true);
+  for (const [id, doc] of [[7, 'doc-a'], [8, 'doc-b']])
+    assert.match((await dispatch('shopifyFeedAcquire', id, doc)).error, /feed.*active/i);
+  for (const action of ['takeoverStart', 'takeoverResume'])
+    assert.match((await dispatch(action)).error, /feed.*active/i);
+  await dispatch('shopifyFeedRelease', 8, 'doc-b');
+  assert.match((await dispatch('shopifyFeedAcquire')).error, /feed.*active/i);
+  await dispatch('shopifyFeedRelease');
+  assert.equal((await dispatch('shopifyFeedAcquire')).success, true);
+  for (const listener of b.tabUpdated) listener(7, {status: 'loading'}, b.tab);
+  assert.equal((await dispatch('shopifyFeedAcquire', 7, 'doc-new')).success, true);
+  await dispatch('shopifyFeedRelease', 7, 'doc-a');
+  assert.match((await dispatch('shopifyFeedAcquire', 8)).error, /feed.*active/i);
+  for (const listener of b.tabRemoved) listener(7);
+  assert.equal((await dispatch('shopifyFeedAcquire', 8)).success, true);
+});
+
+test('feed reservation refuses a running takeover', async () => {
+  const b = bridge();
+  const result = await new Promise(resolve => {
+    if (!b.runtimeMessages[0]({action: 'shopifyFeedAcquire'},
+      {tab: {id: 7, url: black}, url: black, documentId: 'doc-a'}, resolve)) resolve({error: 'unhandled'});
+  });
+  assert.match(result.error, /pause take-over/i);
+});
 
 function captureBridge() {
   const b = bridge();

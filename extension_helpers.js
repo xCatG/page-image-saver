@@ -583,7 +583,47 @@
     }
   }
 
+  function canSaveShopifyFeed(config) {
+    return config?.platform === 'shopify';
+  }
+
+  // Runs in the owner's content-script context, never in the service worker.
+  async function collectShopifyFeed(config, pageUrl, io = {}) {
+    if (!canSaveShopifyFeed(config)) throw new Error('Shopify site config required');
+    const page = new URL(pageUrl);
+    if (page.protocol !== 'https:' || page.hostname !== config.domain) throw new Error('Feed host mismatch');
+    const prefix = page.pathname.match(/^\/([a-z]{2}(?:-[a-z]{2})?)(?:\/|$)/i)?.[0].replace(/\/$/, '') || '';
+    const interval = config.takeover?.intervalMs ?? 10000;
+    if (!Number.isFinite(interval) || interval < 0 || interval > 300000) throw new Error('Invalid site pacing interval');
+    const sleep = io.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    const fetchPage = io.fetch || globalThis.fetch.bind(globalThis);
+    const report = {version: 1, host: page.hostname, prefix, fetched: [], pages: []};
+    for (let n = 1; ; n++) {
+      if (n > 1) await sleep(Math.max(3000, interval));
+      const url = `${page.origin}${prefix}/products.json?limit=250&page=${n}`;
+      const response = await fetchPage(url, {credentials: 'same-origin', mode: 'same-origin',
+        redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(60000)});
+      if (!response.ok) throw new Error(`Shopify feed stopped: HTTP ${response.status} at page ${n}; no retry`);
+      if (!/\bapplication\/json\b/i.test(response.headers.get('content-type') || ''))
+        throw new Error(`Shopify feed stopped: non-JSON response or challenge at page ${n}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const data = JSON.parse(new TextDecoder().decode(bytes));
+      if (!Array.isArray(data?.products) || data.products.length > 250)
+        throw new Error(`Shopify feed stopped: invalid products page ${n}`);
+      const sha256 = await captureSha256(bytes);
+      if (report.fetched.some(row => row.sha256 === sha256))
+        throw new Error(`Shopify feed stopped: repeated products page ${n}`);
+      report.fetched.push({url, status: response.status, fetched_at: new Date().toISOString(),
+        sha256, product_count: data.products.length});
+      report.pages.push(data);
+      io.progress?.(n, report.fetched.reduce((sum, row) => sum + row.product_count, 0));
+      if (data.products.length < 250) return report;
+    }
+  }
+
   const helpers = {
+    canSaveShopifyFeed,
+    collectShopifyFeed,
     prepareLazyGallery,
     captureProductFromJsonLd,
     captureProductEvidence,

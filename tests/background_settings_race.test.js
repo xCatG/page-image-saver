@@ -40,7 +40,7 @@ function bridge() {
     contextMenus: {removeAll(callback) { callback(); }, create() {}, onClicked: passive()},
     action: {onClicked: passive()}, commands: {onCommand: passive()},
     scripting: {executeScript: async () => []},
-    tabs: {create() {}, sendMessage() {}, query() {}, captureVisibleTab() {}},
+    tabs: {onRemoved: passive(), onUpdated: passive(), create() {}, sendMessage() {}, query() {}, captureVisibleTab() {}},
     downloads: {search(_query, callback) { callback([]); }}
   };
   const sandbox = {chrome, URL, Date, Promise, Blob, Uint8Array, ArrayBuffer,

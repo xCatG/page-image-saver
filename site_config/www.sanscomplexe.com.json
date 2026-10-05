@@ -1,0 +1,22 @@
+{
+  "domain": "www.sanscomplexe.com",
+  "platform": "shopify",
+  "locale": "en",
+  "market": "fr",
+  "currency": "EUR",
+  "botProtection": [],
+  "colorVariantStrategy": "separate-url",
+  "takeover": {"intervalMs": 10000},
+  "listing": {
+    "productLinkSelector": "a.product-card__link[href*='/en/products/']",
+    "pagination": {"type": "numbered", "nextSelector": "nav.collection__pagination a[rel='next']"}
+  },
+  "product": {
+    "pageSelector": "product-gallery",
+    "allImagesSelector": "product-gallery .product-gallery__media[data-media-type='image'] img",
+    "imageUrlPattern": "^https://(?:cdn\\.shopify\\.com/s/files/|www\\.sanscomplexe\\.com/cdn/shop/files/)",
+    "highResTransform": {"type": "query-param", "name": "width", "value": "2400"},
+    "lazyLoad": true
+  },
+  "notes": "Derived offline from the saved /en/ listing and Melodie PDP, 2026-10-05: 36 card links, rel=next page=2, five gallery images. Shopify same-host CDN aliases and cdn.shopify.com accepted. Sample has size-only v-p controls; do not cycle sizes or invent color clicks. Capture identity uses separate product URLs; other color behavior needs owner validation. No positive terminal-page proof configured: discovery finishes with gaps, not verified catalog completeness. Use scoped lingerie collections, never /collections/all for capture. Feed export is whole-store evidence, not a lingerie scope decision."
+}

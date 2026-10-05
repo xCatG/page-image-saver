@@ -21,6 +21,27 @@ def source(path):
 
 
 class SavedPageFixtures(unittest.TestCase):
+    def test_sanscomplexe_saved_listing_and_gallery(self):
+        config = json.loads(source("site_config/www.sanscomplexe.com.json"))
+        page = self.open_fixture(config["domain"], "sanscomplexe-listing.html")
+        try:
+            self.assertEqual(page.locator(config["listing"]["productLinkSelector"]).count(), 36)
+            self.assertEqual(page.locator(config["listing"]["pagination"]["nextSelector"]).get_attribute("href"),
+                "/en/collections/all?page=2")
+        finally:
+            page.close()
+        page = self.open_fixture(config["domain"], "sanscomplexe-product.html")
+        try:
+            self.assertEqual(page.locator(config["product"]["allImagesSelector"]).count(), 5)
+            gallery = page.evaluate("config => captureGallery(config, 'site')", config)
+            self.assertEqual(len(gallery), 5)
+            fetched = page.evaluate("config => captureGallery(config, 'site').map(url => "
+                "PageImageSaverHelpers.captureImageUrls(url, config.product.highResTransform).fetched_url)", config)
+            self.assertTrue(all("width=2400" in url for url in fetched))
+            self.assertTrue(all("recommendation" not in url for url in gallery))
+        finally:
+            page.close()
+
     @classmethod
     def setUpClass(cls):
         cls.playwright = sync_playwright().start()

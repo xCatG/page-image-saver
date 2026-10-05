@@ -251,7 +251,7 @@ test('background capture message selects receiver without using cloud settings',
       contextMenus: {removeAll: callback => callback(), create() {}, onClicked: passive()},
       notifications: {create() {}}, action: {onClicked: passive()}, commands: {onCommand: passive()},
       scripting: {executeScript: async () => []},
-      tabs: {create() {}, sendMessage() {}, query() {}, captureVisibleTab() {}},
+      tabs: {onRemoved: passive(), onUpdated: passive(), create() {}, sendMessage() {}, query() {}, captureVisibleTab() {}},
       downloads: {search: (_query, callback) => callback([]), download() {throw new Error('cloud/download called');}}
     }
   };

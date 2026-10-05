@@ -177,7 +177,54 @@ function queueTakeoverControl(action) {
   takeoverControlTail = result.then(() => {}, () => {});
   return result;
 }
+// A browser-session reservation survives SW suspension and panel recreation.
+// There is one owner-driven feed at a time; no background feed scheduler.
+async function readActiveFeed() {
+  return (await chromeCallback(cb => chrome.storage.session.get('activeShopifyFeed', cb))).activeShopifyFeed;
+}
+function clearFeedForTab(tabId) {
+  void queueTakeoverControl(async () => {
+    if ((await readActiveFeed())?.tabId === tabId)
+      await chromeCallback(cb => chrome.storage.session.remove('activeShopifyFeed', cb));
+  }).catch(console.error);
+}
+chrome.tabs.onRemoved.addListener(clearFeedForTab);
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === 'loading') clearFeedForTab(tabId);
+});
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (['shopifyFeedAcquire', 'shopifyFeedRelease'].includes(message.action)) {
+    queueTakeoverControl(async () => {
+      if (!sender.tab || !sender.documentId) throw new Error('Feed requires a browser tab document');
+      const active = await readActiveFeed();
+      if (message.action === 'shopifyFeedRelease') {
+        if (active?.tabId === sender.tab.id && active.documentId === sender.documentId)
+          await chromeCallback(cb => chrome.storage.session.remove('activeShopifyFeed', cb));
+        return;
+      }
+      if (active) throw new Error('Shopify feed already active; wait or close its tab');
+      if ((await takeoverRunner.read())?.status === 'running') throw new Error('Pause take-over before saving the feed');
+      await chromeCallback(cb => chrome.storage.session.set({activeShopifyFeed: {
+        tabId: sender.tab.id, documentId: sender.documentId
+      }}, cb));
+    }).then(() => sendResponse({success: true}))
+      .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+    return true;
+  }
+  if (message.action === 'saveShopifyFeedDownload') {
+    (async () => {
+      const report = message.report;
+      if (!sender.tab || new URL(sender.url || sender.tab.url).hostname !== report?.host ||
+          report.version !== 1 || !Array.isArray(report.pages) || !report.pages.length ||
+          report.pages.length !== report.fetched?.length) throw new Error('Invalid tab feed export');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `${report.host}-products-feed-${stamp}.json`;
+      const dataUrl = await blobToDataUrl(new Blob([JSON.stringify(report, null, 2)], {type: 'application/json'}));
+      await globalThis.PageImageSaverHelpers.saveCaptureDownload(chrome, dataUrl, filename);
+      sendResponse({success: true});
+    })().catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+    return true;
+  }
   if (message.action === 'autoCaptureAllowed') {
     assertAutoCaptureAllowed(sender)
       .then(() => sendResponse({success: true, allowed: true}))
@@ -187,6 +234,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!['takeoverPreview', 'takeoverStart', 'takeoverPause', 'takeoverStop',
     'takeoverResume', 'takeoverStatus', 'takeoverExport', 'takeoverImportDiscovery'].includes(message.action)) return false;
   const handle = async () => {
+    if (['takeoverStart', 'takeoverResume'].includes(message.action) && await readActiveFeed())
+      throw new Error('Shopify feed active; wait for it to finish before take-over');
     if (['takeoverPreview', 'takeoverImportDiscovery'].includes(message.action)) {
       if (!sender.tab || new URL(sender.tab.url).hostname !== message.config?.domain)
         throw new Error('preview must come from the configured site tab');
