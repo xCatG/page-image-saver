@@ -101,6 +101,18 @@ function captureBridge() {
   return {...b, acquisitions, imageRequests, dispatch};
 }
 
+test('query-added capture accepts original sender URL only with the exact saved document binding', async () => {
+  const b=captureBridge();
+  const binding={tabId:7,documentId:'doc-black',generation:2,expectedUrl:black,documentUrl:black+'?size=OS'};
+  b.stored.catalogTakeoverRun.current.binding=binding;
+  b.tab.url=binding.documentUrl;
+  const message={action:'captureProductLocal',runBinding:binding,payload:{identity:{domain:'shop.example.test',product_url:black,color_key:'url'}}};
+  assert.equal((await b.dispatch(message,7,black)).success,true);
+  assert.equal((await b.dispatch(message,7,red)).success,false);
+  b.tab.url=black+'?size=M';
+  assert.equal((await b.dispatch(message,7,black)).success,false);
+});
+
 test('background discovery export records actual export time and manifest version in downloaded JSON', async () => {
   const b = captureBridge();
   b.stored.catalogTakeoverRun = {version: 1, mode: 'discovery', domain: 'shop.example.test',

@@ -279,7 +279,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const binding = message.runBinding;
       const identity = message.payload?.identity;
       if (sender.tab?.id !== binding.tabId ||
-          !takeoverSameUrl(sender.url || sender.tab?.url, binding.documentUrl || binding.expectedUrl) ||
+          (!takeoverSameUrl(sender.url || sender.tab?.url, binding.documentUrl || binding.expectedUrl) &&
+           !takeoverSameUrl(sender.url || sender.tab?.url, binding.expectedUrl)) ||
           identity?.domain !== new URL(binding.expectedUrl).hostname ||
           identity?.color_key !== 'url' ||
           !takeoverSameUrl(identity.product_url, binding.expectedUrl)) {
