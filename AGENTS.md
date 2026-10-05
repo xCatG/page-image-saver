@@ -14,6 +14,7 @@ The technical boundaries are fixed and are the only ones:
 
 - Runs only in the owner's own browser session, at a steady pace (take-over defaults to about 10 s
   between page loads), and stays on the site's own hosts and CDNs.
+- Owner-approved headed Linux Playwright on the owner's machine is also allowed for take-over runs, under the same pacing and technical boundaries.
 - Triggering the page's normal UI is fine: scrolling, lazy-load, hover, clicking color swatches.
 - No solving or bypassing bot challenges or CAPTCHAs, no stealth or fingerprint spoofing, no IP or
   identity rotation, no pushing through 403/429, no chrome.debugger input injection.
