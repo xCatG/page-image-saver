@@ -15,7 +15,7 @@ A Chrome extension to find and save images from web pages to your S3 or R2 stora
 - User-friendly settings UI for configuring storage credentials
 - Preserve original filenames when possible
 - Keyboard shortcuts:
-  - Alt+Shift+I to find images
+  - Alt+Shift+P to find images (Alt+Shift+I is reserved by Chrome on Windows; set or change keys at chrome://extensions/shortcuts)
   - Alt+Shift+S to take a screenshot
 
 ## Installation
@@ -32,7 +32,7 @@ For the Milestone 1 integration, load this exact unpacked directory in `chrome:/
 
 `/home/yenchi/src/lingerie_trends/.worktrees/page-image-saver-capture`
 
-On a product page, press Alt+Shift+I or click the toolbar button. Select product images, choose **Capture Product Locally**, set the color identity policy and scope, then capture. Use **Color on this URL** for in-place swatches (a selected color is required) or **Each color has its own URL** only when the site really uses separate URLs. You may choose site product selectors when a packaged `site_config/<domain>.json` exists; otherwise select images by checkbox. In-place swatch changes wait for both the color and gallery to update, in either order. If you intentionally change only the checked images for the *same* color, check the one-capture **I changed only the image selection, not the product/color** confirmation; it resets immediately and never applies to automatic capture. Reopen the panel after a swatch change when using selected checkboxes. The optional site auto-capture toggle waits briefly for asynchronously rendered product galleries on pages you visit, records/notifies a recognized-product timeout, and never navigates the catalog.
+On a product page, press Alt+Shift+P or click the toolbar button. Select product images, choose **Capture Product Locally**, set the color identity policy and scope, then capture. Use **Color on this URL** for in-place swatches (a selected color is required) or **Each color has its own URL** only when the site really uses separate URLs. You may choose site product selectors when a packaged `site_config/<domain>.json` exists; otherwise select images by checkbox. In-place swatch changes wait for both the color and gallery to update, in either order. If you intentionally change only the checked images for the *same* color, check the one-capture **I changed only the image selection, not the product/color** confirmation; it resets immediately and never applies to automatic capture. Reopen the panel after a swatch change when using selected checkboxes. The optional site auto-capture toggle waits briefly for asynchronously rendered product galleries on pages you visit, records/notifies a recognized-product timeout, and never navigates the catalog.
 
 Local product capture never uses S3/R2 settings. With a configured local receiver, it saves the bundle there; run `lt.py capture-index` in the Python worktree to add verified captures to the viewer. See [receiver setup and indexing](../catalog-manual-capture/docs/catalog-capture-receiver.md). Without a receiver, or when its transport is unavailable, the action exports to Chrome's local `Downloads/PageImageSaver/` folder; run `lt.py capture-import` to verify those files and add them to the viewer. The `complete.json` is written after the page HTML, JSON-LD, and image exports finish, but Chrome's download completion event is not a disk-integrity check. See [manual capture and offline import](../catalog-manual-capture/docs/catalog-manual-capture.md) for the Downloads workflow.
 
@@ -96,7 +96,7 @@ Gold selection remains manual. This preset does not install or invoke `lingerie_
 ### Finding and Saving Images
 
 1. Navigate to any web page
-2. Click the extension icon or press Alt+Shift+I
+2. Click the extension icon or press Alt+Shift+P
 3. A sidebar will appear showing all images found on the page
 4. Select the images you want to save
 5. Click "Save Selected"
@@ -154,7 +154,7 @@ For Cloudflare R2:
 Included in this repository is a `test-page.html` file that contains various types of images for testing the extension. To use it:
 
 1. Open the file in your browser (File > Open or drag it into Chrome)
-2. Click the extension icon or use the Alt+Shift+I shortcut
+2. Click the extension icon or use the Alt+Shift+P shortcut
 3. Verify that the extension correctly finds and displays both regular images and CSS background images
 4. Test the selection, upload, and screenshot functionality
 
