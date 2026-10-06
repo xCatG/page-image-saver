@@ -2532,12 +2532,10 @@ function captureGallery(config, mode) {
     urls = Array.from(checked, node => currentFilteredImages[Number(node.dataset.index)]?.url);
   }
   if (mode === 'site' && config?.product?.originalImageUrlPattern) {
-    // Saved complete pages can retain the original in metadata or another image.
-    // Those are evidence candidates only; they never expand the selected gallery.
-    const candidates = Array.from(document.querySelectorAll('img[src], meta[content]'),
-      node => node.getAttribute('src') || node.getAttribute('content'));
-    urls = urls.filter(Boolean).map(raw => globalThis.PageImageSaverHelpers.resolveGalleryOriginal(
-      raw, config.product.originalImageUrlPattern, window.location.href, candidates));
+    const resolved = Array.from(document.querySelectorAll(config.product.allImagesSelector),
+      node => globalThis.PageImageSaverHelpers.galleryNodeOriginal(node, config, document));
+    urls = resolved.map(item => item.url).filter(Boolean);
+    if (!urls.length) throw resolved.find(item => item.error)?.error || new Error('gallery original: no image nodes');
   }
   const unique = new Set();
   for (const raw of urls) {

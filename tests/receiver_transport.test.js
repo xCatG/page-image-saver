@@ -270,3 +270,8 @@ test('background capture message selects receiver without using cloud settings',
   assert.equal(responses[0].success, true);
   assert.equal(responses[0].storage, 'receiver');
 });
+test('malformed receiver URL has a named step and value, without disclosing its token', async () => {
+  await assert.rejects(() => helpers.captureWithReceiver(payload,
+    {...settings, url: '192.168.1.100:8765', token: 'do-not-log-me'}, {}), error =>
+    /receiver URL/.test(error.message) && /192\.168\.1\.100:8765/.test(error.message) && !error.message.includes('do-not-log-me'));
+});

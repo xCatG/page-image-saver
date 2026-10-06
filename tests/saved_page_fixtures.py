@@ -89,6 +89,60 @@ class SavedPageFixtures(unittest.TestCase):
         finally:
             page.close()
 
+    def test_ap_live_candidates_skip_bad_input_and_share_lazy_resolution(self):
+        config = json.loads(source("site_config/www.agentprovocateur.com.json"))
+        page = self.open_fixture(config["domain"], "agentprovocateur-davinah.html")
+        try:
+            expected = page.evaluate("c => captureGallery(c, 'site')", config)
+            page.evaluate("""urls => {
+              const main = document.querySelector('main'); main.innerHTML = '';
+              const attributes = [
+                {src: 'https://[bad/', 'data-src': new URL(urls[0]).pathname},
+                {src: 'data:image/gif;base64,AAAA', srcset: urls[1].replace('https:', '') + ' 2x'},
+                {src: '', 'data-src': '/tco-images/unsafe/0x0/' + encodeURIComponent(urls[2])},
+                {src: 'https://[bad/'}];
+              for (const attrs of attributes) {
+                const wrapper = document.createElement('product-media-wrapper');
+                const img = document.createElement('img'); img.className = 'df-image';
+                for (const [key, value] of Object.entries(attrs)) img.setAttribute(key, value);
+                wrapper.append(img); main.append(wrapper);
+              }
+              document.querySelector('#image-selector-container').remove();
+            }""", expected)
+            self.assertEqual(page.evaluate("c => captureGallery(c, 'site')", config), expected)
+            page.evaluate("c => PageImageSaverHelpers.prepareLazyGallery(c, document, {timeoutMs: 500, pollMs: 10})", config)
+            page.evaluate("document.querySelector('main').innerHTML = '<product-media-wrapper><img class=\"df-image\" src=\"https://[bad/\"></product-media-wrapper>'")
+            reason = page.evaluate("""c => {try { captureGallery(c, 'site'); return ''; }
+                catch (e) { return e.message; }}""", config)
+            self.assertIn('gallery', reason)
+            self.assertIn('https://[bad/', reason)
+        finally:
+            page.close()
+
+    def test_ap_lazy_placeholder_gets_time_to_materialize(self):
+        config = json.loads(source("site_config/www.agentprovocateur.com.json"))
+        page = self.open_fixture(config["domain"], "agentprovocateur-davinah.html")
+        try:
+            page.evaluate("""() => {
+              const original = 'https://www.agentprovocateur.com/static/media/catalog/product/2/8/106604_ecom_1.jpg';
+              document.querySelector('main').innerHTML = '<product-media-wrapper><img class="df-image"></product-media-wrapper>'.repeat(2);
+              const images = document.querySelectorAll('main img');
+              images[0].src = original;
+              images[1].src = 'data:image/gif;base64,AAAA';
+              images[1].scrollIntoView = () => {
+                if (window.startedLazyLoad) return;
+                window.startedLazyLoad = true;
+                setTimeout(() => { images[1].src = original.replace('_1.jpg', '_2.jpg'); }, 100);
+              };
+            }""")
+            result = page.evaluate("""async c => {
+              await PageImageSaverHelpers.prepareLazyGallery(c, document, {timeoutMs: 500, pollMs: 10});
+              return captureGallery(c, 'site');
+            }""", config)
+            self.assertEqual(len(result), 2)
+        finally:
+            page.close()
+
     @classmethod
     def setUpClass(cls):
         cls.playwright = sync_playwright().start()

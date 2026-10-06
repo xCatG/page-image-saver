@@ -168,6 +168,13 @@
     throw new Error('invalid capture identity key');
   }
 
+  function captureUrlError(step, value, detail) {
+    // Never include URL credentials, query secrets or large inline image payloads.
+    const sample = String(value ?? '').replace(/(https?:\/\/)[^/]*@/gi, '$1[redacted]@')
+      .split(/[?#]/)[0].slice(0, 120);
+    return new Error(`${step}: ${detail}; input=${JSON.stringify(sample)}`);
+  }
+
   // Opt-in site rule: retain only evidenced originals, never guess a path from a SKU.
   function resolveGalleryOriginal(raw, pattern, base, candidates = []) {
     const origin = new URL(base).origin;
@@ -176,22 +183,57 @@
       try {
         const url = new URL(value, base);
         if (url.origin !== origin || url.protocol !== 'https:') return null;
-        const match = url.href.match(re)?.[0];
-        if (!match) return null;
-        if (url.href !== match && !url.pathname.startsWith('/tco-images/')) return null;
+        let source = url.href;
+        if (url.pathname.startsWith('/tco-images/')) {
+          source = decodeURIComponent(source);
+          // Proxy embeds either an absolute, protocol-relative or bare-host original.
+          const hostPath = new URL(base).host + '/static/media/catalog/product/';
+          const offset = source.indexOf(hostPath, origin.length);
+          if (offset < 0) return null;
+          source = 'https://' + source.slice(offset);
+        }
+        const match = source.match(re)?.[0];
+        if (!match || source !== match || new URL(match).origin !== origin) return null;
         return new URL(match).href;
       } catch (_) { return null; }
     };
     const direct = extract(raw);
     if (direct) return direct;
-    const local = new URL(raw, base);
+    let local;
+    try { local = new URL(raw, base); }
+    catch (_) { throw captureUrlError('gallery original', raw, 'invalid URL'); }
     if (local.origin !== origin || !local.pathname.includes('_files/'))
-      throw new Error('No evidenced gallery original URL');
+      throw captureUrlError('gallery original', raw, 'no evidenced original URL');
     const filename = local.pathname.split('/').pop();
     const matches = new Set(candidates.map(extract).filter(url => url &&
       new URL(url).pathname.split('/').pop() === filename));
-    if (matches.size !== 1) throw new Error('Missing or ambiguous gallery original URL');
+    if (matches.size !== 1) {
+      const error = captureUrlError('gallery original', raw, 'missing or ambiguous original URL');
+      error.unresolvedOriginal = true;
+      throw error;
+    }
     return [...matches][0];
+  }
+
+  function galleryNodeOriginal(node, config, doc) {
+    const values = ['data-original', 'data-src'].map(name => node.getAttribute(name));
+    for (const name of ['data-srcset', 'srcset']) {
+      for (const entry of (node.getAttribute(name) || '').split(','))
+        values.push(entry.trim().split(/\s+/)[0]);
+    }
+    values.push(node.getAttribute('src'), node.currentSrc);
+    const evidence = Array.from(doc.querySelectorAll('img[src], meta[content]'),
+      n => n.getAttribute('src') || n.getAttribute('content'));
+    let error, unresolved;
+    for (const raw of [...new Set(values.filter(Boolean))]) {
+      try { return {url: resolveGalleryOriginal(raw, config.product.originalImageUrlPattern,
+        doc.location.href, evidence)}; }
+      catch (e) { error ||= e; if (e.unresolvedOriginal) unresolved = e; }
+    }
+    // A broken alternative candidate cannot poison a valid one. But a saved image
+    // with missing/ambiguous original evidence must not silently disappear.
+    if (unresolved) throw unresolved;
+    return {url: null, error: error || captureUrlError('gallery original', '', 'empty image sources')};
   }
 
   function captureImageUrls(original, transform) {
@@ -343,7 +385,9 @@
   }
 
   async function captureWithReceiver(payload, settings, io) {
-    const url = new URL(settings.url);
+    let url;
+    try { url = new URL(settings.url); }
+    catch (_) { throw captureUrlError('receiver URL', settings.url, 'invalid address; include http:// or https://'); }
     const host = url.hostname.toLowerCase();
     const privateIp = /^(?:127|10)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
       /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
@@ -351,7 +395,7 @@
     if (!['http:', 'https:'].includes(url.protocol) || !privateIp && host !== 'localhost' &&
         !host.endsWith('.local') || url.username || url.password || url.pathname !== '/' ||
         url.search || url.hash || !settings.token) {
-      throw new Error('invalid local receiver URL or token');
+      throw captureUrlError('receiver URL', settings.url, 'invalid local receiver URL or token');
     }
     const base = url.origin;
     const fetcher = io.fetch || globalThis.fetch;
@@ -587,7 +631,9 @@
     let images = [], ready = [];
     // Ready = a matching URL that has either finished loading or lost its placeholder state.
     // Chantelle leaves --blurring on some frames whose image has fully loaded.
-    const isReady = img => pattern.test(img.getAttribute('src') || img.currentSrc || '') &&
+    const original = img => galleryNodeOriginal(img, config, doc);
+    const isReady = img => (config.product.originalImageUrlPattern
+      ? !!original(img).url : pattern.test(img.getAttribute('src') || img.currentSrc || '')) &&
       ((img.complete && img.naturalWidth > 0) || !img.closest('[class*="--blurring"]'));
     try {
       do {
@@ -600,10 +646,20 @@
         }
         images = Array.from(doc.querySelectorAll(selector));
         ready = images.filter(isReady);
-        if (images.length && ready.length === images.length) return;
+        // Give unresolved lazy frames the full deadline to acquire real URLs.
+        // Only then may unusable candidates be skipped; none grant success alone.
+        if (ready.length && ready.length === images.length) return;
         await new Promise(resolve => setTimeout(resolve, pollMs));
       } while (Date.now() < deadline);
-      throw new Error(`Lazy gallery shortfall: ${ready.length}/${images.length} configured images ready (URL pattern and blur check)`);
+      // The final poll sleep may cross the deadline, so evaluate skip eligibility here.
+      images = Array.from(doc.querySelectorAll(selector));
+      ready = images.filter(isReady);
+      if (config.product.originalImageUrlPattern && ready.length &&
+          images.every(img => isReady(img) || !original(img).url)) return;
+      const failed = images.find(img => !isReady(img));
+      const detail = config.product.originalImageUrlPattern && failed ? original(failed).error?.message : null;
+      throw new Error(`Lazy gallery shortfall: ${ready.length}/${images.length} configured images ready (URL pattern and blur check)` +
+        (detail ? `; ${detail}` : `; lazy src=${JSON.stringify(String(failed?.getAttribute('src') || '').slice(0, 120))}`));
     } finally {
       view.scrollTo({left: position[0], top: position[1], behavior: 'instant'});
     }
@@ -657,6 +713,7 @@
     captureIdentityKey,
     captureImageUrls,
     resolveGalleryOriginal,
+    galleryNodeOriginal,
     waitForCaptureState,
     waitForAutoCaptureReady,
     recordCaptureFailure,

@@ -18,3 +18,14 @@ test('AP resolver rejects unrelated hosts and non-gallery URLs', () => {
   for (const raw of ['https://evil.test/' + original, 'https://www.agentprovocateur.com/logo.svg', 'data:image/png,x'])
     assert.throws(() => h.resolveGalleryOriginal(raw, pattern, base), /original/);
 });
+test('AP malformed candidate reports gallery step and truncated offending input', () => {
+  assert.throws(() => h.resolveGalleryOriginal('https://[bad/' + 'x'.repeat(500), pattern, base), error =>
+    /gallery original/.test(error.message) && /https:\/\/\[bad/.test(error.message) && error.message.length < 250);
+});
+test('AP proxy resolves encoded and scheme-less originals against the page origin', () => {
+  for (const value of [encodeURIComponent(original), original.replace('https:', ''), original.replace('https://', '')]) {
+    assert.equal(h.resolveGalleryOriginal('/tco-images/unsafe/0x0/' + value, pattern, base), original);
+  }
+  assert.equal(h.resolveGalleryOriginal(original.replace('https:', ''), pattern, base), original);
+  assert.equal(h.resolveGalleryOriginal(new URL(original).pathname, pattern, base), original);
+});

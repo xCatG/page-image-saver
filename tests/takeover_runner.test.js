@@ -666,3 +666,22 @@ test('exported run carries the saved accounting and reasons for a gap', async ()
   assert.equal(exported.products[0].reason, 'exported_unverified');
   assert.equal(exported.status, 'finished_with_gaps');
 });
+test('fixed queue captures review scope and preserves named URL errors in its export', async () => {
+  const page = {...braPage, product: {name: 'Essie', category: ''}};
+  const r = rig({[bra]: page}, {}, {verifyResult: {storage: 'receiver', status: 'missing'}});
+  await r.runner().importDiscovery(site, [discoverySource()]);
+  await r.runner().start();
+  await r.runner().tick();
+  assert.equal(r.captureCalls[0].scope.decision, 'review');
+  assert.equal(r.memory.run.products[0].status, 'captured');
+  const {resolveGalleryOriginal} = require('../extension_helpers.js');
+  let reason;
+  try { resolveGalleryOriginal('https://[bad/', '.', bra); } catch (error) { reason = error.message; }
+  const failure = rig({[bra]: page}, {[bra]: new Error(reason)},
+    {verifyResult: {storage: 'receiver', status: 'missing'}});
+  await failure.runner().importDiscovery(site, [discoverySource()]);
+  await failure.runner().start();
+  await failure.runner().tick();
+  const exported = exportTakeoverReport(failure.memory.run);
+  assert.match(exported.products[0].reason, /gallery original.*https:\/\/\[bad/);
+});
