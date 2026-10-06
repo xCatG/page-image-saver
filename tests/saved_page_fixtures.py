@@ -42,6 +42,53 @@ class SavedPageFixtures(unittest.TestCase):
         finally:
             page.close()
 
+    def test_ap_saved_gallery_originals_and_carousel_deduplication(self):
+        config = json.loads(source("site_config/www.agentprovocateur.com.json"))
+        page = self.open_fixture(config["domain"], "agentprovocateur-davinah.html")
+        try:
+            self.assertTrue(page.evaluate("c => captureProductSeen(c)", config))
+            gallery = page.evaluate("c => captureGallery(c, 'site')", config)
+            self.assertEqual(gallery, [
+                "https://www.agentprovocateur.com/static/media/catalog/product/2/8/106604_flatshot_front.jpg",
+                "https://www.agentprovocateur.com/static/media/catalog/product/2/8/106604_ecom_1.jpg",
+                "https://www.agentprovocateur.com/static/media/catalog/product/2/8/106604_ecom_2.jpg"])
+            # Model live proxy src using only originals evidenced in this save.
+            page.evaluate("""urls => {
+              document.querySelectorAll('product-media-wrapper img').forEach(img => {
+                const name = img.getAttribute('src').split('/').pop();
+                img.src = '/tco-images/unsafe/0x0/filters:quality(80)/' + urls.find(u => u.endsWith('/' + name));
+              });
+              document.querySelector('#image-selector-container').remove();
+            }""", gallery)
+            self.assertEqual(page.evaluate("c => captureGallery(c, 'site')", config), gallery)
+            page.evaluate("c => PageImageSaverHelpers.prepareLazyGallery(c, document, {timeoutMs: 500})", config)
+        finally:
+            page.close()
+
+    def test_ap_saved_pages_do_not_guess_missing_gallery_originals(self):
+        config = json.loads(source("site_config/www.agentprovocateur.com.json"))
+        for name, count in [("lorna", 5), ("essie", 3)]:
+            page = self.open_fixture(config["domain"], f"agentprovocateur-{name}.html")
+            try:
+                self.assertEqual(page.evaluate("c => new Set([...document.querySelectorAll(c.product.allImagesSelector)].map(n => n.getAttribute('src'))).size", config), count)
+                result = page.evaluate("""c => {try { captureGallery(c, 'site'); return ''; }
+                  catch (e) { return e.message; }}""", config)
+                self.assertIn("original", result)
+            finally:
+                page.close()
+
+    def test_ap_saved_listing_is_scoped_and_has_no_false_terminal_proof(self):
+        config = json.loads(source("site_config/www.agentprovocateur.com.json"))
+        page = self.open_fixture(config["domain"], "agentprovocateur-listing.html")
+        try:
+            self.assertEqual(page.locator(config["listing"]["productLinkSelector"]).count(), 3)
+            self.assertFalse(page.evaluate("c => captureProductSeen(c)", config))
+            self.assertEqual(page.locator(config["listing"]["pagination"]["nextSelector"]).count(), 0)
+            self.assertNotIn("endCheck", config["listing"])
+            self.assertGreaterEqual(config["takeover"]["intervalMs"], 10000)
+        finally:
+            page.close()
+
     @classmethod
     def setUpClass(cls):
         cls.playwright = sync_playwright().start()

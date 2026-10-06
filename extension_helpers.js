@@ -168,6 +168,32 @@
     throw new Error('invalid capture identity key');
   }
 
+  // Opt-in site rule: retain only evidenced originals, never guess a path from a SKU.
+  function resolveGalleryOriginal(raw, pattern, base, candidates = []) {
+    const origin = new URL(base).origin;
+    const re = new RegExp(pattern);
+    const extract = value => {
+      try {
+        const url = new URL(value, base);
+        if (url.origin !== origin || url.protocol !== 'https:') return null;
+        const match = url.href.match(re)?.[0];
+        if (!match) return null;
+        if (url.href !== match && !url.pathname.startsWith('/tco-images/')) return null;
+        return new URL(match).href;
+      } catch (_) { return null; }
+    };
+    const direct = extract(raw);
+    if (direct) return direct;
+    const local = new URL(raw, base);
+    if (local.origin !== origin || !local.pathname.includes('_files/'))
+      throw new Error('No evidenced gallery original URL');
+    const filename = local.pathname.split('/').pop();
+    const matches = new Set(candidates.map(extract).filter(url => url &&
+      new URL(url).pathname.split('/').pop() === filename));
+    if (matches.size !== 1) throw new Error('Missing or ambiguous gallery original URL');
+    return [...matches][0];
+  }
+
   function captureImageUrls(original, transform) {
     const url = new URL(original).href;
     let fetched = url;
@@ -630,6 +656,7 @@
     captureIdentity,
     captureIdentityKey,
     captureImageUrls,
+    resolveGalleryOriginal,
     waitForCaptureState,
     waitForAutoCaptureReady,
     recordCaptureFailure,

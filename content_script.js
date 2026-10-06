@@ -2531,6 +2531,14 @@ function captureGallery(config, mode) {
     const checked = document.querySelectorAll('#image-selector-container input[type="checkbox"]:checked');
     urls = Array.from(checked, node => currentFilteredImages[Number(node.dataset.index)]?.url);
   }
+  if (mode === 'site' && config?.product?.originalImageUrlPattern) {
+    // Saved complete pages can retain the original in metadata or another image.
+    // Those are evidence candidates only; they never expand the selected gallery.
+    const candidates = Array.from(document.querySelectorAll('img[src], meta[content]'),
+      node => node.getAttribute('src') || node.getAttribute('content'));
+    urls = urls.filter(Boolean).map(raw => globalThis.PageImageSaverHelpers.resolveGalleryOriginal(
+      raw, config.product.originalImageUrlPattern, window.location.href, candidates));
+  }
   const unique = new Set();
   for (const raw of urls) {
     if (!raw) continue;
