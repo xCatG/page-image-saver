@@ -279,7 +279,7 @@ test('page-count evidence, unique URLs and exclusion accounting complete a run',
   assert.equal(r.memory.run.status, 'complete');
   assert.deepEqual(summarizeTakeover(r.memory.run), {listingPagesVisited: 2,
     productsFound: 3, productsCaptured: 2, colorsCaptured: 2, sizeOptionsTraversed: 0,
-    excluded: 1, failed: 0, pending: 0, exportedUnverified: 0});
+    excluded: 1, gone: 0, failed: 0, pending: 0, exportedUnverified: 0});
   assert.deepEqual(r.captureCalls.map(call => call.url), [bra, red]);
   assert.equal(r.captureCalls[0].scope.decision, 'include');
 });
@@ -413,7 +413,7 @@ test('challenge and 403/429 stop immediately; transient load failures are bounde
   assert.equal(r.visits.length, 3);
 });
 
-test('dead product 404 fails that item and still captures the next product', async () => {
+test('dead product 404 skips that item and still captures the next product', async () => {
   const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
   const r = rig({[first]: {...listing1, products: [bra, red], next: null,
     end: {type: 'explicit', present: true}}, [bra]: {status: 404},
@@ -422,8 +422,8 @@ test('dead product 404 fails that item and still captures the next product', asy
   for (let i = 0; i < 4 && r.memory.run.status === 'running'; i++) {
     await r.runner().tick(); r.advance(10000);
   }
-  assert.equal(r.memory.run.status, 'finished_with_gaps');
-  assert.equal(r.memory.run.products[0].status, 'failed');
+  assert.equal(r.memory.run.status, 'complete');
+  assert.equal(r.memory.run.products[0].status, 'skipped');
   assert.match(r.memory.run.products[0].reason, /HTTP 404/);
   assert.deepEqual(r.captureCalls.map(call => call.url), [red]);
   assert.deepEqual(r.visits, [first, bra, red]);
@@ -579,7 +579,7 @@ test('fixed queue rejects changed or removed existing query parameters', async (
 
 test('five consecutive fixed queue failures pause across worker restarts', async () => {
   const urls=Array.from({length:6},(_,i)=>bra+'/'+i);
-  const pages=Object.fromEntries(urls.map(url=>[url,{...redPage}]));
+  const pages=Object.fromEntries(urls.map(url=>[url,{kind:'listing',url}]));
   const r=rig(pages,{}, {verifyResult:{storage:'receiver',status:'missing'}});
   await r.runner().importDiscovery(site,[discoverySource(urls)]);
   await r.runner().start();
@@ -611,15 +611,15 @@ test('capture errors trigger the five-failure guard and verified skips reset it'
   assert.match(s.memory.run.reason,/5 consecutive.*image decode failed/);
 });
 
-test('fixed queue redirects fail only the source and capture the destination once at its own turn', async () => {
+test('fixed queue redirects skip gone sources or fail invalid URLs; capture only the destination once at its own turn', async () => {
   for (const destination of [red, 'https://other.test/product', 'not a URL']) {
     const r = rig({[bra]: {...redPage, url: destination}, [red]: redPage}, {},
       {verifyResult: {storage:'receiver', status:'missing'}});
     await r.runner().importDiscovery(site, [discoverySource([bra, red])]);
     await r.runner().start(); await r.runner().tick();
     assert.equal(r.memory.run.status, 'running');
-    assert.equal(r.memory.run.products[0].status, 'failed');
-    assert.match(r.memory.run.products[0].reason, /redirected:|invalid inspected page URL/);
+    assert.equal(r.memory.run.products[0].status, destination === red ? 'skipped' : 'failed');
+    assert.match(r.memory.run.products[0].reason, /gone: redirected to |invalid inspected page URL/);
     assert.equal(r.captureCalls.length, 0);
     r.advance(10000); await r.runner().tick();
     assert.deepEqual(r.captureCalls.map(row => row.url), [red]);
@@ -646,8 +646,9 @@ test('same-site product redirect cannot satisfy a different queued URL', async (
     end: {type: 'explicit', present: true}}, [bra]: {...redPage, url: red}});
   await prepare(r, config); await r.runner().start();
   await r.runner().tick(); r.advance(10000); await r.runner().tick();
-  assert.equal(r.memory.run.status, 'paused');
-  assert.equal(r.memory.run.products[0].status, 'pending');
+  assert.equal(r.memory.run.status, 'running');
+  assert.equal(r.memory.run.products[0].status, 'skipped');
+  assert.equal(r.memory.run.products[0].reason, 'gone: redirected to ' + red);
   assert.equal(r.captureCalls.length, 0);
 });
 
@@ -684,4 +685,60 @@ test('fixed queue captures review scope and preserves named URL errors in its ex
   await failure.runner().tick();
   const exported = exportTakeoverReport(failure.memory.run);
   assert.match(exported.products[0].reason, /gallery original.*https:\/\/\[bad/);
+});
+
+
+test('gone HTTP products preserve failure streak across restarts and export separately from verified skips', async () => {
+  const urls=Array.from({length:10},(_,i)=>bra+'/'+i);
+  const statuses=[500,404,410,500,404,404,500,500,500,200];
+  const pages=Object.fromEntries(urls.map((url,i)=>[url,{...braPage,url,status:statuses[i]}]));
+  const r=rig(pages,{}, {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource(urls)]);
+  await r.runner().start();
+  for(let i=0;i<9;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'paused');
+  assert.equal(r.memory.run.consecutiveFailures,5);
+  assert.equal(r.memory.run.products[9].status,'pending');
+  assert.deepEqual(r.visits,urls.slice(0,9));
+  assert.equal(r.captureCalls.length,0);
+  const report=exportTakeoverReport(r.memory.run);
+  assert.equal(report.accounting.gone,4);
+  assert.equal(report.accounting.skipped,0);
+  assert.equal(report.accounting.failed,5);
+  assert.equal(report.products[1].reason,'gone: HTTP 404');
+  assert.equal(report.products[2].reason,'gone: HTTP 410');
+  assert.equal(report.products[1].status,'skipped');
+});
+
+test('five gone products do not pause and reimport revisits gone but receiver-skips captures', async () => {
+  const urls=[...Array.from({length:5},(_,i)=>bra+'/'+i),red];
+  const pages=Object.fromEntries(urls.map(url=>[url,url===red?redPage:{url,status:404}]));
+  const r=rig(pages,{}, {verifyResult:{storage:'receiver',status:'missing'}});
+  const source=discoverySource(urls);
+  await r.runner().importDiscovery(site,[source]); await r.runner().start();
+  const runner=r.runner();
+  for(let i=0;i<7;i++){await runner.tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'complete');
+  assert.equal(summarizeTakeover(r.memory.run).gone,5);
+  assert.deepEqual(r.captureCalls.map(x=>x.url),[red]);
+  r.io.verify=async identity=>({storage:'receiver',status:identity.product_url===red?'already':'missing'});
+  await r.runner().importDiscovery(site,[source]); await r.runner().start();
+  for(let i=0;i<7;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'complete');
+  assert.equal(summarizeTakeover(r.memory.run).gone,5);
+  assert.equal(summarizeTakeover(r.memory.run).skipped,1);
+  assert.deepEqual(r.visits,[...urls,...urls.slice(0,5)]);
+});
+
+
+test('same-product locale and canonical redirects keep their existing failure handling', async () => {
+  const queued='https://shop.example.test/us_en/bra-239';
+  for (const url of [queued+'/', queued.replace('/us_en/','/uk_en/'), queued.replace('bra','%62ra')]) {
+    const r=rig({[queued]:{...braPage,url}}, {}, {verifyResult:{storage:'receiver',status:'missing'}});
+    await r.runner().importDiscovery(site,[discoverySource([queued])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.products[0].status,'failed');
+    assert.equal(summarizeTakeover(r.memory.run).gone,0);
+    assert.equal(r.captureCalls.length,0);
+  }
 });

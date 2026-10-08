@@ -277,6 +277,79 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
             self.worker.evaluate('() => { globalThis.fetch = fixtureFetch; PageImageSaverHelpers.saveCaptureDownload = fixtureSave; }')
             runner_page.close()
 
+    def test_gone_queue_navigates_offline_without_pausing_or_capturing_redirect(self):
+        self.open_panel('https://us.chantelle.com/list')
+        base = 'https://us.chantelle.com/product/'
+        urls = [base + 'gone-first', base + 'old-product', base + 'bra-black'] + [base + f'gone-{i}' for i in range(5)]
+        source = json.dumps({'schema_version':1, 'format':'page-image-saver-discovery/v1',
+            'mode':'discovery', 'site':'us.chantelle.com',
+            'listings':[{'url':'https://us.chantelle.com/list','final_url':'https://us.chantelle.com/list',
+                'products':[{'url':url} for url in urls]}]}).encode()
+        self.page.locator('#takeover-discovery-files').set_input_files(
+            {'name':'discovery-001.json','mimeType':'application/json','buffer':source})
+        self.page.wait_for_function("document.querySelector('#takeover-feedback').textContent.includes('Fixed queue ready')")
+        runner_page = self.context.new_page()
+        visited = []
+        def offline(route):
+            url = route.request.url
+            if route.request.is_navigation_request():
+                visited.append(url)
+            if '/gone-' in url:
+                route.fulfill(status=404, content_type='text/html', body='<html><body>Gone</body></html>')
+            elif url == base + 'old-product':
+                route.fulfill(status=200, content_type='text/html', body='<script>location.replace(' + json.dumps(base + 'replacement') + ')</script>')
+            else:
+                self.route_fixture(route)
+        runner_page.route('**/*', offline)
+        self.context.set_offline(True)
+        runner_page.goto('https://us.chantelle.com/list-runner')
+        self.worker.evaluate("""async () => {
+          const [tab] = await chrome.tabs.query({url:'https://us.chantelle.com/list-runner'});
+          const {catalogTakeoverRun:run} = await chrome.storage.local.get('catalogTakeoverRun');
+          run.config.takeover = {intervalMs:0};
+          await chrome.storage.local.set({catalogTakeoverRun:run,catalogTakeoverTabId:tab.id});
+          globalThis.goneFixtureOriginal = PageImageSaverHelpers.captureWithReceiver;
+          globalThis.goneFixtureSettings = await chrome.storage.sync.get('imageUploaderSettings');
+          await chrome.storage.sync.set({imageUploaderSettings:{receiver:{enabled:true,
+            url:'http://127.0.0.1:8765',token:'offline-test-only'}}});
+          globalThis.goneFixtureCaptures = [];
+          PageImageSaverHelpers.captureWithReceiver = async (payload, _settings, io) => {
+            const identity = payload.identity;
+            if (io.verifyOnly) return {storage:'receiver',status:
+              goneFixtureCaptures.includes(identity.product_url)?'already':'missing'};
+            goneFixtureCaptures.push(identity.product_url);
+            return {storage:'receiver',status:'published',identity};
+          };
+        }""")
+        try:
+            self.page.locator('#takeover-start-btn').click()
+            for _ in range(300):
+                run = self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun)")
+                if run['status'] in ['complete','finished_with_gaps','paused']:
+                    break
+                self.page.wait_for_timeout(100)
+            self.assertEqual(run['status'], 'complete', run)
+            self.assertEqual([row['url'] for row in run['products']], urls)
+            self.assertEqual([row['status'] for row in run['products']], ['skipped','skipped','captured'] + ['skipped']*5)
+            self.assertEqual(run['products'][0]['reason'], 'gone: HTTP 404')
+            self.assertEqual(run['products'][1]['reason'], 'gone: redirected to ' + base + 'replacement', {'visited':visited,'products':run['products']})
+            self.assertEqual(self.worker.evaluate('goneFixtureCaptures'), [base + 'bra-black'])
+            self.assertIn(base + 'replacement', visited)
+            report = self.worker.evaluate("""async () => PageImageSaverTakeover.exportTakeoverReport(
+              (await chrome.storage.local.get('catalogTakeoverRun')).catalogTakeoverRun)""")
+            self.assertEqual(report['accounting']['gone'],7)
+            self.assertEqual(report['accounting']['skipped'],0)
+            self.page.wait_for_function("document.querySelector('#takeover-progress').textContent.includes('gone 7')")
+            self.assertIn('All other skips require receiver verification', self.page.locator('#takeover-progress').inner_text())
+        finally:
+            self.context.set_offline(False)
+            self.worker.evaluate('''async () => {
+              PageImageSaverHelpers.captureWithReceiver = goneFixtureOriginal;
+              await chrome.storage.sync.remove('imageUploaderSettings');
+              await chrome.storage.sync.set(goneFixtureSettings);
+            }''')
+            runner_page.close()
+
     def test_latest_preview_seed_and_current_discovery_reuse_are_visible(self):
         self.open_panel('https://us.chantelle.com/list-first')
         self.page.locator('#takeover-mode').select_option('discovery')

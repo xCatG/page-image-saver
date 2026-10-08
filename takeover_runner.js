@@ -24,6 +24,14 @@
     return true;
   }
 
+  // Used only to avoid calling locale/canonical spellings a different product.
+  // This does not grant capture permission or change existing URL binding rules.
+  function productPath(value) {
+    return decodeURI(new URL(value).pathname)
+      .replace(/^\/[a-z]{2}(?:[-_][a-z]{2})?(?=\/)/i, '')
+      .replace(/\/+$/, '');
+  }
+
   function classifyTakeoverScope(product) {
     const name = String(product?.name || '').trim();
     const category = String(product?.category || '').trim();
@@ -44,9 +52,10 @@
       productsFound: products.length, productsCaptured: captured,
       colorsCaptured: captured, sizeOptionsTraversed: 0,
       excluded: products.filter(item => item.status === 'excluded').length,
+      gone: products.filter(item => item.status === 'skipped' && item.captureStatus === 'gone').length,
       failed: products.filter(item => item.status === 'failed').length,
       pending: products.filter(item => item.status === 'pending').length,
-      ...(run?.mode === 'capture-discovery' ? {skipped: products.filter(item => item.status === 'skipped').length} : {}),
+      ...(run?.mode === 'capture-discovery' ? {skipped: products.filter(item => item.status === 'skipped' && item.captureStatus !== 'gone').length} : {}),
       exportedUnverified: products.filter(item => item.status === 'failed' && item.reason === 'exported_unverified').length};
   }
 
@@ -215,7 +224,8 @@
       const run = await read();
       if (!run || run.status !== 'running') return run;
       for (const row of run.products) {
-        if (!['captured', 'skipped'].includes(row.status)) continue;
+        if (!['captured', 'skipped'].includes(row.status) ||
+            row.status === 'skipped' && row.captureStatus === 'gone') continue;
         const key = `${run.generation}|${row.url}`;
         if (verifiedHere.has(key)) continue;
         try {
@@ -296,18 +306,27 @@
         return interrupt(run, 'paused', `challenge or HTTP ${page?.status || 'unknown'} at ${url}`);
       }
       let deadProductReason = null;
+      let gone = false;
       let queryEquivalent = false;
-      if (item && run.mode === 'capture-discovery' && page?.url) {
+      if (item && page?.status >= 400) {
+        gone = [404, 410].includes(page.status);
+        deadProductReason = gone ? `gone: HTTP ${page.status}` : `HTTP ${page.status} at ${url}`;
+      } else if (item && page?.url) {
         try {
-          queryEquivalent = addedQueryOnly(canonical(page.url, run.domain), url);
-          if (!queryEquivalent) deadProductReason = `redirected:${page.url}`;
+          const actual = canonical(page.url, run.domain);
+          queryEquivalent = run.mode === 'capture-discovery' && addedQueryOnly(actual, url);
+          // Preserve same-product query/canonical rules. Only another product path is gone.
+          if (page.kind === 'product' && productPath(actual) !== productPath(url)) {
+            gone = true;
+            deadProductReason = `gone: redirected to ${page.url}`;
+          } else if (run.mode === 'capture-discovery' && !queryEquivalent) {
+            deadProductReason = `redirected:${page.url}`;
+          }
         } catch (_) {
-          deadProductReason = `invalid inspected page URL:${page.url}`;
+          if (run.mode === 'capture-discovery') deadProductReason = `invalid inspected page URL:${page.url}`;
         }
       }
-      if (item && [404, 410].includes(page?.status)) {
-        deadProductReason = `HTTP ${page.status} at ${url}`;
-      } else if (!deadProductReason && item && page?.kind === 'listing') {
+      if (!deadProductReason && item && page?.kind === 'listing') {
         try {
           canonical(page.url, run.domain);
           deadProductReason = `product structure mismatch at ${url}`;
@@ -317,10 +336,11 @@
         const beforeFailureSave = await read();
         if (beforeFailureSave?.status !== 'running' ||
             beforeFailureSave.generation !== run.generation) return beforeFailureSave;
-        item.status = 'failed'; item.reason = deadProductReason;
+        item.status = gone ? 'skipped' : 'failed'; item.reason = deadProductReason;
+        if (gone) item.captureStatus = 'gone';
         run.current = null;
-        run.consecutiveFailures = (run.consecutiveFailures || 0) + 1;
-        if (run.consecutiveFailures >= 5) return interrupt(run, 'paused', `5 consecutive product failures: ${item.reason}`);
+        if (!gone) run.consecutiveFailures = (run.consecutiveFailures || 0) + 1;
+        if (!gone && run.consecutiveFailures >= 5) return interrupt(run, 'paused', `5 consecutive product failures: ${item.reason}`);
         await save(run);
         await io.alarm(run.lastNavigationStarted + interval);
         return run;

@@ -2690,9 +2690,9 @@ async function refreshTakeoverProgress() {
         `end ${JSON.stringify(page.end || 'unverified')}`));
     if (run.mode === 'capture-discovery') {
       box.textContent = `Fixed discovery queue ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n` +
-        `Targets ${summary.productsFound}; captured ${summary.productsCaptured}; skipped ${summary.skipped || 0}; ` +
+        `Targets ${summary.productsFound}; captured ${summary.productsCaptured}; gone ${summary.gone || 0}; receiver-verified skips ${summary.skipped || 0}; ` +
         `failed ${summary.failed}; pending ${summary.pending}; exported/unverified ${summary.exportedUnverified}.\n` +
-        'Only these product URLs will be visited. Skips require receiver verification; Downloads are unverified.';
+        'Only these product URLs will be visited. Gone products are skipped without capture. All other skips require receiver verification; Downloads are unverified.';
       return;
     }
     if (run.mode === 'discovery') {
@@ -2708,7 +2708,7 @@ async function refreshTakeoverProgress() {
       `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; found ${summary.productsFound}; ` +
       `captured products ${summary.productsCaptured}; captured colors ${summary.colorsCaptured}; ` +
       `size options traversed ${summary.sizeOptionsTraversed} (size cycling is not part of this run); ` +
-      `excluded ${summary.excluded}; failed ${summary.failed}; pending ${summary.pending}; ` +
+      `excluded ${summary.excluded}; gone ${summary.gone || 0}; failed ${summary.failed}; pending ${summary.pending}; ` +
       `exported/unverified ${summary.exportedUnverified}.\n` +
       (run.products || []).filter(row => row.status === 'failed').map(row => `${row.url}: ${row.reason}`).join('\n') +
       '\nVerified skips require the local receiver. Downloads exports are unverified until imported.';

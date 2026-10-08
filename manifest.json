@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Page Image Saver",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvVkwOeWKOwx/4k9erWce0rpkztCJdEmki7lPf4Pbzink3aqODM0ISlK5CA+fcQ7R1jX0YoPf8ermsq/wNDMTj2Oso3JiGbY1x4hUszMnNcjEz78nskNu67m4nFdcY30eiJFx0lncmbrFuC1fk/Plsx51+mTfYM/yBULd/T4jOYPAwSxpoQJIzPuraITDEqguewwnxKBgPtq2HbY3zZ03sMpLCr7TRm/dUTZhjVIv1hYfP6Ird/qc/mYCgNrAo9Ui3tGcH7HtR71YrRAUcB+oB0lcyYFig1pv9qrxLydDxRCINvj4GjZNEp/9cOqIfcPDrrzNR8xqkK3qD6Wpth/IrQIDAQAB",
   "description": "Save images from web pages to your S3/R2 storage and capture full-page screenshots",
   "permissions": [
