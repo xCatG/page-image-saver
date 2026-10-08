@@ -153,3 +153,19 @@ test('gold capture preset leaves old cloud fields visible and reports sync write
   assert.match(getElement('status-message').innerHTML, /previous storage settings remain active/i);
   assert.doesNotMatch(getElement('status-message').innerHTML, /applied and saved/i);
 });
+
+test('enabled invalid receiver refuses save without changing other form values', () => {
+  const {getElement,writes}=loadSettingsPage();
+  getElement('receiver-url').value='';
+  getElement('receiver-token').value='';
+  getElement('settings-form').dispatchEvent({type:'submit',preventDefault(){}});
+  assert.equal(writes.length,0);
+  assert.match(getElement('receiver-url-error').textContent,/URL invalid/);
+  assert.match(getElement('receiver-token-error').textContent,/token/);
+  assert.equal(getElement('s3-bucket').value,'bucket');
+  getElement('receiver-enabled').checked=false;
+  getElement('receiver-url').value='invalid URL';
+  getElement('settings-form').dispatchEvent({type:'submit',preventDefault(){}});
+  assert.equal(writes.length,1);
+  assert.equal(writes[0].imageUploaderSettings.receiver.enabled,false);
+});

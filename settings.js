@@ -197,9 +197,22 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
+  function validateReceiverForm(receiver) {
+    const errors = PageImageSaverHelpers.validateReceiverSettings(receiver);
+    for (const field of ['url', 'token']) {
+      document.getElementById(`receiver-${field}-error`).textContent = errors[field] || '';
+    }
+    if (Object.keys(errors).length) {
+      showStatusMessage('Correct the receiver settings before continuing.', 'error');
+      return false;
+    }
+    return true;
+  }
+
   // Function to save settings
   function saveSettings() {
     const settings = buildSettingsFromForm();
+    if (!validateReceiverForm(settings.receiver)) return;
     chrome.storage.sync.set({ imageUploaderSettings: settings }, () => {
       showStatusMessage('Settings saved successfully!', 'success');
     });
@@ -207,6 +220,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function applyGoldCapturePreset() {
     const settings = PageImageSaverHelpers.buildGoldCaptureSettings(buildSettingsFromForm());
+    if (!validateReceiverForm(settings.receiver)) return;
 
     chrome.storage.sync.set({ imageUploaderSettings: settings }, () => {
       if (chrome.runtime.lastError) {
@@ -243,7 +257,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Test connection to storage service
   function testConnection() {
+    const formSettings = buildSettingsFromForm();
+    if (!validateReceiverForm(formSettings.receiver)) return;
     showStatusMessage('Testing connection...', 'info');
+    if (formSettings.receiver.enabled) {
+      chrome.runtime.sendMessage({action: 'testReceiverConnection', receiver: formSettings.receiver}, response => {
+        if (chrome.runtime.lastError || !response) {
+          showStatusMessage('Receiver test could not reach the extension worker. Reload the extension and try again.', 'error');
+          return;
+        }
+        showStatusMessage(response.message, response.success ? 'success' : 'error');
+      });
+      return;
+    }
 
     // Create a temporary test file
     const testBlob = new Blob(['test file content'], { type: 'text/plain' });

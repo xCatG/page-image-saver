@@ -384,6 +384,68 @@
     return completion;
   }
 
+  function validateReceiverSettings(settings) {
+    if (settings?.enabled !== true) return {};
+    const errors = {};
+    try {
+      const url = new URL(settings.url);
+      if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) throw new Error();
+      const host = url.hostname.toLowerCase();
+      const privateIp = /^(?:127|10)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host);
+      if ((!privateIp && host !== 'localhost' && !host.endsWith('.local')) ||
+          url.pathname !== '/' || url.search || url.hash) {
+        errors.url = 'URL invalid for captures: use a local receiver base URL (private IPv4, localhost, or .local host), without a path, query, or fragment.';
+      }
+    } catch (_) {
+      errors.url = 'URL invalid: enter an http:// or https:// receiver address with a host (no embedded credentials).';
+    }
+    if (typeof settings.token !== 'string' || !/^[\x21-\x7e]+$/.test(settings.token)) {
+      errors.token = 'Enter a receiver token containing only printable ASCII characters, without spaces.';
+    }
+    return errors;
+  }
+
+  async function testReceiverConnection(settings, io = {}) {
+    const errors = validateReceiverSettings({...settings, enabled: true});
+    if (Object.keys(errors).length) return {success: false, code: 'invalid', message: Object.values(errors).join(' ')};
+    const target = new URL(settings.url).origin + '/v1/already';
+    const originHelp = `Receiver --extension-origin must match this extension: ${io.origin}.`;
+    const controller = new AbortController();
+    let timer;
+    try {
+      return await Promise.race([
+        (async () => {
+          const response = await (io.fetch || globalThis.fetch)(target, {
+            method: 'POST', headers: {'Content-Type': 'application/json', 'X-Capture-Token': settings.token},
+            // Deliberately invalid identity: authenticates but cannot match or publish a capture.
+            body: JSON.stringify({identity: {}}), credentials: 'omit',
+            referrerPolicy: 'no-referrer', redirect: 'error', signal: controller.signal
+          });
+          if (response.status === 401) return {success: false, code: 'token_rejected', message: 'Receiver token rejected. Check the token in this form.'};
+          if (response.status === 403) return {success: false, code: 'origin_rejected', message: `Receiver origin rejected. ${originHelp}`};
+          const body = await response.json().catch(() => null);
+          if (response.status === 400 && body?.error === 'invalid identity' && body.complete === false) {
+            return {success: true, code: 'accepted', message: 'Receiver reachable and token accepted. No capture was written.'};
+          }
+          return {success: false, code: 'unexpected', message: `Unexpected receiver response (HTTP ${response.status}) at ${target}. Check the receiver address and service.`};
+        })(),
+        new Promise(resolve => {
+          timer = setTimeout(() => {
+            resolve({success: false, code: 'timeout', message: `Receiver timed out at ${target}. Check the address and service.`});
+            controller.abort();
+          }, io.timeoutMs ?? 10000);
+        })
+      ]);
+    } catch (_) {
+      // Fetch deliberately hides whether a failure was CORS or transport; do not invent a distinction.
+      return {success: false, code: 'unreachable', message: `Receiver unreachable or blocked by CORS at ${target}. Check the address and service. ${originHelp}`};
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function captureWithReceiver(payload, settings, io) {
     let url;
     try { url = new URL(settings.url); }
@@ -720,6 +782,8 @@
     buildCaptureCompletion,
     exportProductCapture,
     captureWithReceiver,
+    validateReceiverSettings,
+    testReceiverConnection,
     captureResultMessage,
     saveCaptureDownload,
     sanitizeFolderPath,

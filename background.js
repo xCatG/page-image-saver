@@ -193,6 +193,15 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === 'loading') clearFeedForTab(tabId);
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Probe unsaved options in the same worker context as real captures.
+  if (message.action === 'testReceiverConnection') {
+    if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('settings.html')) return false;
+    globalThis.PageImageSaverHelpers.testReceiverConnection(message.receiver, {
+      origin: `chrome-extension://${chrome.runtime.id}`
+    }).then(sendResponse, () => sendResponse({success: false, message: 'Receiver test failed.'}));
+    return true;
+  }
+
   if (['shopifyFeedAcquire', 'shopifyFeedRelease'].includes(message.action)) {
     queueTakeoverControl(async () => {
       if (!sender.tab || !sender.documentId) throw new Error('Feed requires a browser tab document');
