@@ -243,6 +243,7 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
             {'file_sha256':hashlib.sha256(first).hexdigest(),'listing_url':'https://us.chantelle.com/list-bras'},
             {'file_sha256':hashlib.sha256(second).hexdigest(),'listing_url':'https://us.chantelle.com/list-panties'}])
         self.assertIn(bra, self.page.locator('#takeover-start-url').inner_text())
+        self.page.wait_for_function("document.querySelector('#takeover-progress').textContent.includes('Pacing 9–12 s')")
         runner_page = self.context.new_page()
         runner_page.route('**/*', self.route_fixture)
         runner_page.goto('https://us.chantelle.com/list-runner')

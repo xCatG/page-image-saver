@@ -5,6 +5,15 @@
   const KEY_VERSION = 1;
   const MAX_LISTINGS = 1000;
   const MAX_PRODUCTS = 10000;
+  const DEFAULT_PACING = Object.freeze({minMs: 9000, maxMs: 12000});
+  const LEGACY_INTERVAL_MS = 10000;
+
+  function pacingFor(config) {
+    const interval = config?.takeover?.intervalMs;
+    // Preserve explicit non-default overrides, including zero in offline fixtures.
+    return Number.isFinite(interval) && interval !== LEGACY_INTERVAL_MS
+      ? {minMs: interval, maxMs: interval} : {...DEFAULT_PACING};
+  }
   let inFlight = null;
 
   function canonical(value, domain) {
@@ -48,7 +57,7 @@
   function summarizeTakeover(run) {
     const products = run?.products || [];
     const captured = products.filter(item => item.status === 'captured').length;
-    return {listingPagesVisited: run?.listings?.visited?.length || 0,
+    return {pacing: pacingFor(run?.config), listingPagesVisited: run?.listings?.visited?.length || 0,
       productsFound: products.length, productsCaptured: captured,
       colorsCaptured: captured, sizeOptionsTraversed: 0,
       excluded: products.filter(item => item.status === 'excluded').length,
@@ -66,7 +75,7 @@
       started_utc: run.startedAt || null,
       exported_utc: context.exportedUtc || null,
       extension_version: context.extensionVersion || null,
-      site: run.domain, locale: run.locale || null,
+      site: run.domain, locale: run.locale || null, pacing: pacingFor(run.config),
       selectors: {productLinkSelector: run.config.listing.productLinkSelector,
         nextSelector: run.config.listing.pagination.nextSelector,
         endCheck: run.config.listing.endCheck || null},
@@ -76,7 +85,7 @@
       totals: {listing_pages: run.listings.visited.length, product_urls: run.products.length},
       status: run.status, stop_reason: run.reason || null
     };
-    return {...run, schema_version: 1, format: 'page-image-saver-takeover-run/v1',
+    return {...run, pacing: pacingFor(run.config), schema_version: 1, format: 'page-image-saver-takeover-run/v1',
       accounting: summarizeTakeover(run)};
   }
 
@@ -123,7 +132,8 @@
           receiverRequired: 'Verified skip and catalog completion require a configured reachable local receiver.'},
         seedUrl: page.kind === 'listing' ? url : null,
         listings: {queue: [], visited: [], discoveryComplete: false}, products: [],
-        current: null, lastNavigationStarted: null, loadFailures: {}, reason: null};
+        current: null, lastNavigationStarted: null, nextNavigationAt: null,
+        pacing: pacingFor(config), loadFailures: {}, reason: null};
       return save(run);
     }
     async function importDiscovery(config, sources) {
@@ -175,7 +185,8 @@
         status: 'preview', domain, mode: 'capture-discovery', config,
         seedUrl: products.keys().next().value, previews: [], products: [...products.values()],
         preview: {fixedQueue: true}, listings: {queue: [], visited: [], discoveryComplete: true},
-        current: null, lastNavigationStarted: null, loadFailures: {}, reason: null};
+        current: null, lastNavigationStarted: null, nextNavigationAt: null,
+        pacing: pacingFor(config), loadFailures: {}, reason: null};
       return save(run);
     }
     async function start() {
@@ -253,12 +264,19 @@
           await save(run);
         }
       }
-      const interval = Number.isFinite(run.config.takeover?.intervalMs) ?
-        run.config.takeover.intervalMs : 10000;
-      if (interval < 0 || interval > 300000) return interrupt(run, 'paused', 'invalid site pacing interval');
-      const due = (run.lastNavigationStarted || 0) + interval;
-      if (run.lastNavigationStarted !== null && io.now() < due) {
-        await io.alarm(due); return run;
+      const pacing = pacingFor(run.config);
+      if (pacing.minMs < 0 || pacing.maxMs > 300000)
+        return interrupt(run, 'paused', 'invalid site pacing interval');
+      // Upgrade an older saved run without shortening its already-started wait.
+      if (run.lastNavigationStarted !== null && !Number.isFinite(run.nextNavigationAt)) {
+        const oldInterval = Number.isFinite(run.config.takeover?.intervalMs)
+          ? run.config.takeover.intervalMs : LEGACY_INTERVAL_MS;
+        run.nextNavigationAt = run.lastNavigationStarted + oldInterval;
+        run.pacing = pacing;
+        await save(run);
+      }
+      if (Number.isFinite(run.nextNavigationAt) && io.now() < run.nextNavigationAt) {
+        await io.alarm(run.nextNavigationAt); return run;
       }
       const listingUrl = run.listings.queue[0];
       const item = !listingUrl && run.mode !== 'discovery' ? run.products.find(row => row.status === 'pending') : null;
@@ -295,6 +313,10 @@
       }
       run.current = {phase: listingUrl ? 'listing' : 'product', url};
       run.lastNavigationStarted = io.now();
+      const delay = pacing.minMs === pacing.maxMs ? pacing.minMs :
+        pacing.minMs + Math.floor((io.random || Math.random)() * (pacing.maxMs - pacing.minMs + 1));
+      run.pacing = pacing;
+      run.nextNavigationAt = run.lastNavigationStarted + delay;
       await save(run); // Intent and pace precede browser navigation.
       await io.alarm(io.now() + 30000); // Repeating alarm revives a terminated MV3 worker.
       let page;
@@ -342,7 +364,7 @@
         if (!gone) run.consecutiveFailures = (run.consecutiveFailures || 0) + 1;
         if (!gone && run.consecutiveFailures >= 5) return interrupt(run, 'paused', `5 consecutive product failures: ${item.reason}`);
         await save(run);
-        await io.alarm(run.lastNavigationStarted + interval);
+        await io.alarm(run.nextNavigationAt);
         return run;
       }
       if (!page || page.status === 0 || page.status >= 400 || !['listing', 'product'].includes(page.kind)) {
@@ -350,7 +372,7 @@
         run.current = null;
         await save(run);
         if (run.loadFailures[url] >= 3) return interrupt(run, 'paused', `repeated page load failure at ${url}`);
-        await io.alarm(run.lastNavigationStarted + interval);
+        await io.alarm(run.nextNavigationAt);
         return run;
       }
       try {
@@ -459,7 +481,7 @@
         if (run.consecutiveFailures >= 5) return interrupt(run, 'paused', `5 consecutive product failures: ${item.reason}`);
       }
       await save(run);
-      await io.alarm(run.lastNavigationStarted + interval);
+      await io.alarm(run.nextNavigationAt);
       return run;
     }
     function tick() {

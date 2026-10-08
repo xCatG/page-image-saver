@@ -85,7 +85,6 @@ class SavedPageFixtures(unittest.TestCase):
             self.assertFalse(page.evaluate("c => captureProductSeen(c)", config))
             self.assertEqual(page.locator(config["listing"]["pagination"]["nextSelector"]).count(), 0)
             self.assertNotIn("endCheck", config["listing"])
-            self.assertGreaterEqual(config["takeover"]["intervalMs"], 10000)
         finally:
             page.close()
 

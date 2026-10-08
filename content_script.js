@@ -2688,16 +2688,18 @@ async function refreshTakeoverProgress() {
         `${page.scope?.decision || 'review'} (${page.scope?.reason || 'unclassified'})` :
         ` — ${page.products} product links, next ${page.next || 'absent'}, ` +
         `end ${JSON.stringify(page.end || 'unverified')}`));
+    const pacing = summary.pacing;
+    const pacingText = pacing ? `Pacing ${pacing.minMs / 1000}–${pacing.maxMs / 1000} s between navigation starts.\n` : '';
     if (run.mode === 'capture-discovery') {
       box.textContent = `Fixed discovery queue ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n` +
-        `Targets ${summary.productsFound}; captured ${summary.productsCaptured}; gone ${summary.gone || 0}; receiver-verified skips ${summary.skipped || 0}; ` +
+        pacingText + `Targets ${summary.productsFound}; captured ${summary.productsCaptured}; gone ${summary.gone || 0}; receiver-verified skips ${summary.skipped || 0}; ` +
         `failed ${summary.failed}; pending ${summary.pending}; exported/unverified ${summary.exportedUnverified}.\n` +
         'Only these product URLs will be visited. Gone products are skipped without capture. All other skips require receiver verification; Downloads are unverified.';
       return;
     }
     if (run.mode === 'discovery') {
       box.textContent = `Listing discovery ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n` +
-        `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; unique product URLs ${summary.productsFound}.\n` +
+        pacingText + `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; unique product URLs ${summary.productsFound}.\n` +
         (run.preview?.endCheckConfigured ? 'Positive end check configured.' :
           'No positive end check configured; missing next link will finish with gaps.');
       return;
@@ -2705,7 +2707,7 @@ async function refreshTakeoverProgress() {
     const end = run.preview?.endCheckConfigured ? 'Positive end check configured.' :
       'No verified positive end check configured; discovered products will capture, then finish with gaps.';
     box.textContent = `Catalog ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n${end}\n` +
-      `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; found ${summary.productsFound}; ` +
+      pacingText + `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; found ${summary.productsFound}; ` +
       `captured products ${summary.productsCaptured}; captured colors ${summary.colorsCaptured}; ` +
       `size options traversed ${summary.sizeOptionsTraversed} (size cycling is not part of this run); ` +
       `excluded ${summary.excluded}; gone ${summary.gone || 0}; failed ${summary.failed}; pending ${summary.pending}; ` +

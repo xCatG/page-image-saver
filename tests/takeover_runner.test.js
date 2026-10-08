@@ -27,6 +27,7 @@ function rig(pages, captures = {}, opts = {}) {
   let crashOnSave = false;
   const io = {
     now: () => now,
+    random: () => 1 / 3,
     load: async url => { visits.push(url); return {...(pages[url] || {status: 404}),
       tabId: 7, documentId: `fixture:${url}`}; },
     capture: async (url, scope, binding) => {
@@ -277,7 +278,7 @@ test('page-count evidence, unique URLs and exclusion accounting complete a run',
     await r.runner().tick(); r.advance(10000);
   }
   assert.equal(r.memory.run.status, 'complete');
-  assert.deepEqual(summarizeTakeover(r.memory.run), {listingPagesVisited: 2,
+  assert.deepEqual(summarizeTakeover(r.memory.run), {pacing:{minMs:9000,maxMs:12000}, listingPagesVisited: 2,
     productsFound: 3, productsCaptured: 2, colorsCaptured: 2, sizeOptionsTraversed: 0,
     excluded: 1, gone: 0, failed: 0, pending: 0, exportedUnverified: 0});
   assert.deepEqual(r.captureCalls.map(call => call.url), [bra, red]);
@@ -740,5 +741,57 @@ test('same-product locale and canonical redirects keep their existing failure ha
     assert.equal(r.memory.run.products[0].status,'failed');
     assert.equal(summarizeTakeover(r.memory.run).gone,0);
     assert.equal(r.captureCalls.length,0);
+  }
+});
+
+
+for (const [sample, delay] of [[0,9000],[0.5,10500],[1-Number.EPSILON,12000]]) {
+  test(`navigation jitter persists ${delay}ms before load and survives restart`, async () => {
+    const r=rig({[bra]:braPage,[red]:redPage},{}, {verifyResult:{storage:'receiver',status:'missing'}});
+    r.io.verify=async identity=>({storage:'receiver',status:r.captureCalls.some(call=>call.url===identity.product_url)?'already':'missing'});
+    let rolls=0;
+    r.io.random=()=>{rolls++;return sample;};
+    const load=r.io.load;
+    r.io.load=async url=>{
+      assert.equal(r.memory.run.nextNavigationAt,r.memory.run.lastNavigationStarted+delay);
+      return load(url);
+    };
+    await r.runner().importDiscovery(site,[discoverySource([bra,red])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.nextNavigationAt,100000+delay);
+    assert.equal(rolls,1);
+    r.advance(delay-1);
+    await r.runner().tick();
+    assert.deepEqual(r.visits,[bra]);
+    assert.equal(r.alarms.at(-1),100000+delay);
+    assert.equal(rolls,1,'restart/wait must not reroll');
+    r.advance(1); await r.runner().tick();
+    assert.deepEqual(r.visits,[bra,red]);
+    assert.equal(rolls,2,'one roll per navigation');
+    const exported=exportTakeoverReport(r.memory.run);
+    assert.deepEqual(exported.pacing,{minMs:9000,maxMs:12000});
+    assert.equal(exported.nextNavigationAt,100000+2*delay);
+  });
+}
+
+test('legacy run preserves its outstanding 10-second wait then adopts jitter',async()=>{
+  const r=rig({[bra]:braPage,[red]:redPage},{},{verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource([bra,red])]); await r.runner().start();
+  r.memory.run.lastNavigationStarted=100000;
+  delete r.memory.run.nextNavigationAt;
+  r.io.random=()=>0;
+  r.advance(9999); await r.runner().tick();
+  assert.equal(r.visits.length,0);
+  assert.equal(r.memory.run.nextNavigationAt,110000);
+  r.advance(1); await r.runner().tick();
+  assert.deepEqual(r.visits,[bra]);
+  assert.equal(r.memory.run.nextNavigationAt,119000);
+});
+
+
+test('shipped site configurations use the shared 9–12 second pacing range',()=>{
+  for (const config of [{}, require('../site_config/www.agentprovocateur.com.json'),
+      liseConfig, require('../site_config/www.sanscomplexe.com.json')]) {
+    assert.deepEqual(summarizeTakeover({config,products:[]}).pacing,{minMs:9000,maxMs:12000});
   }
 });

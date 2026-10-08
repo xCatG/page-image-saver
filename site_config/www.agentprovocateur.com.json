@@ -6,9 +6,6 @@
   "currency": "USD",
   "botProtection": [],
   "colorVariantStrategy": "separate-url",
-  "takeover": {
-    "intervalMs": 10000
-  },
   "listing": {
     "productLinkSelector": ".product.ratio-product-image a.product-image[href*=\"/us_en/\"]",
     "pagination": {
@@ -23,5 +20,5 @@
     "originalImageUrlPattern": "https://www\\.agentprovocateur\\.com/static/media/catalog/product/[^\\s\"<>?#]+\\.(?:jpg|jpeg|png|webp)",
     "lazyLoad": true
   },
-  "notes": "Owner Windows Ctrl+S saves, 2026-10-05: Lorna 5 unique gallery images, Essie 3, Davinah 3 (carousel clones deduplicated). Original URL resolver unwraps same-host tco-images to /static/media/catalog/product/ originals, with no invented dimensions. Saved local filenames require exact retained URL evidence; missing or ambiguous originals fail closed. Lorna/Essie saves lack most original URLs; Davinah retains all three in saved extension thumbnails. One colour per queued URL; no swatch clicks. 10s pacing equals Chantelle default. Listing is infinite-scroll: only loaded tiles can be discovered; nextSelector intentionally matches nothing and no terminal proof is configured. Use the fixed v4 queue, not this listing as a complete inventory. No Linux live smoke; prior auth/load 403 remains a stop. Owner Windows smoke must verify live gallery completeness, original fetches and colour identity."
+  "notes": "Owner Windows Ctrl+S saves, 2026-10-05: Lorna 5 unique gallery images, Essie 3, Davinah 3 (carousel clones deduplicated). Original URL resolver unwraps same-host tco-images to /static/media/catalog/product/ originals, with no invented dimensions. Saved local filenames require exact retained URL evidence; missing or ambiguous originals fail closed. Lorna/Essie saves lack most original URLs; Davinah retains all three in saved extension thumbnails. One colour per queued URL; no swatch clicks. Take-over uses the shared default jittered pacing. Listing is infinite-scroll: only loaded tiles can be discovered; nextSelector intentionally matches nothing and no terminal proof is configured. Use the fixed v4 queue, not this listing as a complete inventory. No Linux live smoke; prior auth/load 403 remains a stop. Owner Windows smoke must verify live gallery completeness, original fetches and colour identity."
 }
