@@ -879,6 +879,7 @@ function createImageSelectionUI(images) {
   const header = document.createElement('div');
   header.style.flexShrink = '0';
   header.innerHTML = `
+    <div id="takeover-status-line" role="status" hidden style="font-weight: bold; padding: 8px; margin-bottom: 6px; background: #eef4ff; overflow-wrap: anywhere;"></div>
     <h2 style="margin: 0 0 4px; font: bold 16px/20px Arial, sans-serif;">Images Found (${images.length})</h2>
     <p style="margin: 0 0 6px; font: 12px/18px Arial, sans-serif;">Select images to save to your storage</p>
     <div style="display: flex; gap: 4px; margin-bottom: 6px; flex-wrap: wrap;">
@@ -2666,6 +2667,11 @@ async function refreshTakeoverProgress() {
     if (refreshSequence !== takeoverRefreshSequence || box.dataset.previewPending === 'true') return;
     const currentHost = window.location.hostname.toLowerCase();
     const foreignRun = !!run && run.domain !== currentHost;
+    const statusLine = document.getElementById('takeover-status-line');
+    statusLine.hidden = !run;
+    statusLine.textContent = !run ? '' : foreignRun ?
+      `Saved run belongs to ${run.domain} — ${run.status}` :
+      PageImageSaverHelpers.takeoverStatusText(run, summary);
     const startUrl = document.getElementById('takeover-start-url');
     startUrl.textContent = `Start URL: ${!foreignRun && run?.seedUrl || 'preview a listing or load a discovery queue'}`;
     const modeControl = document.getElementById('takeover-mode');
@@ -2715,8 +2721,12 @@ async function refreshTakeoverProgress() {
       (run.products || []).filter(row => row.status === 'failed').map(row => `${row.url}: ${row.reason}`).join('\n') +
       '\nVerified skips require the local receiver. Downloads exports are unverified until imported.';
   } catch (error) {
-    if (refreshSequence === takeoverRefreshSequence && box.dataset.previewPending !== 'true')
+    if (refreshSequence === takeoverRefreshSequence && box.dataset.previewPending !== 'true') {
       box.textContent = `Catalog status unavailable: ${error.message}`;
+      const statusLine = document.getElementById('takeover-status-line');
+      statusLine.hidden = false;
+      statusLine.textContent = box.textContent;
+    }
   }
 }
 

@@ -89,6 +89,67 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
         if not self.page.locator("#catalog-capture-section").evaluate('node => node.open'):
             self.page.locator("#catalog-capture-section summary").click()
 
+    def test_saved_status_reopens_and_exports_without_starting(self):
+        url = "https://www.lisecharmel.com/product-test"
+        self.worker.evaluate("""() => {
+          globalThis.statusDownloads = [];
+          globalThis.originalStatusDownload = PageImageSaverHelpers.saveCaptureDownload;
+          PageImageSaverHelpers.saveCaptureDownload = async (_chrome, data, filename) => {
+            statusDownloads.push({filename, report: JSON.parse(atob(data.split(',')[1]))});
+          };
+        }""")
+        try:
+            self.open_panel(url)
+            for state, reason, label in [('running', None, 'Running'),
+                                          ('paused', 'HTTP 429', 'Paused — HTTP 429'),
+                                          ('complete', None, 'Finished'),
+                                          ('finished_with_gaps', 'one failed', 'Finished with gaps — one failed')]:
+                with self.subTest(state=state):
+                    self.worker.evaluate("""({state, reason, url}) => chrome.storage.local.set({catalogTakeoverRun: {
+                      version:1, generation:1, domain:'www.lisecharmel.com', mode:'capture-discovery',
+                      status:state, reason, current:state === 'running' ? {url} : null,
+                      config:{}, listings:{visited:[], queue:[], discoveryComplete:true},
+                      products:[{url, status:'captured'}, {url:url+'?gone', status:'skipped', captureStatus:'gone'},
+                        {url:url+'?skip', status:'skipped', captureStatus:'already'},
+                        {url:url+'?fail', status:'failed'}, {url:url+'?pending', status:'pending'}]
+                    }})""", {'state':state, 'reason':reason, 'url':url})
+                    self.page.locator('#close-btn').click()
+                    self.worker.evaluate("""async url => {
+                      const [tab] = await chrome.tabs.query({url});
+                      await chrome.tabs.sendMessage(tab.id, {action:'findImages'});
+                    }""", url)
+                    self.page.wait_for_function("label => document.querySelector('#takeover-status-line')?.textContent.startsWith(label)", arg=label)
+                    line = self.page.locator('#takeover-status-line')
+                    self.assertTrue(line.is_visible())
+                    self.assertIn('captured 1 · gone 1 · skipped 1 · failed 1 · pending 1', line.inner_text())
+            self.worker.evaluate("""() => chrome.storage.local.get('catalogTakeoverRun').then(({catalogTakeoverRun:run}) =>
+              chrome.storage.local.set({catalogTakeoverRun:{...run,status:'running',current:null,reason:null,nextNavigationAt:Date.now()+60000}}))""")
+            self.page.locator('#close-btn').click()
+            self.worker.evaluate("""async url => {
+              const [tab] = await chrome.tabs.query({url});
+              await chrome.tabs.sendMessage(tab.id, {action:'findImages'});
+            }""", url)
+            self.page.wait_for_function("document.querySelector('#takeover-status-line').textContent.startsWith('Waiting — next navigation in ')")
+            self.worker.evaluate("""() => chrome.storage.local.get('catalogTakeoverRun').then(({catalogTakeoverRun:run}) =>
+              chrome.storage.local.set({catalogTakeoverRun:{...run,status:'finished_with_gaps',reason:'one failed'}}))""")
+            self.page.locator('#close-btn').click()
+            self.worker.evaluate("""async url => {
+              const [tab] = await chrome.tabs.query({url});
+              await chrome.tabs.sendMessage(tab.id, {action:'findImages'});
+            }""", url)
+            self.page.wait_for_function("document.querySelector('#takeover-status-line')?.textContent.startsWith('Finished with gaps')")
+            self.assertTrue(self.page.locator('#takeover-status-line').is_visible())
+            if not self.page.locator('#catalog-capture-section').evaluate('node => node.open'):
+                self.page.locator('#catalog-capture-section summary').click()
+            self.assertTrue(self.page.locator('#takeover-export-btn').is_enabled())
+            self.page.locator('#takeover-export-btn').click()
+            self.page.wait_for_function("document.body.innerText.includes('Catalog run JSON saved to Downloads')")
+            report = self.worker.evaluate('statusDownloads[0].report')
+            self.assertEqual(report['status'], 'finished_with_gaps')
+            self.assertEqual(len(report['products']), 5)
+        finally:
+            self.worker.evaluate('() => { PageImageSaverHelpers.saveCaptureDownload = originalStatusDownload; }')
+
     def test_real_missing_config_rejection_falls_back_and_replaces_foreign_preview(self):
         self.worker.evaluate("""url => chrome.storage.local.set({catalogTakeoverRun: {
           version: 1, generation: 1, status: 'preview', domain: 'www.empreinte.eu',

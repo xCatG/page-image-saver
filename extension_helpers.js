@@ -765,7 +765,20 @@
     }
   }
 
+  function takeoverStatusText(run, summary = {}, now = Date.now()) {
+    const labels = {preview: 'Ready', running: 'Running', paused: 'Paused',
+      complete: 'Finished', finished_with_gaps: 'Finished with gaps', stopped: 'Stopped'};
+    let state = labels[run.status] || run.status;
+    if (run.status === 'running' && !run.current && Number.isFinite(run.nextNavigationAt) && run.nextNavigationAt > now) {
+      state = `Waiting — next navigation in ${Math.ceil((run.nextNavigationAt - now) / 1000)} s`;
+    } else if (run.reason) state += ` — ${run.reason}`;
+    return `${state} · Current URL: ${run.current?.url || 'none (between pages)'} · ` +
+      `captured ${summary.productsCaptured || 0} · gone ${summary.gone || 0} · skipped ${summary.skipped || 0} · ` +
+      `failed ${summary.failed || 0} · pending ${summary.pending || 0}`;
+  }
+
   const helpers = {
+    takeoverStatusText,
     canSaveShopifyFeed,
     collectShopifyFeed,
     prepareLazyGallery,
