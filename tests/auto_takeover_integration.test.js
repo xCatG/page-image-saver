@@ -91,7 +91,7 @@ test('saved Lise-shaped microdata and OG-only Aubade facts enter the product evi
     querySelectorAll: selector => selector === 'script[type="application/ld+json"]' ? [] :
       selector === 'meta[property]' ? Object.entries(metas).map(([property, content]) => ({
         getAttribute: name => name === 'property' ? property : content})) : []};
-  const sandbox = {document, PageImageSaverHelpers: helpers};
+  const sandbox = {document, window: {location: {hostname: 'www.lisecharmel.com'}}, PageImageSaverHelpers: helpers};
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(source.slice(begin, finish), sandbox);

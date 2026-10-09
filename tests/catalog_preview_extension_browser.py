@@ -89,6 +89,23 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
         if not self.page.locator("#catalog-capture-section").evaluate('node => node.open'):
             self.page.locator("#catalog-capture-section summary").click()
 
+    def test_vs_saved_product_uses_packaged_config_and_rendered_facts(self):
+        html = (ROOT / 'tests/fixtures/victoriassecret-pink-blue.html').read_text()
+        url = 'https://www.victoriassecret.com/us/pink/bras-catalog/5000009521/-/a/generic-11294558-choice-2B53/pink-wink-push-up-balconette-bra-blue'
+        self.page.route('https://www.victoriassecret.com/**', lambda route:
+            route.fulfill(status=200, content_type='text/html; charset=utf-8', body=html if route.request.url == url else ''))
+        self.open_panel(url)
+        self.page.locator('#takeover-preview-btn').click()
+        self.page.wait_for_function("document.querySelector('#takeover-feedback').textContent.includes('Preview ready')")
+        run = self.worker.evaluate("chrome.storage.local.get('catalogTakeoverRun').then(x => x.catalogTakeoverRun)")
+        product = run['previews'][0]['product']
+        self.assertEqual(product['name'], 'PINK Wink™ Push-Up Balconette Bra')
+        self.assertEqual(product['color'], 'Sheer Blue')
+        self.assertEqual(product['product_id'], '5000009521')
+        self.assertEqual(run['previews'][0]['imageCount'], 4)
+        self.assertEqual(run['domain'], 'www.victoriassecret.com')
+        self.assertEqual(run['previews'][0]['url'], url)
+
     def test_saved_status_reopens_and_exports_without_starting(self):
         url = "https://www.lisecharmel.com/product-test"
         self.worker.evaluate("""() => {

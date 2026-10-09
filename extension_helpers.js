@@ -777,7 +777,26 @@
       `failed ${summary.failed || 0} · pending ${summary.pending || 0}`;
   }
 
+  function victoriasSecretImage(raw, candidates = []) {
+    const base = 'https://www.victoriassecret.com';
+    const input = new URL(raw, base);
+    if (input.origin !== base) throw new Error('VS gallery: foreign image host');
+    const filename = decodeURIComponent(input.pathname.split('/').pop());
+    const images = [raw, ...candidates].map(value => {
+      try {
+        const url = new URL(value.startsWith('www.victoriassecret.com/') ? 'https://' + value : value, base);
+        const match = url.pathname.match(/^\/p\/(\d+)x(\d+)\/(?:png|jpg|webp)\/[^?#]+$/);
+        return url.origin === base && match && !url.search && !url.hash &&
+          decodeURIComponent(url.pathname.split('/').pop()) === filename ?
+          {url: url.href, width: Number(match[1]), height: Number(match[2])} : null;
+      } catch (_) { return null; }
+    }).filter(Boolean).sort((a, b) => b.width - a.width || b.height - a.height);
+    if (!images.length) throw new Error('VS gallery: no evidenced original for ' + filename);
+    return images[0].url;
+  }
+
   const helpers = {
+    victoriasSecretImage,
     takeoverStatusText,
     canSaveShopifyFeed,
     collectShopifyFeed,

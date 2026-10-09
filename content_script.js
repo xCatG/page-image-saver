@@ -2506,6 +2506,29 @@ function capturePageProductEvidence() {
     if (['og:type', 'og:title', 'og:image', 'product:price:amount',
       'product:price:currency'].includes(property)) meta[property] = node.getAttribute('content');
   }
+  if (window.location.hostname === 'www.victoriassecret.com' &&
+      document.querySelector('img[id^="primaryProductAltImages-"]')) {
+    const canonical = document.querySelector('link[rel="canonical"]')?.href;
+    const path = canonical && new URL(canonical, window.location.href).pathname;
+    const id = path?.match(/^\/us\/(?:vs|pink)\/[^/]+-catalog\/(\d+)(?:\/|$)/)?.[1];
+    if (id) {
+      const priceNode = document.querySelector('[data-testid="ProductPrice"] [itemprop="price"]');
+      const display = priceNode?.getAttribute('content') || priceNode?.textContent || '';
+      const price = display.trim().match(/^\$(\d+(?:\.\d{2})?)$/)?.[1] || null;
+      const rendered = {name: readItem('[data-testid="ProductInfo-shortDescription"]'),
+        productID: id, sku: readItem('[data-testid="ProductInfo-genericId"]')?.replace(/^Product SKU\s*/, '') || null,
+        color: readItem('[data-testid="SelectedChoiceLabel"]')?.replace(/^\|\s*/, '') || null,
+        offers: {price, priceCurrency: price ? 'USD' : null},
+        field_sources: {name:'[data-testid="ProductInfo-shortDescription"]',
+          productID:'link[rel="canonical"] US catalog path', sku:'[data-testid="ProductInfo-genericId"]',
+          color:'[data-testid="SelectedChoiceLabel"]', price:'[data-testid="ProductPrice"] [itemprop="price"]',
+          priceCurrency:'US market path and dollar price'}};
+      const evidence = globalThis.PageImageSaverHelpers.captureProductEvidence([], rendered, null);
+      evidence.jsonld = captureJsonLd();
+      evidence.meta = Object.keys(meta).length ? meta : null;
+      return evidence;
+    }
+  }
   return globalThis.PageImageSaverHelpers.captureProductEvidence(captureJsonLd(), microdata,
     Object.keys(meta).length ? meta : null);
 }
@@ -2521,6 +2544,12 @@ function captureProductSeen(config, product = capturePageProduct()) {
 }
 
 function captureGallery(config, mode) {
+  if (mode === 'site' && config?.product?.renditionResolver === 'victoriassecret' &&
+      window.location.hostname === 'www.victoriassecret.com') {
+    const candidates = document.documentElement.innerHTML.match(/(?:https:\/\/)?www\.victoriassecret\.com\/p\/\d+x\d+\/[^\s"<>\\]+/g) || [];
+    return [...new Set(Array.from(document.querySelectorAll(config.product.allImagesSelector), node =>
+      globalThis.PageImageSaverHelpers.victoriasSecretImage(node.getAttribute('src') || node.currentSrc, candidates)))];
+  }
   let urls;
   if (mode === 'site') {
     const selector = config?.product?.allImagesSelector || config?.allImagesSelector || config?.product?.imageSelector;

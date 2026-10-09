@@ -21,6 +21,59 @@ def source(path):
 
 
 class SavedPageFixtures(unittest.TestCase):
+    def test_vs_and_pink_rendered_product_facts_and_primary_gallery(self):
+        config = json.loads(source("site_config/www.victoriassecret.com.json"))
+        cases = [
+            ('wave', 'Wave Stripe Peekaboo Demi Bra', 'Black', '1128847700', '64.95', 3),
+            ('viper', 'Viper Embroidery Peekaboo Halter Demi Bra', 'Black', '1128847600', '64.95', 3),
+            ('pink-rose', 'PINK Wink™ Push-Up Balconette Bra', 'Rose Taupe', '5000009521', '49.95', 5),
+            ('pink-blue', 'PINK Wink™ Push-Up Balconette Bra', 'Sheer Blue', '5000009521', '49.95', 4)]
+        for file, name, color, product_id, price, count in cases:
+            with self.subTest(file=file):
+                page = self.open_fixture(config['domain'], f'victoriassecret-{file}.html')
+                try:
+                    facts = page.evaluate('capturePageProduct()')
+                    self.assertEqual({k:facts[k] for k in ('name','color','product_id','offers')},
+                        {'name':name,'color':color,'product_id':product_id,'offers':{'price':price,'currency':'USD'}})
+                    self.assertTrue(page.evaluate('c => captureProductSeen(c)', config))
+                    gallery = page.evaluate("c => captureGallery(c, 'site')", config)
+                    self.assertEqual(len(gallery), count)
+                    self.assertTrue(all(u.startswith('https://www.victoriassecret.com/p/') for u in gallery))
+                    self.assertFalse(any('_SW.' in u for u in gallery))
+                    if file == 'wave':
+                        self.assertEqual(gallery[0], 'https://www.victoriassecret.com/p/1000x1333/png/zz/26/08/31/01/1128847754A2_OM_F.jpg')
+                    evidence = page.evaluate('capturePageProductEvidence()')
+                    self.assertEqual(evidence['fact_source'], 'microdata')
+                    self.assertEqual(evidence['microdata']['color'], color)
+                finally:
+                    page.close()
+
+    def test_vs_query_rendition_does_not_invent_queryless_original(self):
+        config = json.loads(source("site_config/www.victoriassecret.com.json"))
+        page = self.open_fixture(config['domain'], 'victoriassecret-wave.html')
+        try:
+            page.evaluate("""() => {
+              const meta = document.createElement('meta');
+              meta.content = 'https://www.victoriassecret.com/p/2000x2666/png/zz/26/08/31/01/1128847754A2_OM_F.jpg?crop=1';
+              document.head.append(meta);
+            }""")
+            self.assertEqual(page.evaluate("c => captureGallery(c, 'site')[0]", config),
+                'https://www.victoriassecret.com/p/1000x1333/png/zz/26/08/31/01/1128847754A2_OM_F.jpg')
+        finally:
+            page.close()
+
+    def test_vs_gallery_missing_original_and_listing_fail_closed(self):
+        config = json.loads(source("site_config/www.victoriassecret.com.json"))
+        page = self.open_fixture(config['domain'], 'victoriassecret-wave.html')
+        try:
+            page.evaluate("document.querySelector('img[id^=primaryProductAltImages]').src = './saved_files/unknown.jpg'")
+            with self.assertRaisesRegex(Exception, 'evidenced'):
+                page.evaluate("c => captureGallery(c, 'site')", config)
+            page.evaluate("document.querySelectorAll('img[id^=primaryProductAltImages]').forEach(n => n.remove())")
+            self.assertFalse(page.evaluate('c => captureProductSeen(c)', config))
+        finally:
+            page.close()
+
     def test_sanscomplexe_saved_listing_and_gallery(self):
         config = json.loads(source("site_config/www.sanscomplexe.com.json"))
         page = self.open_fixture(config["domain"], "sanscomplexe-listing.html")
