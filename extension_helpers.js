@@ -777,6 +777,22 @@
       `failed ${summary.failed || 0} · pending ${summary.pending || 0}`;
   }
 
+  // Compare URL spelling without changing stored queue/receiver identities. Decode
+  // each path segment once so encoded slashes and double encoding stay distinct.
+  function comparableUrl(value) {
+    const url = new URL(value);
+    url.hash = '';
+    url.pathname = url.pathname.split('/').map(segment =>
+      encodeURIComponent(decodeURIComponent(segment)).replace(/[!'()*]/g,
+        char => '%' + char.charCodeAt(0).toString(16).toUpperCase())).join('/');
+    return url.href;
+  }
+
+  function sameDocumentUrl(actual, expected) {
+    try { return comparableUrl(actual) === comparableUrl(expected); }
+    catch (_) { return false; }
+  }
+
   function victoriasSecretImage(raw, candidates = []) {
     const base = 'https://www.victoriassecret.com';
     const input = new URL(raw, base);
@@ -785,7 +801,7 @@
     const images = [raw, ...candidates].map(value => {
       try {
         const url = new URL(value.startsWith('www.victoriassecret.com/') ? 'https://' + value : value, base);
-        const match = url.pathname.match(/^\/p\/(\d+)x(\d+)\/(?:png|jpg|webp)\/[^?#]+$/);
+        const match = url.pathname.match(/^\/p\/(\d+)x(\d+)\/(?:png|jpg|webp|tif)\/[^?#]+$/);
         return url.origin === base && match && !url.search && !url.hash &&
           decodeURIComponent(url.pathname.split('/').pop()) === filename ?
           {url: url.href, width: Number(match[1]), height: Number(match[2])} : null;
@@ -796,6 +812,7 @@
   }
 
   const helpers = {
+    comparableUrl, sameDocumentUrl,
     victoriasSecretImage,
     takeoverStatusText,
     canSaveShopifyFeed,

@@ -734,7 +734,7 @@ test('five gone products do not pause and reimport revisits gone but receiver-sk
 
 test('same-product locale and canonical redirects keep their existing failure handling', async () => {
   const queued='https://shop.example.test/us_en/bra-239';
-  for (const url of [queued+'/', queued.replace('/us_en/','/uk_en/'), queued.replace('bra','%62ra')]) {
+  for (const url of [queued+'/', queued.replace('/us_en/','/uk_en/')]) {
     const r=rig({[queued]:{...braPage,url}}, {}, {verifyResult:{storage:'receiver',status:'missing'}});
     await r.runner().importDiscovery(site,[discoverySource([queued])]);
     await r.runner().start(); await r.runner().tick();
@@ -794,4 +794,57 @@ test('shipped site configurations use the shared 9–12 second pacing range',()=
       liseConfig, require('../site_config/www.sanscomplexe.com.json')]) {
     assert.deepEqual(summarizeTakeover({config,products:[]}).pacing,{minMs:9000,maxMs:12000});
   }
+});
+
+test('fixed VS queue captures encoded document while retaining saved literal identity',async()=>{
+  const url=require('./fixtures/victoriassecret-apostrophe-urls.json')[0];
+  const r=rig({[url]:{kind:'product',url:url.replaceAll("'",'%27'),product:{name:'Lace Bra'}}},{},
+    {verifyResult:{storage:'receiver',status:'missing'}});
+  const config={...site,domain:'www.victoriassecret.com'};
+  const source=discoverySource([url]); source.report.site=config.domain;
+  source.report.listings[0].url=source.report.listings[0].final_url='https://www.victoriassecret.com/list';
+  await r.runner().importDiscovery(config,[source]);await r.runner().start();await r.runner().tick();
+  assert.equal(r.memory.run.products[0].status,'captured');
+  assert.equal(r.memory.run.products[0].identity.product_url,url);
+});
+
+test('three plain readiness failures fail one product and continue with the next',async()=>{
+  const r=rig({[bra]:{status:0,error:'automatic product gallery readiness timeout'},[red]:redPage},{},
+    {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource([bra,red])]);await r.runner().start();
+  for(let i=0;i<3;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'running');
+  assert.equal(r.memory.run.products[0].status,'failed');
+  assert.match(r.memory.run.products[0].reason,/3.*automatic product gallery readiness timeout/);
+  await r.runner().tick();
+  assert.equal(r.memory.run.products[1].status,'captured');
+});
+
+test('plain load failures on five different products pause; challenge errors pause immediately',async()=>{
+  const urls=Array.from({length:6},(_,i)=>`https://shop.example.test/bra-${i}`);
+  const r=rig(Object.fromEntries(urls.map(url=>[url,{status:0,error:'page load timeout'}])),{},
+    {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource(urls)]);await r.runner().start();
+  for(let i=0;i<15;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.products.filter(p=>p.status==='failed').length,5);
+  assert.equal(r.memory.run.status,'paused');
+  assert.match(r.memory.run.reason,/5 consecutive product failures.*page load timeout/);
+  for(const error of ['HTTP 403','HTTP 429','captcha challenge']) {
+    const b=rig({[bra]:{status:0,error}},{},{verifyResult:{storage:'receiver',status:'missing'}});
+    await b.runner().importDiscovery(site,[discoverySource([bra])]);await b.runner().start();await b.runner().tick();
+    assert.equal(b.memory.run.status,'paused');assert.equal(b.visits.length,1);
+  }
+});
+
+test('equivalent percent-encoded path letters capture but unknown inspection failures retain a clear pause', async()=>{
+  const encoded=bra.replace('bra','%62ra');
+  const r=rig({[bra]:{...braPage,url:encoded}},{},{verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource([bra])]);await r.runner().start();await r.runner().tick();
+  assert.equal(r.memory.run.products[0].status,'captured');
+  const b=rig({[bra]:{status:0,error:'page inspection failed'}},{},{verifyResult:{storage:'receiver',status:'missing'}});
+  await b.runner().importDiscovery(site,[discoverySource([bra])]);await b.runner().start();
+  for(let i=0;i<3;i++){await b.runner().tick();b.advance(10000);}
+  assert.equal(b.memory.run.status,'paused');
+  assert.match(b.memory.run.reason,/page inspection failed/);
+  assert.equal(b.memory.run.products[0].status,'pending');
 });

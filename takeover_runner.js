@@ -2,6 +2,7 @@
  * same state machine can be exercised without a vendor or receiver connection. */
 (function(root) {
   'use strict';
+  const {comparableUrl, sameDocumentUrl} = root.PageImageSaverHelpers || require('./extension_helpers.js');
   const KEY_VERSION = 1;
   const MAX_LISTINGS = 1000;
   const MAX_PRODUCTS = 10000;
@@ -25,7 +26,7 @@
   }
 
   function addedQueryOnly(actual, expected) {
-    const a = new URL(actual), e = new URL(expected);
+    const a = new URL(comparableUrl(actual)), e = new URL(comparableUrl(expected));
     if (a.origin !== e.origin || a.pathname !== e.pathname || a.username || a.password) return false;
     for (const key of new Set(e.searchParams.keys())) {
       if (JSON.stringify(a.searchParams.getAll(key)) !== JSON.stringify(e.searchParams.getAll(key))) return false;
@@ -242,7 +243,7 @@
         try {
           if (!row.identity || row.identity.domain !== run.domain ||
               row.identity.color_key !== 'url' ||
-              canonical(row.identity.product_url, run.domain) !== row.url) {
+              !sameDocumentUrl(canonical(row.identity.product_url, run.domain), row.url)) {
             throw new Error('missing or mismatched saved capture identity');
           }
           const result = await io.verify(row.identity);
@@ -324,8 +325,9 @@
       catch (error) { page = {status: 0, error: String(error?.message || error)}; }
       const afterLoad = await read();
       if (afterLoad?.status !== 'running' || afterLoad.generation !== run.generation) return afterLoad;
-      if (page?.status === 403 || page?.status === 429 || page?.kind === 'challenge') {
-        return interrupt(run, 'paused', `challenge or HTTP ${page?.status || 'unknown'} at ${url}`);
+      if (page?.status === 403 || page?.status === 429 || page?.kind === 'challenge' ||
+          /\b(403|429|captcha|challenge)\b/i.test(page?.error || '')) {
+        return interrupt(run, 'paused', `${page?.error || `challenge or HTTP ${page?.status || 'unknown'}`} at ${url}`);
       }
       let deadProductReason = null;
       let gone = false;
@@ -368,15 +370,27 @@
         return run;
       }
       if (!page || page.status === 0 || page.status >= 400 || !['listing', 'product'].includes(page.kind)) {
+        const reason = page?.error || `HTTP ${page?.status ?? 'unknown'}; page kind ${page?.kind || 'missing'}`;
         run.loadFailures[url] = (run.loadFailures[url] || 0) + 1;
+        run.lastLoadError = {url, reason, attempts: run.loadFailures[url]};
         run.current = null;
+        if (run.loadFailures[url] >= 3) {
+          // Only known local readiness/timeouts can advance a product queue.
+          // Unknown navigation/inspection failures retain the conservative pause.
+          const plainFailure = /^(page load timeout|automatic product gallery readiness timeout|Lazy gallery shortfall:)/.test(reason);
+          if (!item || !plainFailure)
+            return interrupt(run, 'paused', `repeated page load failure at ${url}: ${reason}`);
+          item.status = 'failed'; item.reason = `3 page load attempts failed: ${reason}`;
+          run.consecutiveFailures = (run.consecutiveFailures || 0) + 1;
+          if (run.consecutiveFailures >= 5)
+            return interrupt(run, 'paused', `5 consecutive product failures: ${item.reason}`);
+        }
         await save(run);
-        if (run.loadFailures[url] >= 3) return interrupt(run, 'paused', `repeated page load failure at ${url}`);
         await io.alarm(run.nextNavigationAt);
         return run;
       }
       try {
-        if (!queryEquivalent && canonical(page.url, run.domain) !== url) {
+        if (!queryEquivalent && !sameDocumentUrl(canonical(page.url, run.domain), url)) {
           return interrupt(run, listingUrl ? 'discovery_incomplete' : 'paused',
             `inspected page URL does not match queued URL at ${url}`);
         }
@@ -449,13 +463,13 @@
             }
             const binding = {generation: run.generation, tabId: page.tabId,
               documentId: page.documentId, expectedUrl: url};
-            if (queryEquivalent && canonical(page.url, run.domain) !== url) binding.documentUrl = canonical(page.url, run.domain);
+            if (queryEquivalent && !sameDocumentUrl(canonical(page.url, run.domain), url)) binding.documentUrl = canonical(page.url, run.domain);
             run.current.binding = binding;
             await save(run); // Bind this document before any image acquisition.
             const result = await io.capture(url, scope, binding);
             if (!result.identity || result.identity.domain !== run.domain ||
                 result.identity.color_key !== 'url' ||
-                canonical(result.identity.product_url, run.domain) !== url) {
+                !sameDocumentUrl(canonical(result.identity.product_url, run.domain), url)) {
               return interrupt(run, 'paused', `capture identity does not match queued URL at ${url}`);
             }
             if (result.storage === 'receiver' && ['published', 'reused', 'already'].includes(result.status)) {

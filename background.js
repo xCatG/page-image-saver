@@ -62,11 +62,7 @@ function takeoverMessage(tabId, message) {
 }
 
 function takeoverSameUrl(actual, expected) {
-  try {
-    const url = new URL(actual);
-    url.hash = '';
-    return url.href === expected;
-  } catch (_) { return false; }
+  return globalThis.PageImageSaverHelpers.sameDocumentUrl(actual, expected);
 }
 
 async function takeoverOwnedTab(binding) {

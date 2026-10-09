@@ -25,3 +25,22 @@ test('content capture binds the query-added document but publishes the queued pr
   sandbox.window.location.href=queued+'?size=M';
   await assert.rejects(()=>sandbox.captureCurrentProduct({manual:false,binding}),/URL changed/);
 });
+
+test('real VS apostrophe URLs bind both spellings, while other documents and paths stay rejected', () => {
+  const source=fs.readFileSync(path.join(__dirname,'..','content_script.js'),'utf8');
+  const sandbox={URL,window:{location:{}},takeoverDocumentId:'doc',
+    PageImageSaverHelpers:require('../extension_helpers.js')};
+  sandbox.captureCanonicalUrl=()=>sandbox.window.location.href;
+  sandbox.globalThis=sandbox;
+  vm.runInNewContext(source.slice(source.indexOf('function assertTakeoverBinding('),source.indexOf('function rescanCaptureImages(')),sandbox);
+  for (const queued of require('./fixtures/victoriassecret-apostrophe-urls.json')) {
+    const encoded=queued.replaceAll("'",'%27');
+    for (const [expected,actual] of [[queued,encoded],[encoded,queued]]) {
+      sandbox.window.location.href=actual;
+      assert.doesNotThrow(()=>sandbox.assertTakeoverBinding({documentId:'doc',expectedUrl:expected}));
+      assert.throws(()=>sandbox.assertTakeoverBinding({documentId:'other-doc',expectedUrl:expected}),/changed/);
+      sandbox.window.location.href=actual+'-other';
+      assert.throws(()=>sandbox.assertTakeoverBinding({documentId:'doc',expectedUrl:expected}),/changed/);
+    }
+  }
+});

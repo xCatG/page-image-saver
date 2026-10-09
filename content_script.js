@@ -2608,12 +2608,10 @@ async function recordCaptureFailure(error) {
 
 function assertTakeoverBinding(binding) {
   if (!binding) return;
-  const visited = new URL(window.location.href);
-  visited.hash = '';
-  const canonical = new URL(captureCanonicalUrl());
-  canonical.hash = '';
-  if (binding.documentId !== takeoverDocumentId || visited.href !== (binding.documentUrl || binding.expectedUrl) ||
-      (canonical.href !== binding.expectedUrl && canonical.href !== binding.documentUrl)) {
+  const same = globalThis.PageImageSaverHelpers.sameDocumentUrl;
+  if (binding.documentId !== takeoverDocumentId ||
+      !same(window.location.href, binding.documentUrl || binding.expectedUrl) ||
+      (!same(captureCanonicalUrl(), binding.expectedUrl) && !same(captureCanonicalUrl(), binding.documentUrl))) {
     throw new Error('take-over document or product URL changed');
   }
 }

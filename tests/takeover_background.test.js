@@ -92,7 +92,7 @@ function bridge() {
           stored.catalogTakeoverRun.status = 'stopped'; return stored.catalogTakeoverRun;
         }};
     }, summarizeTakeover() { return {}; }},
-    PageImageSaverHelpers: {}};
+    PageImageSaverHelpers: {...require('../extension_helpers.js')}};
   sandbox.globalThis = sandbox;
   const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8')
     .split('// Product capture is always local.')[0]
@@ -419,4 +419,15 @@ test('navigation during capture prevents accepting a receiver result for the old
   };
   await assert.rejects(() => b.io.capture(black, {decision: 'include', reason: 'Bras'}, binding),
     /tab URL changed|document changed/);
+});
+
+test('tab URL comparison accepts real VS apostrophe encodings but not another product or query', () => {
+  const b=bridge();
+  for (const url of require('./fixtures/victoriassecret-apostrophe-urls.json')) {
+    assert.equal(b.sandbox.takeoverSameUrl(url.replaceAll("'",'%27'),url),true);
+    assert.equal(b.sandbox.takeoverSameUrl(url,url.replaceAll("'",'%27')),true);
+    assert.equal(b.sandbox.takeoverSameUrl(url+'?choice=other',url),false);
+  }
+  assert.equal(b.sandbox.takeoverSameUrl('https://shop.example.test/a%2Fb','https://shop.example.test/a/b'),false);
+  assert.equal(b.sandbox.takeoverSameUrl('https://shop.example.test/a%2527','https://shop.example.test/a%27'),false);
 });

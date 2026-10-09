@@ -48,6 +48,27 @@ class SavedPageFixtures(unittest.TestCase):
                 finally:
                     page.close()
 
+    def test_vs_adaptive_readiness_and_ganache_facts(self):
+        config = json.loads(source("site_config/www.victoriassecret.com.json"))
+        page = self.open_fixture(config['domain'], 'victoriassecret-adaptive.html')
+        try:
+            content = source("content_script.js")
+            inspector = content[content.index("function takeoverCategory()"):
+                content.index("// A site must be explicitly enabled")]
+            page.add_script_tag(content='const takeoverDocumentId="fixture"; function rescanCaptureImages() {}' + inspector)
+            result = page.evaluate("c => inspectTakeoverPage(c, 'capture-discovery', 'product')", config)
+            self.assertEqual(result['kind'], 'product')
+            self.assertEqual(result['imageCount'], 5)
+            self.assertEqual(result['product']['name'], 'VS Adaptive Lightly Lined Front-Close Full Coverage Bra')
+            self.assertEqual(result['product']['color'], 'Ganache')
+            self.assertEqual(result['product']['product_id'], '5000008963')
+            self.assertEqual(result['product']['offers'], {'price': '54.95', 'currency': 'USD'})
+            self.assertEqual(page.locator('[data-testid="ImageBadge"]').count(), 1)
+            self.assertEqual(page.evaluate("c => captureGallery(c, 'site')[0]", config),
+                'https://www.victoriassecret.com/p/760x1013/tif/zz/23/08/02/02/1121720633F6_OM_F.jpg')
+        finally:
+            page.close()
+
     def test_vs_query_rendition_does_not_invent_queryless_original(self):
         config = json.loads(source("site_config/www.victoriassecret.com.json"))
         page = self.open_fixture(config['domain'], 'victoriassecret-wave.html')

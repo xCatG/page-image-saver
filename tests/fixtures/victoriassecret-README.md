@@ -21,3 +21,13 @@ parent product ID. JSON-LD alone lacks selected colour; PINK saves require rende
 DOM facts. No complete saved VS panty HTML was present, so that family remains an
 owner smoke-test obligation. The gallery resolver selects the widest evidenced
 same-filename rendition and rejects missing/foreign/query-bearing original evidence.
+
+`victoriassecret-adaptive.html` is a scrubbed excerpt of the owner's October 9
+Adaptive Ganache save (source SHA-256 in its header). It retains the actual
+primary-gallery markup including the adaptive badge, five images, canonical
+choice-33F6 URL, selected Ganache label, product facts, and five evidenced URLs.
+Four photo URLs use `/tif/`; the digitally rendered front uses `/png/`. The path
+segment is retained as evidenced; the delivered filename still ends in `.jpg`.
+Scripts, cookies, recommendation images and account content are omitted.
+`victoriassecret-apostrophe-urls.json` contains the five failed URLs from the
+owner's 2026-10-09T07-50-04-269Z run report, without other run data.
