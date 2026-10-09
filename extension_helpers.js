@@ -215,6 +215,34 @@
     return [...matches][0];
   }
 
+  // Manual saves only: preserve the selected proxy URL, grouping by evidenced original.
+  function dedupeManualImages(images, pageUrl) {
+    let page;
+    try { page = new URL(pageUrl); } catch (_) { return images; }
+    if (page.origin !== 'https://www.agentprovocateur.com') return images;
+    const pattern = 'https://www\\.agentprovocateur\\.com/static/media/catalog/product/[^\\s"<>?#]+\\.(?:jpg|jpeg|png|webp)';
+    const chosen = new Map();
+    for (const image of images) {
+      let key;
+      try { key = resolveGalleryOriginal(image.url, pattern, page.href); }
+      catch (_) {
+        // Let the existing per-image processor handle unsupported/invalid sources.
+        chosen.set(image, {image, area: 0});
+        continue;
+      }
+      const dimensions = new URL(image.url, page.href).pathname.match(/^\/tco-images\/unsafe\/(\d+)x(\d+)\//);
+      // Loaded images carry intrinsic dimensions. Lazy images carry DOM layout
+      // dimensions, so prefer their explicit proxy size. 0x0 remains unknown.
+      const dimension = (actual, proxy) => image.isLoaded === false
+        ? Number(proxy) || Number(actual) || 0 : Number(actual) || Number(proxy) || 0;
+      const width = dimension(image.width, dimensions?.[1]);
+      const height = dimension(image.height, dimensions?.[2]);
+      const area = width * height;
+      if (!chosen.has(key) || area > chosen.get(key).area) chosen.set(key, {image, area});
+    }
+    return Array.from(chosen.values(), row => row.image);
+  }
+
   function galleryNodeOriginal(node, config, doc) {
     const values = ['data-original', 'data-src'].map(name => node.getAttribute(name));
     for (const name of ['data-srcset', 'srcset']) {
@@ -635,7 +663,7 @@
         else if (delta.id === id) terminal(delta);
       }
       chromeApi.downloads.onChanged.addListener(onChanged);
-      chromeApi.downloads.download({url: dataUrl, filename, saveAs: false, conflictAction: 'uniquify'}, downloadId => {
+      chromeApi.downloads.download({url: dataUrl, filename, saveAs: false, conflictAction: options.conflictAction === 'overwrite' ? 'overwrite' : 'uniquify'}, downloadId => {
         if (chromeApi.runtime.lastError || !Number.isInteger(downloadId)) {
           finish(new Error(chromeApi.runtime.lastError?.message || 'capture download failed to start'));
           return;
@@ -824,6 +852,7 @@
     captureIdentityKey,
     captureImageUrls,
     resolveGalleryOriginal,
+    dedupeManualImages,
     galleryNodeOriginal,
     waitForCaptureState,
     waitForAutoCaptureReady,

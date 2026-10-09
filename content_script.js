@@ -1,3 +1,6 @@
+// A manifest injection can race toolbar/keyboard fallback injection in the same document.
+(() => {
+if (window.PageImageSaverLoaded) return;
 // content_script.js - This gets injected into web pages
 
 // Add a global flag that the background script can check to see if we're loaded
@@ -2691,10 +2694,12 @@ async function refreshTakeoverProgress() {
   const refreshSequence = ++takeoverRefreshSequence;
   try {
     const {run, summary} = await takeoverRequest('takeoverStatus');
-    if (refreshSequence !== takeoverRefreshSequence || box.dataset.previewPending === 'true') return;
+    if (document.getElementById('takeover-progress') !== box ||
+        refreshSequence !== takeoverRefreshSequence || box.dataset.previewPending === 'true') return;
     const currentHost = window.location.hostname.toLowerCase();
     const foreignRun = !!run && run.domain !== currentHost;
     const statusLine = document.getElementById('takeover-status-line');
+    if (!statusLine) return;
     statusLine.hidden = !run;
     statusLine.textContent = !run ? '' : foreignRun ?
       `Saved run belongs to ${run.domain} — ${run.status}` :
@@ -2748,9 +2753,11 @@ async function refreshTakeoverProgress() {
       (run.products || []).filter(row => row.status === 'failed').map(row => `${row.url}: ${row.reason}`).join('\n') +
       '\nVerified skips require the local receiver. Downloads exports are unverified until imported.';
   } catch (error) {
-    if (refreshSequence === takeoverRefreshSequence && box.dataset.previewPending !== 'true') {
+    if (document.getElementById('takeover-progress') === box &&
+        refreshSequence === takeoverRefreshSequence && box.dataset.previewPending !== 'true') {
       box.textContent = `Catalog status unavailable: ${error.message}`;
       const statusLine = document.getElementById('takeover-status-line');
+      if (!statusLine) return;
       statusLine.hidden = false;
       statusLine.textContent = box.textContent;
     }
@@ -3026,3 +3033,5 @@ console.log('Page Image Saver content script loaded.');
   }, true);
 })();
 // =======================================================================
+
+})();

@@ -1200,6 +1200,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Process images in controlled batches
 async function processImagesInBatches(images, sourceInfo, tabId) {
+  images = globalThis.PageImageSaverHelpers.dedupeManualImages(images, sourceInfo?.url);
   const results = [];
   const batchSize = CONFIG.maxConcurrentUploads;
   let totalCompleted = 0;
@@ -1557,6 +1558,10 @@ function getFilename(url, contentType) {
       
       // If filename has a valid extension, use it
       if (filename && filename.includes('.')) {
+        // The proxy may encode PNG/WebP bytes behind a .jpg URL.
+        const mime = (contentType || '').split(';')[0].trim().toLowerCase();
+        const knownImage = /^image\/(jpeg|png|gif|webp|avif|svg\+xml|bmp|tiff)$/.test(mime);
+        if (knownImage) filename = filename.slice(0, filename.lastIndexOf('.')) + getExtensionFromContentType(mime);
         const sanitized = sanitizeFilename(filename);
         debugLog(`Using sanitized original filename: "${sanitized}"`);
         return sanitized;
@@ -1660,6 +1665,7 @@ function getExtensionFromContentType(contentType) {
   debugLog(`Getting file extension for content type: ${contentType}`);
   
   if (!contentType) return '.jpg';
+  contentType = contentType.split(';')[0].trim().toLowerCase();
   
   if (contentType.includes('mpegurl') || contentType.includes('m3u8')) {
     return '.m3u8';
@@ -1670,6 +1676,7 @@ function getExtensionFromContentType(contentType) {
     'image/png': '.png',
     'image/gif': '.gif',
     'image/webp': '.webp',
+    'image/avif': '.avif',
     'image/svg+xml': '.svg',
     'image/bmp': '.bmp',
     'image/tiff': '.tiff',
@@ -1708,7 +1715,7 @@ async function saveToDownloads(blob, filename, domain) {
 
   const dataUrl = await blobToDataUrl(blob);
   const savedPath = await globalThis.PageImageSaverHelpers.saveCaptureDownload(
-    chrome, dataUrl, localPath, 120000, {allowUniquified: true});
+    chrome, dataUrl, localPath, 120000, {conflictAction: 'overwrite'});
   return {success: true, type: 'local', fullPath: savedPath};
 }
 

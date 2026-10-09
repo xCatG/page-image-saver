@@ -73,6 +73,32 @@ class CatalogPreviewExtensionBrowserTest(unittest.TestCase):
         else:
             route.fulfill(status=404, body="")
 
+    def test_double_injection_preserves_document_binding_and_one_listener(self):
+        url = 'https://unknown.example.test/double'
+        self.open_panel(url)
+        errors = []
+        self.page.on('pageerror', lambda error: errors.append(str(error)))
+        self.page.locator('#close-btn').click()
+        result = self.worker.evaluate("""async url => {
+          const [tab] = await chrome.tabs.query({url});
+          const before = await chrome.tabs.sendMessage(tab.id, {action:'takeoverDocumentCheck'});
+          const inject = () => chrome.scripting.executeScript({target:{tabId:tab.id}, files:['content_script.js']});
+          await inject(); await inject();
+          const after = await chrome.tabs.sendMessage(tab.id, {action:'takeoverDocumentCheck'});
+          const [probe] = await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>{
+            let count=0;
+            const append=document.body.appendChild.bind(document.body);
+            document.body.appendChild=node=>{if(node.id==='image-selector-container') count++;return append(node);};
+            globalThis.issue14PanelCount=()=>count;
+          }});
+          await chrome.tabs.sendMessage(tab.id,{action:'findImages'});
+          const [count] = await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>globalThis.issue14PanelCount()});
+          return {before,after,count:count.result};
+        }""", url)
+        self.assertEqual(errors, [])
+        self.assertEqual(result['before']['documentId'], result['after']['documentId'])
+        self.assertEqual(result['count'], 1)
+
     def open_panel(self, url):
         self.page.goto(url, wait_until="domcontentloaded")
         self.worker.evaluate("""async url => {

@@ -69,6 +69,24 @@ class CatalogPanelBrowserTest(unittest.TestCase):
     def tearDown(self):
         self.page.close()
 
+    def test_close_panel_while_status_request_is_pending(self):
+        refresh = SOURCE[SOURCE.index('let takeoverRefreshSequence'):SOURCE.index('function takeoverCategory(')]
+        self.page.add_script_tag(content=refresh)
+        self.page.evaluate("""() => {
+          globalThis.takeoverRequest = () => new Promise(resolve => {globalThis.finishStatus=resolve;});
+          createImageSelectionUI([]);
+        }""")
+        self.page.locator('#close-btn').click()
+        result = self.page.evaluate("""async () => {
+          // Refresh explicitly so the promise itself is observable.
+          createImageSelectionUI([]);
+          const pending=refreshTakeoverProgress();
+          document.querySelector('#close-btn').click();
+          finishStatus({run:null,summary:{}});
+          try { await pending; return 'settled'; } catch(error) {return error.message;}
+        }""")
+        self.assertEqual(result, 'settled')
+
     def open_panel(self):
         self.page.evaluate("createImageSelectionUI([])")
         self.page.wait_for_timeout(50)
