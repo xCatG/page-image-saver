@@ -2591,8 +2591,9 @@ function captureSelectedColor(product) {
   return product.color || captureSwatchColor() || document.getElementById('capture-color')?.value.trim() || null;
 }
 
-function captureCanonicalUrl() {
+function captureCanonicalUrl({forBinding = false} = {}) {
   const candidate = document.querySelector('link[rel="canonical"]')?.href;
+  if (forBinding && candidate) return candidate; // Binding must reject foreign canonicals, not hide them.
   try {
     if (candidate && new URL(candidate).hostname === window.location.hostname) return candidate;
   } catch (_) { /* Use the visited URL. */ }
@@ -2611,10 +2612,14 @@ async function recordCaptureFailure(error) {
 
 function assertTakeoverBinding(binding) {
   if (!binding) return;
-  const same = globalThis.PageImageSaverHelpers.sameDocumentUrl;
+  const helpers = globalThis.PageImageSaverHelpers;
+  const same = helpers.sameDocumentUrl;
+  const canonical = captureCanonicalUrl({forBinding: true});
+  const sameProduct = expected => same(canonical, expected) ||
+    helpers.victoriasSecretSameProductChoice(canonical, expected);
   if (binding.documentId !== takeoverDocumentId ||
       !same(window.location.href, binding.documentUrl || binding.expectedUrl) ||
-      (!same(captureCanonicalUrl(), binding.expectedUrl) && !same(captureCanonicalUrl(), binding.documentUrl))) {
+      (!sameProduct(binding.expectedUrl) && !sameProduct(binding.documentUrl))) {
     throw new Error('take-over document or product URL changed');
   }
 }

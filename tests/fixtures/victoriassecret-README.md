@@ -31,3 +31,14 @@ segment is retained as evidenced; the delivered filename still ends in `.jpg`.
 Scripts, cookies, recommendation images and account content are omitted.
 `victoriassecret-apostrophe-urls.json` contains the five failed URLs from the
 owner's 2026-10-09T07-50-04-269Z run report, without other run data.
+
+`victoriassecret-pink-velour.html` is a 2.5 KB DOM excerpt from the owner's saved
+Plush Touch Velour Boyshort Panty / Pretty Mint Confetti Velour page. Original
+HTML SHA-256: `e8e9ac0db88eaa4fb8ddfc07cd15f77786d306e98681c4d84732bb3c104044eb`.
+The saved-from URL ends in `plush-touch-boyshort-panty-green`; the canonical ends
+in `plush-touch-velour-boyshort-panty-green`. Both have catalog `5000005293`,
+generic `11291842`, choice `72ZS`. The fixture retains the real canonical,
+rendered title/colour/price, three primary image elements, and evidenced gallery
+URLs. Scripts, account content and recommendations are omitted. Node coverage
+also exercises the capture route and asserts the queued URL remains the receiver
+identity; browser coverage checks the saved canonical, readiness, facts and gallery.

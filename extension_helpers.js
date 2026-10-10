@@ -821,6 +821,19 @@
     catch (_) { return false; }
   }
 
+  // VS may rename only the final merchandising slug. Never use this for
+  // navigation/document binding or rewrite the queued receiver identity.
+  function victoriasSecretSameProductChoice(actual, expected) {
+    try {
+      const a = new URL(actual), b = new URL(expected);
+      const product = /^(\/us\/(?:vs|pink)\/(?:bras|panties)-catalog\/\d+\/-\/a\/generic-\d+-choice-[A-Za-z0-9]+)\/[^/]+\/?$/;
+      const left = a.pathname.match(product), right = b.pathname.match(product);
+      return a.origin === 'https://www.victoriassecret.com' && a.origin === b.origin &&
+        !a.username && !a.password && !b.username && !b.password &&
+        a.search === b.search && !!left && !!right && left[1] === right[1];
+    } catch (_) { return false; }
+  }
+
   function victoriasSecretImage(raw, candidates = []) {
     const base = 'https://www.victoriassecret.com';
     const input = new URL(raw, base);
@@ -841,7 +854,7 @@
 
   const helpers = {
     comparableUrl, sameDocumentUrl,
-    victoriasSecretImage,
+    victoriasSecretImage, victoriasSecretSameProductChoice,
     takeoverStatusText,
     canSaveShopifyFeed,
     collectShopifyFeed,

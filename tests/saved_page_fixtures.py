@@ -48,6 +48,24 @@ class SavedPageFixtures(unittest.TestCase):
                 finally:
                     page.close()
 
+    def test_vs_renamed_velour_slug_binding_and_gallery(self):
+        config = json.loads(source("site_config/www.victoriassecret.com.json"))
+        queued = "https://www.victoriassecret.com/us/pink/panties-catalog/5000005293/-/a/generic-11291842-choice-72ZS/plush-touch-boyshort-panty-green"
+        page = self.open_fixture(config['domain'], 'victoriassecret-pink-velour.html')
+        try:
+            page.evaluate("url => history.replaceState({}, '', url)", queued)
+            content = source("content_script.js")
+            page.add_script_tag(content='const takeoverDocumentId="fixture";' +
+                content[content.index("function captureCanonicalUrl("):content.index("function rescanCaptureImages(")])
+            page.evaluate("url => assertTakeoverBinding({documentId:'fixture', documentUrl:url, expectedUrl:url})", queued)
+            facts = page.evaluate('capturePageProduct()')
+            self.assertEqual(facts['name'], 'Plush Touch Velour Boyshort Panty')
+            self.assertEqual(facts['color'], 'Pretty Mint Confetti Velour')
+            self.assertTrue(page.evaluate('c => captureProductSeen(c)', config))
+            self.assertEqual(len(page.evaluate("c => captureGallery(c, 'site')", config)), 3)
+        finally:
+            page.close()
+
     def test_vs_adaptive_readiness_and_ganache_facts(self):
         config = json.loads(source("site_config/www.victoriassecret.com.json"))
         page = self.open_fixture(config['domain'], 'victoriassecret-adaptive.html')
