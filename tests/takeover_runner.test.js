@@ -848,3 +848,18 @@ test('equivalent percent-encoded path letters capture but unknown inspection fai
   assert.match(b.memory.run.reason,/page inspection failed/);
   assert.equal(b.memory.run.products[0].status,'pending');
 });
+
+for (const phase of ['inspection', 'capture']) test(`unavailable choices at ${phase} export gone without capture or failure pauses`, async () => {
+  const urls = Array.from({length: 6}, (_, i) => bra + '/' + i);
+  const reason = 'choice unavailable in region: 7OWG → 7WZZ';
+  const pages = Object.fromEntries(urls.map(url => [url, {...braPage, url, colorLinks: [], ...(phase === 'inspection' ? {goneReason: reason} : {})}]));
+  const r = rig(pages, {}, {verifyResult: {storage:'receiver',status:'missing'}});
+  if (phase === 'capture') r.io.capture = async () => {throw new Error(reason);};
+  await r.runner().importDiscovery(site, [discoverySource(urls)]); await r.runner().start();
+  for (let i=0;i<7;i++) {await r.runner().tick(); r.advance(10000);}
+  assert.equal(r.memory.run.status, 'complete');
+  assert.equal(summarizeTakeover(r.memory.run).gone, 6);
+  assert.equal(summarizeTakeover(r.memory.run).failed, 0);
+  assert.ok(r.memory.run.products.every(p => p.reason === reason));
+  assert.equal(r.captureCalls.length, 0);
+});

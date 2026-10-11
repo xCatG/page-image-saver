@@ -834,6 +834,22 @@
     } catch (_) { return false; }
   }
 
+  // A regional fallback is a missing queued choice, never permission to capture its substitute.
+  function victoriasSecretUnavailableChoice(expected, actual, alertText = '') {
+    try {
+      const a = new URL(actual), b = new URL(expected);
+      const product = /^\/us\/(?:vs|pink)\/(?:bras|panties)-catalog\/\d+\/-\/a\/generic-(\d+)-choice-([A-Za-z0-9]+)\/[^/]+\/?$/;
+      const left = a.pathname.match(product), right = b.pathname.match(product);
+      if (a.origin !== 'https://www.victoriassecret.com' || a.origin !== b.origin ||
+          a.username || a.password || b.username || b.password ||
+          !left || !right || left[1] !== right[1]) return null;
+      const unavailable = Array.from(alertText.matchAll(/Item unavailable in ([A-Za-z0-9]+)\b/g), m => m[1]);
+      if (left[2] !== right[2]) return `choice unavailable in region: ${right[2]} → ${left[2]}`;
+      if (unavailable.includes(right[2])) return `choice unavailable in region: ${right[2]}`;
+    } catch (_) { /* Malformed/off-site identities retain the ordinary binding rejection. */ }
+    return null;
+  }
+
   function victoriasSecretImage(raw, candidates = []) {
     const base = 'https://www.victoriassecret.com';
     const input = new URL(raw, base);
@@ -854,7 +870,7 @@
 
   const helpers = {
     comparableUrl, sameDocumentUrl,
-    victoriasSecretImage, victoriasSecretSameProductChoice,
+    victoriasSecretImage, victoriasSecretSameProductChoice, victoriasSecretUnavailableChoice,
     takeoverStatusText,
     canSaveShopifyFeed,
     collectShopifyFeed,

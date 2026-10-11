@@ -30,7 +30,6 @@ test('renamed VS canonical slug captures with the original queued receiver ident
   assert.equal(result.identity.color_key, 'url');
 });
 for (const [label, changed] of [
-  ['choice', canonical.replace('choice-72ZS', 'choice-OTHER')],
   ['generic id', canonical.replace('generic-11291842', 'generic-99999999')],
   ['host', canonical.replace('www.victoriassecret.com', 'evil.test')],
   ['catalog id', canonical.replace('5000005293', '5000000000')],
@@ -53,4 +52,45 @@ test('non-VS canonical slug changes remain rejected', () => {
   sandbox.window.location = {href: other, hostname: 'shop.example.test'};
   state.canonical = canonical.replace('www.victoriassecret.com', 'shop.example.test');
   assert.throws(() => sandbox.assertTakeoverBinding({...binding, expectedUrl: other, documentUrl: other}), /URL changed/);
+});
+
+for (const fixture of require('./fixtures/vs-unavailable-choices.json')) {
+  test(`unavailable saved choice ${fixture.alert} never captures its substitute`, async () => {
+    const {sandbox, state, binding} = page();
+    sandbox.window.location.href = fixture.queued;
+    state.canonical = fixture.canonical;
+    binding.expectedUrl = binding.documentUrl = fixture.queued;
+    await assert.rejects(sandbox.captureCurrentProduct({manual: false, binding}), /choice unavailable in region:/);
+    assert.equal(state.payload, null);
+  });
+}
+test('binding diagnostics distinguish document, location, and canonical with observed values', () => {
+  const {sandbox, state, binding} = page();
+  assert.throws(() => sandbox.assertTakeoverBinding({...binding, documentId: 'old'}), /URL changed: document id doc vs old/);
+  sandbox.window.location.href = canonical;
+  assert.throws(() => sandbox.assertTakeoverBinding(binding), e => e.message.includes(`location ${canonical} vs ${queued}`));
+  sandbox.window.location.href = queued; state.canonical = canonical.replace('11291842','99999999');
+  assert.throws(() => sandbox.assertTakeoverBinding(binding), e => e.message.includes(`canonical ${state.canonical} vs ${queued}`));
+});
+test('unavailable alert must name the queued choice; foreign products and hosts are not gone', () => {
+  const f = require('./fixtures/vs-unavailable-choices.json')[0];
+  assert.match(helpers.victoriasSecretUnavailableChoice(f.queued, f.queued, f.alert), /choice unavailable in region:/);
+  assert.equal(helpers.victoriasSecretUnavailableChoice(f.queued, f.queued, 'Item unavailable in OTHER'), null);
+  assert.equal(helpers.victoriasSecretUnavailableChoice(f.queued, f.canonical.replace('generic-11285761','generic-99999999')), null);
+  assert.equal(helpers.victoriasSecretUnavailableChoice(f.queued, f.canonical.replace('www.victoriassecret.com','evil.test')), null);
+});
+
+for (const fixture of require('./fixtures/vs-unavailable-choices.json')) test(`inspection recognizes ${fixture.alert} before waiting for gallery`, async () => {
+  const {sandbox, state} = page();
+  sandbox.window.location.href = fixture.queued;
+  state.canonical = fixture.canonical;
+  sandbox.document = {title: '', body: {innerText: fixture.alert},
+    querySelector: selector => selector.includes('canonical') ? {href: fixture.canonical} : null,
+    querySelectorAll: () => [{textContent: fixture.alert}]};
+  sandbox.capturePageProduct = () => {throw Error('must not acquire substitute product');};
+  vm.runInNewContext(source.slice(source.indexOf('async function inspectTakeoverPage('), source.indexOf('// A site must be explicitly enabled')), sandbox);
+  const result = await sandbox.inspectTakeoverPage({}, 'capture', 'product');
+  assert.match(result.goneReason, /choice unavailable in region:/);
+  assert.equal(result.url, fixture.queued);
+  assert.equal(state.payload, null);
 });

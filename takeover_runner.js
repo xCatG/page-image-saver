@@ -350,6 +350,9 @@
           if (run.mode === 'capture-discovery') deadProductReason = `invalid inspected page URL:${page.url}`;
         }
       }
+      if (!deadProductReason && item && page?.goneReason) {
+        gone = true; deadProductReason = page.goneReason;
+      }
       if (!deadProductReason && item && page?.kind === 'listing') {
         try {
           canonical(page.url, run.domain);
@@ -483,14 +486,16 @@
           } catch (error) {
             const reason = String(error?.message || error);
             if (/\b(403|429|captcha|challenge)\b/i.test(reason)) return interrupt(run, 'paused', reason);
-            item.status = 'failed'; item.reason = reason;
+            item.status = reason.startsWith('choice unavailable in region: ') ? 'skipped' : 'failed';
+            item.reason = reason;
+            if (item.status === 'skipped') item.captureStatus = 'gone';
           }
         }
       }
       run.current = null;
       const beforeSave = await read();
       if (beforeSave?.status !== 'running' || beforeSave.generation !== run.generation) return beforeSave;
-      if (item) {
+      if (item && item.captureStatus !== 'gone') {
         run.consecutiveFailures = item.status === 'failed' ? (run.consecutiveFailures || 0) + 1 : 0;
         if (run.consecutiveFailures >= 5) return interrupt(run, 'paused', `5 consecutive product failures: ${item.reason}`);
       }

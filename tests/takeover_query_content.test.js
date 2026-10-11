@@ -8,7 +8,7 @@ test('content capture binds the query-added document but publishes the queued pr
   const queued='https://shop.example.test/product';
   const visited=queued+'?size=OS';
   let payload;
-  const sandbox={URL,Map,Date,window:{location:{href:visited}},takeoverDocumentId:'doc',
+  const sandbox={document:{querySelectorAll:()=>[]},URL,Map,Date,window:{location:{href:visited}},takeoverDocumentId:'doc',
     captureCanonicalUrl:()=>visited, loadCaptureSiteConfig:async()=>({colorVariantStrategy:'separate-url'}),
     capturePageProduct:()=>({name:'Brief'}),captureGallery:()=>['https://shop.example.test/image.jpg'],
     captureSwatchColor:()=>null,captureSelectedColor:()=>null,previousCaptureStates:new Map(),
@@ -17,7 +17,7 @@ test('content capture binds the query-added document but publishes the queued pr
     chrome:{runtime:{sendMessage:(message,callback)=>{payload=message.payload;callback({success:true,status:'published'});}}}};
   sandbox.globalThis=sandbox;
   const source=fs.readFileSync(path.join(__dirname,'..','content_script.js'),'utf8');
-  vm.runInNewContext(source.slice(source.indexOf('function assertTakeoverBinding('),source.indexOf('function takeoverRequest(')),sandbox);
+  vm.runInNewContext(source.slice(source.indexOf('function takeoverUnavailableChoice('),source.indexOf('function takeoverRequest(')),sandbox);
   const binding={documentId:'doc',expectedUrl:queued,documentUrl:visited};
   const result=await sandbox.captureCurrentProduct({manual:false,binding});
   assert.equal(payload.identity.product_url,queued);
@@ -28,11 +28,11 @@ test('content capture binds the query-added document but publishes the queued pr
 
 test('real VS apostrophe URLs bind both spellings, while other documents and paths stay rejected', () => {
   const source=fs.readFileSync(path.join(__dirname,'..','content_script.js'),'utf8');
-  const sandbox={URL,window:{location:{}},takeoverDocumentId:'doc',
+  const sandbox={document:{querySelectorAll:()=>[]},URL,window:{location:{}},takeoverDocumentId:'doc',
     PageImageSaverHelpers:require('../extension_helpers.js')};
   sandbox.captureCanonicalUrl=()=>sandbox.window.location.href;
   sandbox.globalThis=sandbox;
-  vm.runInNewContext(source.slice(source.indexOf('function assertTakeoverBinding('),source.indexOf('function rescanCaptureImages(')),sandbox);
+  vm.runInNewContext(source.slice(source.indexOf('function takeoverUnavailableChoice('),source.indexOf('function rescanCaptureImages(')),sandbox);
   for (const queued of require('./fixtures/victoriassecret-apostrophe-urls.json')) {
     const encoded=queued.replaceAll("'",'%27');
     for (const [expected,actual] of [[queued,encoded],[encoded,queued]]) {

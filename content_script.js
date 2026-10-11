@@ -2610,18 +2610,29 @@ async function recordCaptureFailure(error) {
   return globalThis.PageImageSaverHelpers.recordCaptureFailure(chrome, window.location.href, error);
 }
 
+function takeoverUnavailableChoice(expectedUrl) {
+  const alerts = Array.from(document.querySelectorAll?.('strong') || [], node => node.textContent).join('\n');
+  return globalThis.PageImageSaverHelpers.victoriasSecretUnavailableChoice(
+    expectedUrl, captureCanonicalUrl({forBinding: true}), alerts);
+}
+
 function assertTakeoverBinding(binding) {
   if (!binding) return;
   const helpers = globalThis.PageImageSaverHelpers;
   const same = helpers.sameDocumentUrl;
+  const prefix = 'take-over document or product URL changed: ';
+  if (binding.documentId !== takeoverDocumentId)
+    throw new Error(`${prefix}document id ${takeoverDocumentId} vs ${binding.documentId}`);
+  const expectedLocation = binding.documentUrl || binding.expectedUrl;
+  if (!same(window.location.href, expectedLocation))
+    throw new Error(`${prefix}location ${window.location.href} vs ${expectedLocation}`);
+  const goneReason = takeoverUnavailableChoice(binding.expectedUrl);
+  if (goneReason) throw new Error(goneReason);
   const canonical = captureCanonicalUrl({forBinding: true});
   const sameProduct = expected => same(canonical, expected) ||
     helpers.victoriasSecretSameProductChoice(canonical, expected);
-  if (binding.documentId !== takeoverDocumentId ||
-      !same(window.location.href, binding.documentUrl || binding.expectedUrl) ||
-      (!sameProduct(binding.expectedUrl) && !sameProduct(binding.documentUrl))) {
-    throw new Error('take-over document or product URL changed');
-  }
+  if (!sameProduct(binding.expectedUrl) && !sameProduct(binding.documentUrl))
+    throw new Error(`${prefix}canonical ${canonical} vs ${binding.expectedUrl} (document URL ${expectedLocation})`);
 }
 
 function rescanCaptureImages() {
@@ -2789,6 +2800,8 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
       document.querySelector('iframe[src*="captcha"], .g-recaptcha, [data-sitekey]')) {
     return {kind: 'challenge', url: window.location.href};
   }
+  const goneReason = expect === 'product' ? takeoverUnavailableChoice(window.location.href) : null;
+  if (goneReason) return {kind: 'product', url: window.location.href, documentId: takeoverDocumentId, goneReason};
   let product = capturePageProduct();
   let productSeen = captureProductSeen(config, product);
   // A product URL from a fixed queue may still be hydrating at tab "complete"; give it time
