@@ -171,3 +171,7 @@ MIT
 ### Lise Charmel alias retry (1.0.12)
 
 Discovery preserves saved listing links and deduplicates Magento category aliases by product id. A direct product link is preferred only when the listing actually contains it for that id; no `.html` URL is synthesized. Category suffixes remain intact. Capture binding stays strict: unexpected redirects or canonical rewrites pause with a URL mismatch instead of capturing another identity. Use the owner browser only; no Linux site requests. After updating/reloading 1.0.12, import the owner retry discovery file and capture its 62 products. If a URL mismatch pauses the run, save that PDP for offline diagnosis rather than weakening binding.
+
+### PrimaDonna and Marie Jo (1.0.13)
+
+US-English owner-browser PDP capture is prepared for `www.primadonna.com` and `www.mariejo.com`. Import a saved fixed discovery queue, or preview a product page. Colours have separate `/en-us/p/` URLs; Next.js product data supplies the exact identity, USD facts and original gallery. Stale SPA colour data, non-US identity and unknown media hosts fail closed. Swim/nightwear/accessories stay under scope review/exclusion. Listing discovery is disabled pending saved pagination/total evidence. No Linux/automated site requests. See the companion lingerie_trends `docs/vandevelde-page-image-saver.md` runbook and the owner’s three-product smoke queues.

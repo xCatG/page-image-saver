@@ -47,7 +47,7 @@
     const category = String(product?.category || '').trim();
     const evidence = category.toLowerCase();
     const title = name.toLowerCase();
-    const accessory = config?.domain === 'www.lisecharmel.com' &&
+    const accessory = ['www.lisecharmel.com', 'www.primadonna.com', 'www.mariejo.com'].includes(config?.domain) &&
       /\b(accessories|jewelry|jewellery|masks?|stockings?)\b/i.test(`${evidence} ${title}`);
     const excluded = accessory || /\b(swimwear|swimsuits?|swim|bikini|maillot de bain|sleepwear|nightwear|nightdress(?:es)?|pyjamas?|pajamas?|menswear|mens?|men's|men’s|ready.to.wear|apparel)\b/i.test(`${evidence} ${title}`);
     const intimate = /\b(lingerie|bras?|sports? bras?|panties|briefs|thongs|corsets?|bodies|bodysuits?|culottes?|soutiens?.gorge)\b/i.test(`${evidence} ${title}`);
@@ -113,7 +113,10 @@
     async function read() { return io.read(); }
     async function preview(config, page, mode = 'capture') {
       if (!['capture', 'discovery'].includes(mode)) throw new Error('unknown catalog mode');
-      if (!config?.domain || !config.listing?.productLinkSelector || !config.listing?.pagination?.nextSelector)
+      if (config?.listing?.enabled === false && (mode === 'discovery' || page?.kind !== 'product'))
+        throw new Error('Discovery needs saved listing evidence for pagination and totals');
+      if (!config?.domain || (config.listing?.enabled !== false &&
+          (!config.listing?.productLinkSelector || !config.listing?.pagination?.nextSelector)))
         throw new Error('site needs explicit listing selectors');
       if (mode === 'capture' && config.colorVariantStrategy !== 'separate-url')
         throw new Error('take-over currently requires separate-URL color identity');

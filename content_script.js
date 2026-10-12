@@ -2488,6 +2488,16 @@ function captureJsonLd() {
 }
 
 function capturePageProductEvidence() {
+  if (['www.primadonna.com', 'www.mariejo.com'].includes(window.location.hostname) &&
+      window.location.pathname.includes('/p/')) {
+    const scripts = document.querySelectorAll('script#__NEXT_DATA__');
+    if (scripts.length !== 1) throw new Error('VDV product: missing or ambiguous Next data');
+    const result = globalThis.PageImageSaverHelpers.vandeveldeProduct(
+      JSON.parse(scripts[0].textContent), window.location.href);
+    return {...globalThis.PageImageSaverHelpers.captureProductEvidence(captureJsonLd()),
+      facts: result.facts, fact_source: 'nextdata',
+      nextdata: {path: 'props.pageProps.product', product_id: result.facts.product_id}};
+  }
   const readItem = selector => {
     const node = document.querySelector(selector);
     return node?.getAttribute?.('content') || node?.textContent?.trim() || null;
@@ -2541,12 +2551,20 @@ function capturePageProduct() {
 }
 
 function captureProductSeen(config, product = capturePageProduct()) {
+  if (config?.product?.renditionResolver === 'vandevelde-nextdata')
+    return window.location.pathname.startsWith('/en-us/p/') && !!product.product_id;
   if (config?.product?.pageSelector) return !!document.querySelector(config.product.pageSelector);
   return !!(product.name || product.sku || product.product_id || product.color ||
     document.querySelector('meta[property="og:type"][content="product"]'));
 }
 
 function captureGallery(config, mode) {
+  if (mode === 'site' && config?.product?.renditionResolver === 'vandevelde-nextdata') {
+    const scripts = document.querySelectorAll('script#__NEXT_DATA__');
+    if (scripts.length !== 1) throw new Error('VDV product: missing or ambiguous Next data');
+    return globalThis.PageImageSaverHelpers.vandeveldeProduct(
+      JSON.parse(scripts[0].textContent), window.location.href).images;
+  }
   if (mode === 'site' && config?.product?.renditionResolver === 'lisecharmel-magento') {
     return globalThis.PageImageSaverHelpers.liseCharmelGallery(
       [...new Set([...(globalThis.PageImageSaverLiseGallery || []),
@@ -2833,9 +2851,11 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
     const colorLinks = selector ? Array.from(document.querySelectorAll(selector), node => node.href)
       .filter(Boolean) : [];
     return {kind: 'product', url: window.location.href, documentId: takeoverDocumentId,
-      product: {...product, category: takeoverCategory()}, colorLinks,
+      product: {...product, category: product.category || takeoverCategory()}, colorLinks,
       imageCount: captureGallery(config, 'site').length};
   }
+  if (config.listing?.enabled === false)
+    throw new Error('Discovery needs saved listing evidence for pagination and totals');
   const selector = config.listing?.productLinkSelector;
   const nextSelector = config.listing?.pagination?.nextSelector;
   if (!selector || !nextSelector) throw new Error('listing selectors are missing');

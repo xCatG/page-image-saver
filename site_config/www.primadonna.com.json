@@ -1,0 +1,18 @@
+{
+  "domain": "www.primadonna.com",
+  "platform": "vandevelde-nextdata",
+  "locale": "en-US",
+  "market": "us",
+  "currency": "USD",
+  "colorVariantStrategy": "separate-url",
+  "listing": {
+    "enabled": false,
+    "reason": "Saved listing pagination and displayed-total evidence required before discovery."
+  },
+  "product": {
+    "allImagesSelector": "script#__NEXT_DATA__",
+    "renditionResolver": "vandevelde-nextdata",
+    "lazyLoad": false
+  },
+  "notes": "Owner-browser US PDP capture from imported discovery queues. Next product.media URLs preserved verbatim; exact URL/id/locale and USD facts required. Colour-specific URLs; no swatch or size clicks. Listing discovery is disabled pending saved listing evidence. No Linux storefront requests."
+}
