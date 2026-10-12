@@ -1,3 +1,6 @@
+// A manifest injection can race toolbar/keyboard fallback injection in the same document.
+(() => {
+if (window.PageImageSaverLoaded) return;
 // content_script.js - This gets injected into web pages
 
 // Add a global flag that the background script can check to see if we're loaded
@@ -879,6 +882,7 @@ function createImageSelectionUI(images) {
   const header = document.createElement('div');
   header.style.flexShrink = '0';
   header.innerHTML = `
+    <div id="takeover-status-line" role="status" hidden style="font-weight: bold; padding: 8px; margin-bottom: 6px; background: #eef4ff; overflow-wrap: anywhere;"></div>
     <h2 style="margin: 0 0 4px; font: bold 16px/20px Arial, sans-serif;">Images Found (${images.length})</h2>
     <p style="margin: 0 0 6px; font: 12px/18px Arial, sans-serif;">Select images to save to your storage</p>
     <div style="display: flex; gap: 4px; margin-bottom: 6px; flex-wrap: wrap;">
@@ -892,6 +896,11 @@ function createImageSelectionUI(images) {
     </div>
     <details id="catalog-capture-section" style="margin-bottom: 4px; max-height: 35vh; overflow-y: auto; font-size: 12px;">
       <summary style="cursor: pointer; padding: 4px 0; font-weight: bold;">Catalog capture</summary>
+      <label>Run mode <select id="takeover-mode"><option value="capture">Product capture</option><option value="discovery">Listing discovery only</option><option value="capture-discovery">Capture discovery queue</option></select></label>
+      <label style="display:block;">Discovery exports <input id="takeover-discovery-files" type="file" multiple accept=".json,application/json" style="width:100%;"></label>
+      <button id="takeover-reuse-discovery-btn" type="button">Reuse current discovery</button>
+      <button id="shopify-feed-btn" type="button" hidden>Save Shopify feed</button>
+      <div id="takeover-start-url" style="overflow-wrap:anywhere;">Start URL: no preview yet</div>
       <div style="display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap;">
         <button id="capture-product-btn" style="padding: 8px 12px; border-radius: 4px; border: none; background: #6b46a0; color: white; cursor: pointer;">Capture Product Locally</button>
         <button id="takeover-preview-btn" type="button">Preview catalog</button>
@@ -1050,6 +1059,7 @@ document.body.appendChild(container);
   refreshCaptureFailures();
 
   loadCaptureSiteConfig().then(config => {
+    container.querySelector('#shopify-feed-btn').hidden = config?.platform !== 'shopify';
     if (config) {
       document.getElementById('capture-image-mode').value = 'site';
       document.getElementById('capture-color-policy').value =
@@ -1082,8 +1092,77 @@ document.body.appendChild(container);
     }
   });
   const previewButton = container.querySelector('#takeover-preview-btn');
+  container.querySelector('#shopify-feed-btn').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    const feedback = container.querySelector('#takeover-feedback');
+    let acquired = false;
+    try {
+      await takeoverRequest('shopifyFeedAcquire');
+      acquired = true;
+      if (/verify you are human|unusual traffic|access denied|captcha|bot challenge/i.test(
+          `${document.title} ${document.body?.innerText?.slice(0, 2000) || ''}`))
+        throw new Error('Page challenge detected; feed not requested');
+      feedback.textContent = 'Saving Shopify feed… Keep this tab open and do not navigate.';
+      const config = await loadCaptureSiteConfig();
+      const report = await globalThis.PageImageSaverHelpers.collectShopifyFeed(config, window.location.href, {
+        progress: (pages, products) => { feedback.textContent = `Shopify feed: ${pages} pages, ${products} products…`; }
+      });
+      await takeoverRequest('saveShopifyFeedDownload', {report});
+      feedback.textContent = `Shopify feed saved to Downloads (${report.pages.length} pages).`;
+      showStatusMessage(feedback.textContent, 'success');
+    } catch (error) {
+      feedback.textContent = `Shopify feed failed: ${error.message}. No automatic retry or partial export.`;
+      showStatusMessage(feedback.textContent, 'error');
+    } finally {
+      if (acquired) {
+        try { await takeoverRequest('shopifyFeedRelease'); }
+        catch (error) { showStatusMessage(`Feed reservation not released: ${error.message}. Close this tab before restarting.`, 'error'); }
+      }
+      button.disabled = false;
+    }
+  });
   const takeoverFeedback = container.querySelector('#takeover-feedback');
   const takeoverProgress = container.querySelector('#takeover-progress');
+  const modeControl = container.querySelector('#takeover-mode');
+  modeControl.addEventListener('change', () => { modeControl.dataset.userChanged = 'true'; });
+  const discoveryFiles = container.querySelector('#takeover-discovery-files');
+  const reuseDiscovery = container.querySelector('#takeover-reuse-discovery-btn');
+  async function prepareDiscoveryCapture(files) {
+    discoveryFiles.disabled = reuseDiscovery.disabled = true;
+    takeoverProgress.dataset.previewPending = 'true';
+    takeoverRefreshSequence++;
+    takeoverFeedback.textContent = 'Preparing discovery capture…';
+    try {
+      const config = await loadCaptureSiteConfig();
+      if (!config) throw new Error('No site config for discovery capture');
+      const sources = [];
+      for (const file of files || []) {
+        const bytes = await file.arrayBuffer();
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+        sources.push({sha256, report: JSON.parse(new TextDecoder().decode(bytes))});
+      }
+      await takeoverRequest('takeoverImportDiscovery', {config, sources, reuse: files === null});
+      modeControl.value = 'capture-discovery';
+      modeControl.dataset.userChanged = 'true';
+      delete takeoverProgress.dataset.previewPending;
+      await refreshTakeoverProgress();
+      takeoverFeedback.textContent = 'Fixed queue ready. Take over starts at the URL shown.';
+    } catch (error) {
+      const reloadHint = /message port closed|message channel closed|Receiving end does not exist/i.test(error.message) ?
+        ' Reload the extension in chrome://extensions, then refresh this page and import again.' : '';
+      takeoverFeedback.textContent = `Discovery import failed: ${error.message}${reloadHint}`;
+    } finally {
+      delete takeoverProgress.dataset.previewPending;
+      discoveryFiles.disabled = reuseDiscovery.disabled = false;
+      discoveryFiles.value = '';
+    }
+  }
+  discoveryFiles.addEventListener('change', () => {
+    if (discoveryFiles.files.length) void prepareDiscoveryCapture(Array.from(discoveryFiles.files));
+  });
+  reuseDiscovery.addEventListener('click', () => { void prepareDiscoveryCapture(null); });
   previewButton.addEventListener('click', async () => {
     previewButton.disabled = true;
     takeoverProgress.dataset.previewPending = 'true';
@@ -1092,8 +1171,10 @@ document.body.appendChild(container);
     try {
       const config = await loadCaptureSiteConfig();
       if (!config) throw new Error('No site config for catalog preview');
-      const page = await inspectTakeoverPage(config);
-      await takeoverRequest('takeoverPreview', {config, page});
+      const mode = container.querySelector('#takeover-mode').value;
+      if (mode === 'capture-discovery') throw new Error('Load discovery exports or reuse current discovery to prepare this queue');
+      const page = await inspectTakeoverPage(config, mode);
+      await takeoverRequest('takeoverPreview', {config, page, mode});
       delete takeoverProgress.dataset.previewPending;
       await refreshTakeoverProgress();
       takeoverFeedback.textContent = `Preview ready for ${catalogDomain}.`;
@@ -1110,7 +1191,8 @@ document.body.appendChild(container);
     ['takeover-stop-btn', 'takeoverStop'], ['takeover-export-btn', 'takeoverExport']]) {
     document.getElementById(button).addEventListener('click', async () => {
       try {
-        await takeoverRequest(action, {domain: catalogDomain});
+        await takeoverRequest(action, {domain: catalogDomain,
+          mode: container.querySelector('#takeover-mode').value});
         if (action === 'takeoverExport') showStatusMessage('Catalog run JSON saved to Downloads.', 'success');
         await refreshTakeoverProgress();
       }
@@ -2427,6 +2509,29 @@ function capturePageProductEvidence() {
     if (['og:type', 'og:title', 'og:image', 'product:price:amount',
       'product:price:currency'].includes(property)) meta[property] = node.getAttribute('content');
   }
+  if (window.location.hostname === 'www.victoriassecret.com' &&
+      document.querySelector('img[id^="primaryProductAltImages-"]')) {
+    const canonical = document.querySelector('link[rel="canonical"]')?.href;
+    const path = canonical && new URL(canonical, window.location.href).pathname;
+    const id = path?.match(/^\/us\/(?:vs|pink)\/[^/]+-catalog\/(\d+)(?:\/|$)/)?.[1];
+    if (id) {
+      const priceNode = document.querySelector('[data-testid="ProductPrice"] [itemprop="price"]');
+      const display = priceNode?.getAttribute('content') || priceNode?.textContent || '';
+      const price = display.trim().match(/^\$(\d+(?:\.\d{2})?)$/)?.[1] || null;
+      const rendered = {name: readItem('[data-testid="ProductInfo-shortDescription"]'),
+        productID: id, sku: readItem('[data-testid="ProductInfo-genericId"]')?.replace(/^Product SKU\s*/, '') || null,
+        color: readItem('[data-testid="SelectedChoiceLabel"]')?.replace(/^\|\s*/, '') || null,
+        offers: {price, priceCurrency: price ? 'USD' : null},
+        field_sources: {name:'[data-testid="ProductInfo-shortDescription"]',
+          productID:'link[rel="canonical"] US catalog path', sku:'[data-testid="ProductInfo-genericId"]',
+          color:'[data-testid="SelectedChoiceLabel"]', price:'[data-testid="ProductPrice"] [itemprop="price"]',
+          priceCurrency:'US market path and dollar price'}};
+      const evidence = globalThis.PageImageSaverHelpers.captureProductEvidence([], rendered, null);
+      evidence.jsonld = captureJsonLd();
+      evidence.meta = Object.keys(meta).length ? meta : null;
+      return evidence;
+    }
+  }
   return globalThis.PageImageSaverHelpers.captureProductEvidence(captureJsonLd(), microdata,
     Object.keys(meta).length ? meta : null);
 }
@@ -2442,15 +2547,34 @@ function captureProductSeen(config, product = capturePageProduct()) {
 }
 
 function captureGallery(config, mode) {
+  if (mode === 'site' && config?.product?.renditionResolver === 'lisecharmel-magento') {
+    return globalThis.PageImageSaverHelpers.liseCharmelGallery(
+      [...new Set([...(globalThis.PageImageSaverLiseGallery || []),
+        ...Array.from(document.querySelectorAll('script[type="text/x-magento-init"]'), node => node.textContent)])],
+      window.location.href);
+  }
+  if (mode === 'site' && config?.product?.renditionResolver === 'victoriassecret' &&
+      window.location.hostname === 'www.victoriassecret.com') {
+    const candidates = document.documentElement.innerHTML.match(/(?:https:\/\/)?www\.victoriassecret\.com\/p\/\d+x\d+\/[^\s"<>\\]+/g) || [];
+    return [...new Set(Array.from(document.querySelectorAll(config.product.allImagesSelector), node =>
+      globalThis.PageImageSaverHelpers.victoriasSecretImage(node.getAttribute('src') || node.currentSrc, candidates)))];
+  }
   let urls;
   if (mode === 'site') {
     const selector = config?.product?.allImagesSelector || config?.allImagesSelector || config?.product?.imageSelector;
     if (!selector) throw new Error('No product image selector in this site config');
-    urls = Array.from(document.querySelectorAll(selector), node =>
+    urls = Array.from(document.querySelectorAll(selector), node => config?.product?.lazyLoad ?
+      node.getAttribute('src') || node.currentSrc :
       node.getAttribute('data-src') || node.currentSrc || node.getAttribute('src') || node.getAttribute('href'));
   } else {
     const checked = document.querySelectorAll('#image-selector-container input[type="checkbox"]:checked');
     urls = Array.from(checked, node => currentFilteredImages[Number(node.dataset.index)]?.url);
+  }
+  if (mode === 'site' && config?.product?.originalImageUrlPattern) {
+    const resolved = Array.from(document.querySelectorAll(config.product.allImagesSelector),
+      node => globalThis.PageImageSaverHelpers.galleryNodeOriginal(node, config, document));
+    urls = resolved.map(item => item.url).filter(Boolean);
+    if (!urls.length) throw resolved.find(item => item.error)?.error || new Error('gallery original: no image nodes');
   }
   const unique = new Set();
   for (const raw of urls) {
@@ -2473,8 +2597,9 @@ function captureSelectedColor(product) {
   return product.color || captureSwatchColor() || document.getElementById('capture-color')?.value.trim() || null;
 }
 
-function captureCanonicalUrl() {
+function captureCanonicalUrl({forBinding = false} = {}) {
   const candidate = document.querySelector('link[rel="canonical"]')?.href;
+  if (forBinding && candidate) return candidate; // Binding must reject foreign canonicals, not hide them.
   try {
     if (candidate && new URL(candidate).hostname === window.location.hostname) return candidate;
   } catch (_) { /* Use the visited URL. */ }
@@ -2491,15 +2616,37 @@ async function recordCaptureFailure(error) {
   return globalThis.PageImageSaverHelpers.recordCaptureFailure(chrome, window.location.href, error);
 }
 
+function takeoverUnavailableChoice(expectedUrl) {
+  const alerts = Array.from(document.querySelectorAll?.('strong') || [], node => node.textContent).join('\n');
+  return globalThis.PageImageSaverHelpers.victoriasSecretUnavailableChoice(
+    expectedUrl, captureCanonicalUrl({forBinding: true}), alerts);
+}
+
 function assertTakeoverBinding(binding) {
   if (!binding) return;
-  const visited = new URL(window.location.href);
-  visited.hash = '';
-  const canonical = new URL(captureCanonicalUrl());
-  canonical.hash = '';
-  if (binding.documentId !== takeoverDocumentId || visited.href !== binding.expectedUrl ||
-      canonical.href !== binding.expectedUrl) {
-    throw new Error('take-over document or product URL changed');
+  const helpers = globalThis.PageImageSaverHelpers;
+  const same = helpers.sameDocumentUrl;
+  const prefix = 'take-over document or product URL changed: ';
+  if (binding.documentId !== takeoverDocumentId)
+    throw new Error(`${prefix}document id ${takeoverDocumentId} vs ${binding.documentId}`);
+  const expectedLocation = binding.documentUrl || binding.expectedUrl;
+  if (!same(window.location.href, expectedLocation))
+    throw new Error(`${prefix}location ${window.location.href} vs ${expectedLocation}`);
+  const goneReason = takeoverUnavailableChoice(binding.expectedUrl);
+  if (goneReason) throw new Error(goneReason);
+  const canonical = captureCanonicalUrl({forBinding: true});
+  const sameProduct = expected => same(canonical, expected) ||
+    helpers.victoriasSecretSameProductChoice(canonical, expected);
+  if (!sameProduct(binding.expectedUrl) && !sameProduct(binding.documentUrl))
+    throw new Error(`${prefix}canonical ${canonical} vs ${binding.expectedUrl} (document URL ${expectedLocation})`);
+}
+
+function rescanCaptureImages() {
+  const displayedImages = currentFilteredImages;
+  try { findAllImages(); }
+  finally {
+    // A rescan updates discovery, but does not rebuild the panel's indexed checkboxes.
+    if (document.getElementById('image-selector-container')) currentFilteredImages = displayedImages;
   }
 }
 
@@ -2507,6 +2654,11 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
   assertTakeoverBinding(binding);
   const config = await loadCaptureSiteConfig();
   const mode = manual ? document.getElementById('capture-image-mode').value : 'site';
+  const selectedGallery = config?.product?.lazyLoad && mode === 'selected' ? captureGallery(config, mode) : null;
+  if (config?.product?.lazyLoad) {
+    await globalThis.PageImageSaverHelpers.prepareLazyGallery(config, document);
+    rescanCaptureImages();
+  }
   const sameColorControl = manual ? document.getElementById('capture-same-color-selection') : null;
   const allowSameColorGalleryChange = !!sameColorControl?.checked;
   if (sameColorControl) sameColorControl.checked = false;
@@ -2517,12 +2669,12 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
     config?.colorVariantStrategy === 'separate-url' ? 'url' : 'color';
   const readState = () => {
     const product = capturePageProduct();
-    const gallery = captureGallery(config, mode);
+    const gallery = selectedGallery || captureGallery(config, mode);
     const swatchColor = captureSwatchColor();
     return {color: policy === 'url' ? captureCanonicalUrl() : captureSelectedColor(product), gallery,
       colorConflict: !!(product.color && swatchColor && product.color !== swatchColor)};
   };
-  const url = captureCanonicalUrl();
+  const url = binding?.expectedUrl || captureCanonicalUrl();
   const previous = previousCaptureStates.get(url);
   const state = await globalThis.PageImageSaverHelpers.waitForCaptureState(readState, previous,
     {timeoutMs: 8000, pollMs: 200, allowSameColorGalleryChange: manual && allowSameColorGalleryChange});
@@ -2564,14 +2716,25 @@ async function refreshTakeoverProgress() {
   const refreshSequence = ++takeoverRefreshSequence;
   try {
     const {run, summary} = await takeoverRequest('takeoverStatus');
-    if (refreshSequence !== takeoverRefreshSequence || box.dataset.previewPending === 'true') return;
+    if (document.getElementById('takeover-progress') !== box ||
+        refreshSequence !== takeoverRefreshSequence || box.dataset.previewPending === 'true') return;
     const currentHost = window.location.hostname.toLowerCase();
     const foreignRun = !!run && run.domain !== currentHost;
+    const statusLine = document.getElementById('takeover-status-line');
+    if (!statusLine) return;
+    statusLine.hidden = !run;
+    statusLine.textContent = !run ? '' : foreignRun ?
+      `Saved run belongs to ${run.domain} — ${run.status}` :
+      PageImageSaverHelpers.takeoverStatusText(run, summary);
+    const startUrl = document.getElementById('takeover-start-url');
+    startUrl.textContent = `Start URL: ${!foreignRun && run?.seedUrl || 'preview a listing or load a discovery queue'}`;
+    const modeControl = document.getElementById('takeover-mode');
+    if (run && !foreignRun && !modeControl.dataset.userChanged) modeControl.value = run.mode || 'capture';
     for (const id of ['takeover-start-btn', 'takeover-pause-btn', 'takeover-resume-btn',
       'takeover-stop-btn', 'takeover-export-btn']) {
       document.getElementById(id).disabled = foreignRun;
     }
-    if (!run) { box.textContent = 'No catalog preview yet. Browse listing and product pages, then preview each page.'; return; }
+    if (!run) { box.textContent = 'Preview a listing or load discovery exports to prepare a run.'; return; }
     if (foreignRun) {
       box.textContent = `Saved catalog ${run.status} belongs to ${run.domain}. This page is ${currentHost}. ` +
         (['running', 'paused'].includes(run.status) ?
@@ -2585,19 +2748,41 @@ async function refreshTakeoverProgress() {
         `${page.scope?.decision || 'review'} (${page.scope?.reason || 'unclassified'})` :
         ` — ${page.products} product links, next ${page.next || 'absent'}, ` +
         `end ${JSON.stringify(page.end || 'unverified')}`));
+    const pacing = summary.pacing;
+    const pacingText = pacing ? `Pacing ${pacing.minMs / 1000}–${pacing.maxMs / 1000} s between navigation starts.\n` : '';
+    if (run.mode === 'capture-discovery') {
+      box.textContent = `Fixed discovery queue ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n` +
+        pacingText + `Targets ${summary.productsFound}; captured ${summary.productsCaptured}; gone ${summary.gone || 0}; receiver-verified skips ${summary.skipped || 0}; ` +
+        `failed ${summary.failed}; pending ${summary.pending}; exported/unverified ${summary.exportedUnverified}.\n` +
+        'Only these product URLs will be visited. Gone products are skipped without capture. All other skips require receiver verification; Downloads are unverified.';
+      return;
+    }
+    if (run.mode === 'discovery') {
+      box.textContent = `Listing discovery ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n` +
+        pacingText + `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; unique product URLs ${summary.productsFound}.\n` +
+        (run.preview?.endCheckConfigured ? 'Positive end check configured.' :
+          'No positive end check configured; missing next link will finish with gaps.');
+      return;
+    }
     const end = run.preview?.endCheckConfigured ? 'Positive end check configured.' :
       'No verified positive end check configured; discovered products will capture, then finish with gaps.';
     box.textContent = `Catalog ${run.status}${run.reason ? ` — ${run.reason}` : ''}\n${end}\n` +
-      `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; found ${summary.productsFound}; ` +
+      pacingText + `${samples.join('\n')}\nListings ${summary.listingPagesVisited}; found ${summary.productsFound}; ` +
       `captured products ${summary.productsCaptured}; captured colors ${summary.colorsCaptured}; ` +
       `size options traversed ${summary.sizeOptionsTraversed} (size cycling is not part of this run); ` +
-      `excluded ${summary.excluded}; failed ${summary.failed}; pending ${summary.pending}; ` +
+      `excluded ${summary.excluded}; gone ${summary.gone || 0}; failed ${summary.failed}; pending ${summary.pending}; ` +
       `exported/unverified ${summary.exportedUnverified}.\n` +
       (run.products || []).filter(row => row.status === 'failed').map(row => `${row.url}: ${row.reason}`).join('\n') +
       '\nVerified skips require the local receiver. Downloads exports are unverified until imported.';
   } catch (error) {
-    if (refreshSequence === takeoverRefreshSequence && box.dataset.previewPending !== 'true')
+    if (document.getElementById('takeover-progress') === box &&
+        refreshSequence === takeoverRefreshSequence && box.dataset.previewPending !== 'true') {
       box.textContent = `Catalog status unavailable: ${error.message}`;
+      const statusLine = document.getElementById('takeover-status-line');
+      if (!statusLine) return;
+      statusLine.hidden = false;
+      statusLine.textContent = box.textContent;
+    }
   }
 }
 
@@ -2615,15 +2800,29 @@ function takeoverCategory() {
   return document.querySelector('[itemprop="category"], nav.breadcrumbs, .breadcrumbs')?.textContent?.trim() || '';
 }
 
-async function inspectTakeoverPage(config) {
+async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   const challengeText = `${document.title} ${document.body?.innerText?.slice(0, 2000) || ''}`;
   if (/verify you are human|unusual traffic|access denied|captcha|bot challenge/i.test(challengeText) ||
       document.querySelector('iframe[src*="captcha"], .g-recaptcha, [data-sitekey]')) {
     return {kind: 'challenge', url: window.location.href};
   }
-  const product = capturePageProduct();
-  const productSeen = captureProductSeen(config, product);
+  const goneReason = expect === 'product' ? takeoverUnavailableChoice(window.location.href) : null;
+  if (goneReason) return {kind: 'product', url: window.location.href, documentId: takeoverDocumentId, goneReason};
+  let product = capturePageProduct();
+  let productSeen = captureProductSeen(config, product);
+  // A product URL from a fixed queue may still be hydrating at tab "complete"; give it time
+  // before reading the page as a listing (which the runner treats as a structure mismatch).
+  for (const deadline = Date.now() + 8000; expect === 'product' && !productSeen && Date.now() < deadline;) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    product = capturePageProduct();
+    productSeen = captureProductSeen(config, product);
+  }
   if (productSeen) {
+    if (mode === 'discovery') throw new Error('Listing discovery needs a listing page');
+    if (config?.product?.lazyLoad) {
+      await globalThis.PageImageSaverHelpers.prepareLazyGallery(config, document);
+      rescanCaptureImages();
+    }
     await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
       let gallery = [];
       try { gallery = captureGallery(config, 'site'); } catch (_) { /* Still loading. */ }
@@ -2640,13 +2839,20 @@ async function inspectTakeoverPage(config) {
   const selector = config.listing?.productLinkSelector;
   const nextSelector = config.listing?.pagination?.nextSelector;
   if (!selector || !nextSelector) throw new Error('listing selectors are missing');
+  const listingProductUrl = value => config.domain === 'www.lisecharmel.com' ?
+    globalThis.PageImageSaverHelpers.liseCharmelProductUrl(value) : value;
   let products = [];
   for (let attempt = 0; attempt < 20; attempt++) {
-    products = Array.from(document.querySelectorAll(selector), node => node.href).filter(Boolean);
+    products = Array.from(document.querySelectorAll(selector), node => node.href).filter(Boolean).map(listingProductUrl);
     if (products.length) break;
     await new Promise(resolve => setTimeout(resolve, 200));
   }
   const next = document.querySelector(nextSelector)?.href || null;
+  const cards = mode === 'discovery' ? Array.from(document.querySelectorAll(selector), node => ({
+    url: node.href ? listingProductUrl(node.href) : null,
+    card_text: (node.closest('.product-card, [data-testid="ProductCard"], article') || node)
+      .textContent.replace(/\s+/g, ' ').trim()
+  })).filter(card => card.url) : undefined;
   const check = config.listing?.endCheck;
   const node = check?.selector ? document.querySelector(check.selector) : null;
   let end = null;
@@ -2656,11 +2862,11 @@ async function inspectTakeoverPage(config) {
     if (match) end = {type: 'page-count', current: Number(match[1]), total: Number(match[2])};
   }
   if (check?.type === 'result-total') {
-    const match = node?.textContent?.match(/\b(\d+)\s+(?:results?|items?|products?)\b/i);
-    if (match) end = {type: 'result-total', total: Number(match[1])};
+    const total = globalThis.PageImageSaverHelpers.listingResultTotal(node?.textContent || '');
+    if (total !== null) end = {type: 'result-total', total};
   }
   return {kind: 'listing', url: window.location.href,
-    documentId: takeoverDocumentId, products, next, end};
+    documentId: takeoverDocumentId, products, cards, locale: document.documentElement.lang || null, next, end};
 }
 
 // A site must be explicitly enabled in the panel, and must have a product
@@ -2677,7 +2883,11 @@ setTimeout(async () => {
         let gallery = [];
         try { gallery = captureGallery(config, 'site'); } catch (_) { /* Gallery may render later. */ }
         return {productSeen: captureProductSeen(config, product), gallery};
-      }, {timeoutMs: 8000, pollMs: 200});
+      }, {timeoutMs: 8000, pollMs: 200,
+        prepare: config.product.lazyLoad ? async () => {
+          await globalThis.PageImageSaverHelpers.prepareLazyGallery(config, document);
+          rescanCaptureImages();
+        } : null});
       if (!ready) return;
       if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
       const capture = await captureCurrentProduct({manual: false, autoPageLoad: true});
@@ -2727,7 +2937,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'takeoverInspect') {
     loadCaptureSiteConfig().then(config => {
       if (!config) throw new Error('site config unavailable');
-      return inspectTakeoverPage(config);
+      return inspectTakeoverPage(config, message.mode, message.expect || null);
     }).then(page => sendResponse({success: true, page}))
       .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
     return true;
@@ -2849,3 +3059,5 @@ console.log('Page Image Saver content script loaded.');
   }, true);
 })();
 // =======================================================================
+
+})();

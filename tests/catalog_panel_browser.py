@@ -69,6 +69,24 @@ class CatalogPanelBrowserTest(unittest.TestCase):
     def tearDown(self):
         self.page.close()
 
+    def test_close_panel_while_status_request_is_pending(self):
+        refresh = SOURCE[SOURCE.index('let takeoverRefreshSequence'):SOURCE.index('function takeoverCategory(')]
+        self.page.add_script_tag(content=refresh)
+        self.page.evaluate("""() => {
+          globalThis.takeoverRequest = () => new Promise(resolve => {globalThis.finishStatus=resolve;});
+          createImageSelectionUI([]);
+        }""")
+        self.page.locator('#close-btn').click()
+        result = self.page.evaluate("""async () => {
+          // Refresh explicitly so the promise itself is observable.
+          createImageSelectionUI([]);
+          const pending=refreshTakeoverProgress();
+          document.querySelector('#close-btn').click();
+          finishStatus({run:null,summary:{}});
+          try { await pending; return 'settled'; } catch(error) {return error.message;}
+        }""")
+        self.assertEqual(result, 'settled')
+
     def open_panel(self):
         self.page.evaluate("createImageSelectionUI([])")
         self.page.wait_for_timeout(50)
@@ -92,6 +110,15 @@ class CatalogPanelBrowserTest(unittest.TestCase):
             "element => element.getBoundingClientRect().height")
         print(f"Collapsed catalog: image grid is {grid_height:.0f}px tall in a 900px viewport")
         self.assertGreater(grid_height, 180, f"image grid height: {grid_height}")
+
+    def test_feed_button_is_hidden_except_for_shopify(self):
+        self.open_panel()
+        self.assertEqual(self.page.locator('#shopify-feed-btn').count(), 1)
+        self.assertTrue(self.page.locator('#shopify-feed-btn').evaluate('n => n.hidden'))
+        self.page.locator('#close-btn').click()
+        self.page.evaluate("loadCaptureSiteConfig = async () => ({platform:'shopify'})")
+        self.open_panel()
+        self.assertFalse(self.page.locator('#shopify-feed-btn').evaluate('n => n.hidden'))
 
     def test_open_state_persists_per_domain_after_reopening(self):
         self.open_panel()

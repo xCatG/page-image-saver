@@ -7,7 +7,33 @@ const vm = require('node:vm');
 const black = 'https://shop.example.test/bra-black';
 const red = 'https://shop.example.test/bra-red';
 
+test('Shopify feed download message keeps the port open and writes exactly one Downloads file', async () => {
+  const b = bridge();
+  const downloads = [];
+  b.sandbox.Blob = Blob;
+  b.sandbox.blobToDataUrl = async blob => 'data:application/json,' + await blob.text();
+  b.sandbox.PageImageSaverHelpers.saveCaptureDownload = async (_chrome, data, filename) => {
+    downloads.push({data, filename});
+  };
+  const report = {version: 1, host: 'shop.example.test', prefix: '',
+    fetched: [{status: 200}], pages: [{products: [{id: 1}]}]};
+  const response = await new Promise(resolve => {
+    assert.equal(b.runtimeMessages[0]({action: 'saveShopifyFeedDownload', report},
+      {tab: {id: 7, url: black}, url: black}, resolve), true);
+  });
+  assert.equal(response.success, true);
+  assert.equal(downloads.length, 1);
+  assert.match(downloads[0].filename, /^shop\.example\.test-products-feed-.*\.json$/);
+  assert.deepEqual(JSON.parse(downloads[0].data.split(',').slice(1).join(',')), report);
+  const rejected = await new Promise(resolve => b.runtimeMessages[0](
+    {action: 'saveShopifyFeedDownload', report: {...report, host: 'other.test'}},
+    {tab: {id: 7, url: black}, url: black}, resolve));
+  assert.equal(rejected.success, false);
+  assert.equal(downloads.length, 1);
+});
+
 function bridge() {
+  const tabRemoved = [];
   const webCompleted = [];
   const webHeaders = [];
   const tabUpdated = [];
@@ -30,7 +56,7 @@ function bridge() {
       get(key, callback) { callback({[key]: stored[key]}); },
       set(value, callback) { Object.assign(stored, value); callback?.(); }
     }},
-    tabs: {onUpdated: event(tabUpdated),
+    tabs: {onUpdated: event(tabUpdated), onRemoved: event(tabRemoved),
       create(_details, callback) { callback({...tab}); },
       update(_id, details, callback) { tab.url = details.url; callback({...tab}); },
       get(_id, callback) { callback({...tab}); },
@@ -46,6 +72,12 @@ function bridge() {
       }
     }
   };
+  const session = {};
+  chrome.storage.session = {
+    get(key, callback) { callback({[key]: session[key]}); },
+    set(value, callback) { Object.assign(session, value); callback?.(); },
+    remove(key, callback) { delete session[key]; callback?.(); }
+  };
   const sandbox = {chrome, URL, Date, Promise, console,
     setTimeout() { return 1; }, clearTimeout() {},
     PageImageSaverTakeover: {createTakeoverRunner(value) {
@@ -60,7 +92,7 @@ function bridge() {
           stored.catalogTakeoverRun.status = 'stopped'; return stored.catalogTakeoverRun;
         }};
     }, summarizeTakeover() { return {}; }},
-    PageImageSaverHelpers: {}};
+    PageImageSaverHelpers: {...require('../extension_helpers.js')}};
   sandbox.globalThis = sandbox;
   const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8')
     .split('// Product capture is always local.')[0]
@@ -69,8 +101,41 @@ function bridge() {
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, {filename: 'background.js'});
   return {io, tab, stored, controls, chrome, messages, webCompleted, webHeaders, tabUpdated,
-    runtimeMessages, sandbox};
+    runtimeMessages, sandbox, tabRemoved, session};
 }
+
+test('feed reservation prevents duplicate starts and takeover until completion or tab loss', async () => {
+  const b = bridge();
+  b.stored.catalogTakeoverRun.status = 'paused';
+  const dispatch = (action, id = 7, documentId = 'doc-a') => new Promise(resolve => {
+    const handled = b.runtimeMessages[0]({action}, {tab: {id, url: black}, url: black, documentId}, resolve);
+    if (!handled) resolve({success: false, error: 'unhandled'});
+  });
+  assert.equal((await dispatch('shopifyFeedAcquire')).success, true);
+  for (const [id, doc] of [[7, 'doc-a'], [8, 'doc-b']])
+    assert.match((await dispatch('shopifyFeedAcquire', id, doc)).error, /feed.*active/i);
+  for (const action of ['takeoverStart', 'takeoverResume'])
+    assert.match((await dispatch(action)).error, /feed.*active/i);
+  await dispatch('shopifyFeedRelease', 8, 'doc-b');
+  assert.match((await dispatch('shopifyFeedAcquire')).error, /feed.*active/i);
+  await dispatch('shopifyFeedRelease');
+  assert.equal((await dispatch('shopifyFeedAcquire')).success, true);
+  for (const listener of b.tabUpdated) listener(7, {status: 'loading'}, b.tab);
+  assert.equal((await dispatch('shopifyFeedAcquire', 7, 'doc-new')).success, true);
+  await dispatch('shopifyFeedRelease', 7, 'doc-a');
+  assert.match((await dispatch('shopifyFeedAcquire', 8)).error, /feed.*active/i);
+  for (const listener of b.tabRemoved) listener(7);
+  assert.equal((await dispatch('shopifyFeedAcquire', 8)).success, true);
+});
+
+test('feed reservation refuses a running takeover', async () => {
+  const b = bridge();
+  const result = await new Promise(resolve => {
+    if (!b.runtimeMessages[0]({action: 'shopifyFeedAcquire'},
+      {tab: {id: 7, url: black}, url: black, documentId: 'doc-a'}, resolve)) resolve({error: 'unhandled'});
+  });
+  assert.match(result.error, /pause take-over/i);
+});
 
 function captureBridge() {
   const b = bridge();
@@ -100,6 +165,41 @@ function captureBridge() {
   });
   return {...b, acquisitions, imageRequests, dispatch};
 }
+
+test('query-added capture accepts original sender URL only with the exact saved document binding', async () => {
+  const b=captureBridge();
+  const binding={tabId:7,documentId:'doc-black',generation:2,expectedUrl:black,documentUrl:black+'?size=OS'};
+  b.stored.catalogTakeoverRun.current.binding=binding;
+  b.tab.url=binding.documentUrl;
+  const message={action:'captureProductLocal',runBinding:binding,payload:{identity:{domain:'shop.example.test',product_url:black,color_key:'url'}}};
+  assert.equal((await b.dispatch(message,7,black)).success,true);
+  assert.equal((await b.dispatch(message,7,red)).success,false);
+  b.tab.url=black+'?size=M';
+  assert.equal((await b.dispatch(message,7,black)).success,false);
+});
+
+test('background discovery export records actual export time and manifest version in downloaded JSON', async () => {
+  const b = captureBridge();
+  b.stored.catalogTakeoverRun = {version: 1, mode: 'discovery', domain: 'shop.example.test',
+    status: 'stopped', startedAt: '2026-10-01T10:20:30.000Z', products: [],
+    config: {listing: {productLinkSelector: 'a.card', pagination: {nextSelector: 'a.next'}}},
+    listings: {visited: []}, reason: 'stopped by user'};
+  b.sandbox.PageImageSaverTakeover.exportTakeoverReport = require('../takeover_runner.js').exportTakeoverReport;
+  b.chrome.runtime.getManifest = () => ({version: '7.8.9'});
+  b.sandbox.Blob = Blob;
+  b.sandbox.blobToDataUrl = async blob => 'data:application/json,' + encodeURIComponent(await blob.text());
+  let downloaded;
+  b.sandbox.PageImageSaverHelpers.saveCaptureDownload = async (_chrome, url) => {
+    downloaded = JSON.parse(decodeURIComponent(url.split(',')[1]));
+  };
+  const before = Date.now();
+  const reply = await b.dispatch({action: 'takeoverExport', domain: 'shop.example.test'});
+  assert.equal(reply.success, true, reply.error);
+  assert.equal(downloaded.started_utc, '2026-10-01T10:20:30.000Z');
+  assert.equal(downloaded.extension_version, '7.8.9');
+  assert.ok(Date.parse(downloaded.exported_utc) >= before);
+  assert.ok(Date.parse(downloaded.exported_utc) <= Date.now());
+});
 
 test('owned runner tab blocks page-load capture after pause, challenge, or stop', async () => {
   for (const status of ['paused', 'stopped']) {
@@ -289,6 +389,19 @@ test('tab navigation after inspection rejects capture before media acquisition',
   assert.equal(b.messages.length, before, 'no capture message may reach the changed tab');
 });
 
+test('query-added document binding permits capture but stays pinned to the inspected URL', async () => {
+  const b=bridge();
+  const binding={tabId:7,documentId:'doc-black',generation:2,expectedUrl:black,documentUrl:black+'?size=OS'};
+  b.stored.catalogTakeoverRun.current.binding=binding;
+  b.tab.url=binding.documentUrl;
+  b.chrome.tabs.sendMessage=(_id,message,callback)=>callback(message.action==='takeoverDocumentCheck'
+    ? {success:true,documentId:'doc-black',url:b.tab.url}
+    : {success:true,result:{identity:{product_url:black}}});
+  assert.equal((await b.io.capture(black,{},binding)).identity.product_url,black);
+  b.tab.url=black+'?size=M';
+  await assert.rejects(()=>b.io.capture(black,{},binding),/URL changed/);
+});
+
 test('navigation during capture prevents accepting a receiver result for the old document', async () => {
   const b = bridge();
   b.tab.status = 'complete';
@@ -306,4 +419,15 @@ test('navigation during capture prevents accepting a receiver result for the old
   };
   await assert.rejects(() => b.io.capture(black, {decision: 'include', reason: 'Bras'}, binding),
     /tab URL changed|document changed/);
+});
+
+test('tab URL comparison accepts real VS apostrophe encodings but not another product or query', () => {
+  const b=bridge();
+  for (const url of require('./fixtures/victoriassecret-apostrophe-urls.json')) {
+    assert.equal(b.sandbox.takeoverSameUrl(url.replaceAll("'",'%27'),url),true);
+    assert.equal(b.sandbox.takeoverSameUrl(url,url.replaceAll("'",'%27')),true);
+    assert.equal(b.sandbox.takeoverSameUrl(url+'?choice=other',url),false);
+  }
+  assert.equal(b.sandbox.takeoverSameUrl('https://shop.example.test/a%2Fb','https://shop.example.test/a/b'),false);
+  assert.equal(b.sandbox.takeoverSameUrl('https://shop.example.test/a%2527','https://shop.example.test/a%27'),false);
 });

@@ -168,6 +168,102 @@
     throw new Error('invalid capture identity key');
   }
 
+  function captureUrlError(step, value, detail) {
+    // Never include URL credentials, query secrets or large inline image payloads.
+    const sample = String(value ?? '').replace(/(https?:\/\/)[^/]*@/gi, '$1[redacted]@')
+      .split(/[?#]/)[0].slice(0, 120);
+    return new Error(`${step}: ${detail}; input=${JSON.stringify(sample)}`);
+  }
+
+  // Opt-in site rule: retain only evidenced originals, never guess a path from a SKU.
+  function resolveGalleryOriginal(raw, pattern, base, candidates = []) {
+    const origin = new URL(base).origin;
+    const re = new RegExp(pattern);
+    const extract = value => {
+      try {
+        const url = new URL(value, base);
+        if (url.origin !== origin || url.protocol !== 'https:') return null;
+        let source = url.href;
+        if (url.pathname.startsWith('/tco-images/')) {
+          source = decodeURIComponent(source);
+          // Proxy embeds either an absolute, protocol-relative or bare-host original.
+          const hostPath = new URL(base).host + '/static/media/catalog/product/';
+          const offset = source.indexOf(hostPath, origin.length);
+          if (offset < 0) return null;
+          source = 'https://' + source.slice(offset);
+        }
+        const match = source.match(re)?.[0];
+        if (!match || source !== match || new URL(match).origin !== origin) return null;
+        return new URL(match).href;
+      } catch (_) { return null; }
+    };
+    const direct = extract(raw);
+    if (direct) return direct;
+    let local;
+    try { local = new URL(raw, base); }
+    catch (_) { throw captureUrlError('gallery original', raw, 'invalid URL'); }
+    if (local.origin !== origin || !local.pathname.includes('_files/'))
+      throw captureUrlError('gallery original', raw, 'no evidenced original URL');
+    const filename = local.pathname.split('/').pop();
+    const matches = new Set(candidates.map(extract).filter(url => url &&
+      new URL(url).pathname.split('/').pop() === filename));
+    if (matches.size !== 1) {
+      const error = captureUrlError('gallery original', raw, 'missing or ambiguous original URL');
+      error.unresolvedOriginal = true;
+      throw error;
+    }
+    return [...matches][0];
+  }
+
+  // Manual saves only: preserve the selected proxy URL, grouping by evidenced original.
+  function dedupeManualImages(images, pageUrl) {
+    let page;
+    try { page = new URL(pageUrl); } catch (_) { return images; }
+    if (page.origin !== 'https://www.agentprovocateur.com') return images;
+    const pattern = 'https://www\\.agentprovocateur\\.com/static/media/catalog/product/[^\\s"<>?#]+\\.(?:jpg|jpeg|png|webp)';
+    const chosen = new Map();
+    for (const image of images) {
+      let key;
+      try { key = resolveGalleryOriginal(image.url, pattern, page.href); }
+      catch (_) {
+        // Let the existing per-image processor handle unsupported/invalid sources.
+        chosen.set(image, {image, area: 0});
+        continue;
+      }
+      const dimensions = new URL(image.url, page.href).pathname.match(/^\/tco-images\/unsafe\/(\d+)x(\d+)\//);
+      // Loaded images carry intrinsic dimensions. Lazy images carry DOM layout
+      // dimensions, so prefer their explicit proxy size. 0x0 remains unknown.
+      const dimension = (actual, proxy) => image.isLoaded === false
+        ? Number(proxy) || Number(actual) || 0 : Number(actual) || Number(proxy) || 0;
+      const width = dimension(image.width, dimensions?.[1]);
+      const height = dimension(image.height, dimensions?.[2]);
+      const area = width * height;
+      if (!chosen.has(key) || area > chosen.get(key).area) chosen.set(key, {image, area});
+    }
+    return Array.from(chosen.values(), row => row.image);
+  }
+
+  function galleryNodeOriginal(node, config, doc) {
+    const values = ['data-original', 'data-src'].map(name => node.getAttribute(name));
+    for (const name of ['data-srcset', 'srcset']) {
+      for (const entry of (node.getAttribute(name) || '').split(','))
+        values.push(entry.trim().split(/\s+/)[0]);
+    }
+    values.push(node.getAttribute('src'), node.currentSrc);
+    const evidence = Array.from(doc.querySelectorAll('img[src], meta[content]'),
+      n => n.getAttribute('src') || n.getAttribute('content'));
+    let error, unresolved;
+    for (const raw of [...new Set(values.filter(Boolean))]) {
+      try { return {url: resolveGalleryOriginal(raw, config.product.originalImageUrlPattern,
+        doc.location.href, evidence)}; }
+      catch (e) { error ||= e; if (e.unresolvedOriginal) unresolved = e; }
+    }
+    // A broken alternative candidate cannot poison a valid one. But a saved image
+    // with missing/ambiguous original evidence must not silently disappear.
+    if (unresolved) throw unresolved;
+    return {url: null, error: error || captureUrlError('gallery original', '', 'empty image sources')};
+  }
+
   function captureImageUrls(original, transform) {
     const url = new URL(original).href;
     let fetched = url;
@@ -228,6 +324,10 @@
     while (now() - start <= timeout) {
       const evidence = readEvidence();
       productSeen ||= evidence.productSeen === true;
+      if (evidence.productSeen === true && options.prepare) {
+        await options.prepare();
+        return true;
+      }
       if (evidence.productSeen === true && Array.isArray(evidence.gallery) && evidence.gallery.length > 0) return true;
       await delay(poll);
     }
@@ -312,8 +412,72 @@
     return completion;
   }
 
+  function validateReceiverSettings(settings) {
+    if (settings?.enabled !== true) return {};
+    const errors = {};
+    try {
+      const url = new URL(settings.url);
+      if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) throw new Error();
+      const host = url.hostname.toLowerCase();
+      const privateIp = /^(?:127|10)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host);
+      if ((!privateIp && host !== 'localhost' && !host.endsWith('.local')) ||
+          url.pathname !== '/' || url.search || url.hash) {
+        errors.url = 'URL invalid for captures: use a local receiver base URL (private IPv4, localhost, or .local host), without a path, query, or fragment.';
+      }
+    } catch (_) {
+      errors.url = 'URL invalid: enter an http:// or https:// receiver address with a host (no embedded credentials).';
+    }
+    if (typeof settings.token !== 'string' || !/^[\x21-\x7e]+$/.test(settings.token)) {
+      errors.token = 'Enter a receiver token containing only printable ASCII characters, without spaces.';
+    }
+    return errors;
+  }
+
+  async function testReceiverConnection(settings, io = {}) {
+    const errors = validateReceiverSettings({...settings, enabled: true});
+    if (Object.keys(errors).length) return {success: false, code: 'invalid', message: Object.values(errors).join(' ')};
+    const target = new URL(settings.url).origin + '/v1/already';
+    const originHelp = `Receiver --extension-origin must match this extension: ${io.origin}.`;
+    const controller = new AbortController();
+    let timer;
+    try {
+      return await Promise.race([
+        (async () => {
+          const response = await (io.fetch || globalThis.fetch)(target, {
+            method: 'POST', headers: {'Content-Type': 'application/json', 'X-Capture-Token': settings.token},
+            // Deliberately invalid identity: authenticates but cannot match or publish a capture.
+            body: JSON.stringify({identity: {}}), credentials: 'omit',
+            referrerPolicy: 'no-referrer', redirect: 'error', signal: controller.signal
+          });
+          if (response.status === 401) return {success: false, code: 'token_rejected', message: 'Receiver token rejected. Check the token in this form.'};
+          if (response.status === 403) return {success: false, code: 'origin_rejected', message: `Receiver origin rejected. ${originHelp}`};
+          const body = await response.json().catch(() => null);
+          if (response.status === 400 && body?.error === 'invalid identity' && body.complete === false) {
+            return {success: true, code: 'accepted', message: 'Receiver reachable and token accepted. No capture was written.'};
+          }
+          return {success: false, code: 'unexpected', message: `Unexpected receiver response (HTTP ${response.status}) at ${target}. Check the receiver address and service.`};
+        })(),
+        new Promise(resolve => {
+          timer = setTimeout(() => {
+            resolve({success: false, code: 'timeout', message: `Receiver timed out at ${target}. Check the address and service.`});
+            controller.abort();
+          }, io.timeoutMs ?? 10000);
+        })
+      ]);
+    } catch (_) {
+      // Fetch deliberately hides whether a failure was CORS or transport; do not invent a distinction.
+      return {success: false, code: 'unreachable', message: `Receiver unreachable or blocked by CORS at ${target}. Check the address and service. ${originHelp}`};
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function captureWithReceiver(payload, settings, io) {
-    const url = new URL(settings.url);
+    let url;
+    try { url = new URL(settings.url); }
+    catch (_) { throw captureUrlError('receiver URL', settings.url, 'invalid address; include http:// or https://'); }
     const host = url.hostname.toLowerCase();
     const privateIp = /^(?:127|10)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
       /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
@@ -321,7 +485,7 @@
     if (!['http:', 'https:'].includes(url.protocol) || !privateIp && host !== 'localhost' &&
         !host.endsWith('.local') || url.username || url.password || url.pathname !== '/' ||
         url.search || url.hash || !settings.token) {
-      throw new Error('invalid local receiver URL or token');
+      throw captureUrlError('receiver URL', settings.url, 'invalid local receiver URL or token');
     }
     const base = url.origin;
     const fetcher = io.fetch || globalThis.fetch;
@@ -499,7 +663,7 @@
         else if (delta.id === id) terminal(delta);
       }
       chromeApi.downloads.onChanged.addListener(onChanged);
-      chromeApi.downloads.download({url: dataUrl, filename, saveAs: false, conflictAction: 'uniquify'}, downloadId => {
+      chromeApi.downloads.download({url: dataUrl, filename, saveAs: false, conflictAction: options.conflictAction === 'overwrite' ? 'overwrite' : 'uniquify'}, downloadId => {
         if (chromeApi.runtime.lastError || !Number.isInteger(downloadId)) {
           finish(new Error(chromeApi.runtime.lastError?.message || 'capture download failed to start'));
           return;
@@ -546,18 +710,240 @@
     };
   }
 
+  async function prepareLazyGallery(config, doc, options = {}) {
+    if (!config?.product?.lazyLoad) return;
+    const selector = config.product.allImagesSelector || config.allImagesSelector;
+    const pattern = new RegExp(config.product.imageUrlPattern || config.imageUrlPattern || '.');
+    const deadline = Date.now() + (options.timeoutMs ?? 8000);
+    const pollMs = options.pollMs ?? 100;
+    const view = doc.defaultView;
+    const position = [view.scrollX, view.scrollY];
+    let images = [], ready = [];
+    // Ready = a matching URL that has either finished loading or lost its placeholder state.
+    // Chantelle leaves --blurring on some frames whose image has fully loaded.
+    const original = img => galleryNodeOriginal(img, config, doc);
+    const isReady = img => (config.product.originalImageUrlPattern
+      ? !!original(img).url : pattern.test(img.getAttribute('src') || img.currentSrc || '')) &&
+      ((img.complete && img.naturalWidth > 0) || !img.closest('[class*="--blurring"]'));
+    try {
+      do {
+        images = Array.from(doc.querySelectorAll(selector));
+        for (const img of images) {
+          if (isReady(img)) continue;
+          img.scrollIntoView({block: 'center', behavior: 'instant'});
+          await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, Math.max(0, deadline - Date.now()))));
+          if (Date.now() >= deadline) break;
+        }
+        images = Array.from(doc.querySelectorAll(selector));
+        ready = images.filter(isReady);
+        // Give unresolved lazy frames the full deadline to acquire real URLs.
+        // Only then may unusable candidates be skipped; none grant success alone.
+        if (ready.length && ready.length === images.length) return;
+        await new Promise(resolve => setTimeout(resolve, pollMs));
+      } while (Date.now() < deadline);
+      // The final poll sleep may cross the deadline, so evaluate skip eligibility here.
+      images = Array.from(doc.querySelectorAll(selector));
+      ready = images.filter(isReady);
+      if (config.product.originalImageUrlPattern && ready.length &&
+          images.every(img => isReady(img) || !original(img).url)) return;
+      const failed = images.find(img => !isReady(img));
+      const detail = config.product.originalImageUrlPattern && failed ? original(failed).error?.message : null;
+      throw new Error(`Lazy gallery shortfall: ${ready.length}/${images.length} configured images ready (URL pattern and blur check)` +
+        (detail ? `; ${detail}` : `; lazy src=${JSON.stringify(String(failed?.getAttribute('src') || '').slice(0, 120))}`));
+    } finally {
+      view.scrollTo({left: position[0], top: position[1], behavior: 'instant'});
+    }
+  }
+
+  function canSaveShopifyFeed(config) {
+    return config?.platform === 'shopify';
+  }
+
+  // Runs in the owner's content-script context, never in the service worker.
+  async function collectShopifyFeed(config, pageUrl, io = {}) {
+    if (!canSaveShopifyFeed(config)) throw new Error('Shopify site config required');
+    const page = new URL(pageUrl);
+    if (page.protocol !== 'https:' || page.hostname !== config.domain) throw new Error('Feed host mismatch');
+    const prefix = page.pathname.match(/^\/([a-z]{2}(?:-[a-z]{2})?)(?:\/|$)/i)?.[0].replace(/\/$/, '') || '';
+    const interval = config.takeover?.intervalMs ?? 10000;
+    if (!Number.isFinite(interval) || interval < 0 || interval > 300000) throw new Error('Invalid site pacing interval');
+    const sleep = io.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    const fetchPage = io.fetch || globalThis.fetch.bind(globalThis);
+    const report = {version: 1, host: page.hostname, prefix, fetched: [], pages: []};
+    for (let n = 1; ; n++) {
+      if (n > 1) await sleep(Math.max(3000, interval));
+      const url = `${page.origin}${prefix}/products.json?limit=250&page=${n}`;
+      const response = await fetchPage(url, {credentials: 'same-origin', mode: 'same-origin',
+        redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(60000)});
+      if (!response.ok) throw new Error(`Shopify feed stopped: HTTP ${response.status} at page ${n}; no retry`);
+      if (!/\bapplication\/json\b/i.test(response.headers.get('content-type') || ''))
+        throw new Error(`Shopify feed stopped: non-JSON response or challenge at page ${n}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const data = JSON.parse(new TextDecoder().decode(bytes));
+      if (!Array.isArray(data?.products) || data.products.length > 250)
+        throw new Error(`Shopify feed stopped: invalid products page ${n}`);
+      const sha256 = await captureSha256(bytes);
+      if (report.fetched.some(row => row.sha256 === sha256))
+        throw new Error(`Shopify feed stopped: repeated products page ${n}`);
+      report.fetched.push({url, status: response.status, fetched_at: new Date().toISOString(),
+        sha256, product_count: data.products.length});
+      report.pages.push(data);
+      io.progress?.(n, report.fetched.reduce((sum, row) => sum + row.product_count, 0));
+      if (data.products.length < 250) return report;
+    }
+  }
+
+  function takeoverStatusText(run, summary = {}, now = Date.now()) {
+    const labels = {preview: 'Ready', running: 'Running', paused: 'Paused',
+      complete: 'Finished', finished_with_gaps: 'Finished with gaps', stopped: 'Stopped'};
+    let state = labels[run.status] || run.status;
+    if (run.status === 'running' && !run.current && Number.isFinite(run.nextNavigationAt) && run.nextNavigationAt > now) {
+      state = `Waiting — next navigation in ${Math.ceil((run.nextNavigationAt - now) / 1000)} s`;
+    } else if (run.reason) state += ` — ${run.reason}`;
+    return `${state} · Current URL: ${run.current?.url || 'none (between pages)'} · ` +
+      `captured ${summary.productsCaptured || 0} · gone ${summary.gone || 0} · skipped ${summary.skipped || 0} · ` +
+      `failed ${summary.failed || 0} · pending ${summary.pending || 0}`;
+  }
+
+  // Compare URL spelling without changing stored queue/receiver identities. Decode
+  // each path segment once so encoded slashes and double encoding stay distinct.
+  function comparableUrl(value) {
+    const url = new URL(value);
+    url.hash = '';
+    url.pathname = url.pathname.split('/').map(segment =>
+      encodeURIComponent(decodeURIComponent(segment)).replace(/[!'()*]/g,
+        char => '%' + char.charCodeAt(0).toString(16).toUpperCase())).join('/');
+    return url.href;
+  }
+
+  function sameDocumentUrl(actual, expected) {
+    try { return comparableUrl(actual) === comparableUrl(expected); }
+    catch (_) { return false; }
+  }
+
+  // VS may rename only the final merchandising slug. Never use this for
+  // navigation/document binding or rewrite the queued receiver identity.
+  function victoriasSecretSameProductChoice(actual, expected) {
+    try {
+      const a = new URL(actual), b = new URL(expected);
+      const product = /^(\/us\/(?:vs|pink)\/(?:bras|panties)-catalog\/\d+\/-\/a\/generic-\d+-choice-[A-Za-z0-9]+)\/[^/]+\/?$/;
+      const left = a.pathname.match(product), right = b.pathname.match(product);
+      return a.origin === 'https://www.victoriassecret.com' && a.origin === b.origin &&
+        !a.username && !a.password && !b.username && !b.password &&
+        a.search === b.search && !!left && !!right && left[1] === right[1];
+    } catch (_) { return false; }
+  }
+
+  // A regional fallback is a missing queued choice, never permission to capture its substitute.
+  function victoriasSecretUnavailableChoice(expected, actual, alertText = '') {
+    try {
+      const a = new URL(actual), b = new URL(expected);
+      const product = /^\/us\/(?:vs|pink)\/(?:bras|panties)-catalog\/\d+\/-\/a\/generic-(\d+)-choice-([A-Za-z0-9]+)\/[^/]+\/?$/;
+      const left = a.pathname.match(product), right = b.pathname.match(product);
+      if (a.origin !== 'https://www.victoriassecret.com' || a.origin !== b.origin ||
+          a.username || a.password || b.username || b.password ||
+          !left || !right || left[1] !== right[1]) return null;
+      const unavailable = Array.from(alertText.matchAll(/Item unavailable in ([A-Za-z0-9]+)\b/g), m => m[1]);
+      if (left[2] !== right[2]) return `choice unavailable in region: ${right[2]} → ${left[2]}`;
+      if (unavailable.includes(right[2])) return `choice unavailable in region: ${right[2]}`;
+    } catch (_) { /* Malformed/off-site identities retain the ordinary binding rejection. */ }
+    return null;
+  }
+
+  // Read only the primary Magento gallery, never recommendation or swatch data.
+  function liseCharmelGallery(scripts, pageUrl) {
+    const base = new URL(pageUrl);
+    if (base.origin !== 'https://www.lisecharmel.com' || !base.pathname.startsWith('/lc_us_en/'))
+      throw new Error('LC gallery: wrong storefront');
+    const galleries = [];
+    for (const text of scripts) {
+      let data;
+      try { data = JSON.parse(text); }
+      catch (_) {
+        if (text.includes('mage/gallery/gallery')) throw new Error('LC gallery: malformed init');
+        continue;
+      }
+      const gallery = data?.['[data-gallery-role=gallery-placeholder]']?.['mage/gallery/gallery'];
+      if (gallery) galleries.push(gallery);
+    }
+    if (galleries.length !== 1 || !Array.isArray(galleries[0].data))
+      throw new Error('LC gallery: missing or ambiguous primary init');
+    const urls = new Set();
+    for (const image of galleries[0].data) {
+      if (image.type && image.type !== 'image') continue;
+      let url;
+      try { url = new URL(image.full); } catch (_) { throw new Error('LC gallery: missing full URL'); }
+      if (url.origin !== base.origin || url.username || url.password || url.hash ||
+          !url.pathname.startsWith('/media/catalog/product/'))
+        throw new Error('LC gallery: invalid full URL');
+      urls.add(url.href); // Preserve the evidenced full rendition, including its query.
+    }
+    if (!urls.size) throw new Error('LC gallery: no primary images');
+    return [...urls];
+  }
+
+  function liseCharmelProductUrl(raw) {
+    const url = new URL(raw);
+    const alias = url.pathname.match(/^\/lc_us_en\/catalog\/product\/view\/id\/\d+\/s\/([a-z0-9-]+-[a-z0-9]+-\d+)\/category\/\d+\/?$/i);
+    if (url.origin === 'https://www.lisecharmel.com' && !url.username && !url.password && alias)
+      url.pathname = `/lc_us_en/${alias[1]}.html`;
+    return url.href;
+  }
+
+  function listingResultTotal(text) {
+    const range = String(text).match(/^\s*Items\s+(\d+)\s*-\s*(\d+)\s+of\s+(\d+)\s*$/i);
+    if (range) {
+      const [start, end, total] = range.slice(1).map(Number);
+      return Number.isSafeInteger(total) && start >= 1 && start <= end && end <= total ? total : null;
+    }
+    const simple = String(text).match(/\b(\d+)\s+(?:results?|items?|products?)\b/i);
+    return simple && Number.isSafeInteger(Number(simple[1])) ? Number(simple[1]) : null;
+  }
+
+  function victoriasSecretImage(raw, candidates = []) {
+    const base = 'https://www.victoriassecret.com';
+    const input = new URL(raw, base);
+    if (input.origin !== base) throw new Error('VS gallery: foreign image host');
+    const filename = decodeURIComponent(input.pathname.split('/').pop());
+    const images = [raw, ...candidates].map(value => {
+      try {
+        const url = new URL(value.startsWith('www.victoriassecret.com/') ? 'https://' + value : value, base);
+        const match = url.pathname.match(/^\/p\/(\d+)x(\d+)\/(?:png|jpg|webp|tif)\/[^?#]+$/);
+        return url.origin === base && match && !url.search && !url.hash &&
+          decodeURIComponent(url.pathname.split('/').pop()) === filename ?
+          {url: url.href, width: Number(match[1]), height: Number(match[2])} : null;
+      } catch (_) { return null; }
+    }).filter(Boolean).sort((a, b) => b.width - a.width || b.height - a.height);
+    if (!images.length) throw new Error('VS gallery: no evidenced original for ' + filename);
+    return images[0].url;
+  }
+
   const helpers = {
+    liseCharmelGallery,
+    liseCharmelProductUrl,
+    listingResultTotal,
+    comparableUrl, sameDocumentUrl,
+    victoriasSecretImage, victoriasSecretSameProductChoice, victoriasSecretUnavailableChoice,
+    takeoverStatusText,
+    canSaveShopifyFeed,
+    collectShopifyFeed,
+    prepareLazyGallery,
     captureProductFromJsonLd,
     captureProductEvidence,
     captureIdentity,
     captureIdentityKey,
     captureImageUrls,
+    resolveGalleryOriginal,
+    dedupeManualImages,
+    galleryNodeOriginal,
     waitForCaptureState,
     waitForAutoCaptureReady,
     recordCaptureFailure,
     buildCaptureCompletion,
     exportProductCapture,
     captureWithReceiver,
+    validateReceiverSettings,
+    testReceiverConnection,
     captureResultMessage,
     saveCaptureDownload,
     sanitizeFolderPath,

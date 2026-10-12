@@ -1,6 +1,7 @@
 # Agent Notes (page-image-saver)
 
 Chrome MV3 extension, no build step. Architecture and loading: `CLAUDE.md`. Tests: `npm test`.
+The manifest public key fixes the unpacked ID; the private packing key is stored only at `~/.config/page-image-saver/extension-key.pem` (mode 600), is not needed for unpacked loading, and must never be committed.
 It feeds the local `lingerie_trends` catalog archive (~/src/lingerie_trends); see that repo's AGENTS.md.
 
 ## Catalog collection: settled policy
@@ -14,6 +15,7 @@ The technical boundaries are fixed and are the only ones:
 
 - Runs only in the owner's own browser session, at a steady pace (take-over defaults to about 10 s
   between page loads), and stays on the site's own hosts and CDNs.
+- Owner-approved headed Linux Playwright on the owner's machine is also allowed for take-over runs, under the same pacing and technical boundaries.
 - Triggering the page's normal UI is fine: scrolling, lazy-load, hover, clicking color swatches.
 - No solving or bypassing bot challenges or CAPTCHAs, no stealth or fingerprint spoofing, no IP or
   identity rotation, no pushing through 403/429, no chrome.debugger input injection.

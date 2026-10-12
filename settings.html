@@ -369,11 +369,13 @@
       </div>
       <div class="input-group">
         <label for="receiver-url">Receiver URL:</label>
-        <input type="url" id="receiver-url" placeholder="http://192.168.1.100:8765">
+        <input type="text" id="receiver-url" aria-describedby="receiver-url-error" placeholder="http://&lt;NAS address&gt;:&lt;port&gt;">
+        <div id="receiver-url-error" role="alert" style="color: #b00020"></div>
       </div>
       <div class="input-group">
         <label for="receiver-token">Receiver token:</label>
-        <input type="password" id="receiver-token" autocomplete="off">
+        <input type="password" id="receiver-token" autocomplete="off" aria-describedby="receiver-token-error">
+        <div id="receiver-token-error" role="alert" style="color: #b00020"></div>
         <div class="help-text">An unreachable receiver falls back to Downloads. Authorization and validation failures remain visible errors.</div>
       </div>
     </div>

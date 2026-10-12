@@ -3,7 +3,6 @@
     "platform": "magento",
     "botProtection": [],
     "colorVariantStrategy": "separate-url",
-    "takeover": {"intervalMs": 10000},
     "listing": {
       "productLinkSelector": "a.product-item-link",
       "pagination": {

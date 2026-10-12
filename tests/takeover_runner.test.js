@@ -27,6 +27,7 @@ function rig(pages, captures = {}, opts = {}) {
   let crashOnSave = false;
   const io = {
     now: () => now,
+    random: () => 1 / 3,
     load: async url => { visits.push(url); return {...(pages[url] || {status: 404}),
       tabId: 7, documentId: `fixture:${url}`}; },
     capture: async (url, scope, binding) => {
@@ -69,22 +70,196 @@ async function prepare(r, config = site, listing = listing1) {
   await r.runner().preview(config, listing);
 }
 
+test('discovery requires only a listing preview, never visits PDPs, and exports listing evidence', async () => {
+  const r = rig({[first]: {...listing1, cards: [{url: bra, card_text: 'Lace Bra $42'}]}, [second]: listing2});
+  await r.runner().preview({...site, colorVariantStrategy: undefined}, {...listing1, locale: 'en-US'}, 'discovery');
+  await r.runner().start();
+  for (let i = 0; i < 4; i++) { await r.runner().tick(); r.advance(10000); }
+  assert.deepEqual(r.visits, [first, second]);
+  assert.equal(r.captureCalls.length, 0);
+  const report = exportTakeoverReport(r.memory.run);
+  assert.equal(report.mode, 'discovery');
+  assert.equal(report.locale, 'en-US');
+  assert.equal(report.status, 'complete');
+  assert.deepEqual(report.totals, {listing_pages: 2, product_urls: 3});
+  assert.deepEqual(report.listings[0].products, [{url: bra, card_text: 'Lace Bra $42'}, {url: sleep, card_text: ''}]);
+  assert.equal(report.listings[0].final_url, first);
+  assert.equal(report.listings[0].next_url, second);
+  assert.deepEqual(report.listings[1].end_check, {observed: listing2.end, passed: true});
+  assert.equal(report.site, site.domain);
+  assert.equal(report.config, undefined);
+  assert.equal(report.products, undefined);
+});
+
+test('discovery without positive end evidence finishes with gaps and can pause/resume', async () => {
+  const listing = {...listing1, next: null, end: null};
+  const r = rig({[first]: listing});
+  await r.runner().preview({...site, listing: {...site.listing, endCheck: null}}, listing, 'discovery');
+  await r.runner().start();
+  await r.runner().pause();
+  await r.runner().tick();
+  assert.deepEqual(r.visits, []);
+  await r.runner().resume();
+  await r.runner().tick(); r.advance(10000); await r.runner().tick();
+  const report = exportTakeoverReport(r.memory.run);
+  assert.equal(report.status, 'finished_with_gaps');
+  assert.match(report.stop_reason, /without passing end check/);
+  assert.equal(report.listings[0].end_check.passed, false);
+  assert.equal(r.captureCalls.length, 0);
+});
+
+test('discovery rejects product previews and does not inherit capture previews', async () => {
+  const r = rig({});
+  await prepare(r);
+  await assert.rejects(r.runner().preview(site, braPage, 'discovery'), /listing/);
+  await r.runner().preview(site, listing1, 'discovery');
+  assert.equal(r.memory.run.previews.length, 1);
+});
+
+test('discovery export carries supplied provenance and an unstarted preview has no invented start', async () => {
+  const r = rig({});
+  await r.runner().preview(site, listing1, 'discovery');
+  const context = {exportedUtc: '2026-10-03T19:00:00.000Z', extensionVersion: '2.3.4'};
+  const preview = exportTakeoverReport(r.memory.run, context);
+  assert.equal(preview.started_utc, null);
+  assert.equal(preview.exported_utc, '2026-10-03T19:00:00.000Z');
+  assert.equal(preview.extension_version, '2.3.4');
+  await r.runner().start();
+  const started = exportTakeoverReport(r.memory.run, context);
+  assert.equal(started.started_utc, '1970-01-01T00:01:40.000Z');
+  const capture = exportTakeoverReport({...r.memory.run, mode: 'capture'}, context);
+  assert.equal(capture.format, 'page-image-saver-takeover-run/v1');
+  assert.equal(capture.started_utc, undefined);
+  assert.equal(capture.extension_version, undefined);
+});
+
 test('preview stores observations but only explicit take over starts navigation', async () => {
   const r = rig({[first]: listing1});
   await r.runner().preview(site, listing1);
   assert.deepEqual(r.visits, []);
   assert.equal(r.memory.run.status, 'preview');
   assert.equal(r.memory.run.preview.endCheckConfigured, true);
-  await assert.rejects(() => r.runner().start(), /preview a product page/);
   await r.runner().preview(site, {...braPage, imageCount: 2});
   assert.equal(r.memory.run.previews.find(p => p.kind === 'product').scope.decision, 'include');
   assert.equal(r.memory.run.previews.find(p => p.kind === 'product').imageCount, 2);
+  assert.equal(r.memory.run.seedUrl, null);
+  await assert.rejects(() => r.runner().start(), /preview a listing/);
+  await r.runner().preview(site, listing1);
+  assert.equal(r.memory.run.previews.length, 1);
   await r.runner().start();
   assert.equal(r.memory.run.status, 'running');
   assert.deepEqual(r.visits, []);
   assert.ok(r.alarms.length > 0, 'a recovery alarm must exist before first navigation');
   await r.runner().tick();
   assert.deepEqual(r.visits, [first]);
+});
+
+test('each listing preview replaces the prior list and starts at the latest explicit URL', async () => {
+  const r = rig({[second]: listing2});
+  await r.runner().preview(site, listing1);
+  await r.runner().preview(site, listing2);
+  assert.deepEqual(r.memory.run.previews.map(row => row.url), [second]);
+  assert.equal(r.memory.run.seedUrl, second);
+  await r.runner().start();
+  await r.runner().tick();
+  assert.deepEqual(r.visits, [second]);
+});
+
+function discoverySource(urls = [bra], sha256 = 'a'.repeat(64), listingUrl = first) {
+  return {sha256, report: {format: 'page-image-saver-discovery/v1', schema_version: 1,
+    mode: 'discovery', site: site.domain, started_utc: '2026-10-03T10:00:00.000Z',
+    listings: [{url: listingUrl, final_url: listingUrl,
+      products: urls.map(url => ({url, card_text: 'Recorded card'})), next_url: null,
+      end_check: {observed: null, passed: false}}]}};
+}
+
+test('imported discovery captures only normalized targets, all origins, and never drops excluded scope', async () => {
+  const r = rig({[bra]: braPage, [sleep]: sleepPage}, {}, {verifyResult: {storage:'receiver', status:'missing'}});
+  const runner = r.runner();
+  assert.equal(typeof runner.importDiscovery, 'function');
+  await runner.importDiscovery(site, [discoverySource([bra + '#color', sleep]),
+    discoverySource([bra], 'b'.repeat(64), second)]);
+  assert.equal(r.memory.run.mode, 'capture-discovery');
+  assert.equal(r.memory.run.seedUrl, bra);
+  assert.deepEqual(r.memory.run.products.map(row => row.url), [bra, sleep]);
+  assert.deepEqual(r.memory.run.products[0].origins, [
+    {file_sha256: 'a'.repeat(64), listing_url: first},
+    {file_sha256: 'b'.repeat(64), listing_url: second}]);
+  await runner.start();
+  for (let i = 0; i < 4; i++) { await runner.tick(); r.advance(10000); }
+  assert.deepEqual(r.visits, [bra, sleep]);
+  assert.deepEqual(r.captureCalls.map(row => row.url), [bra, sleep]);
+  assert.equal(r.memory.run.products[1].scope.decision, 'exclude');
+  assert.equal(r.memory.run.products[1].status, 'captured');
+  assert.equal(r.memory.run.status, 'complete');
+  assert.deepEqual(exportTakeoverReport(r.memory.run).products[0].origins,
+    r.memory.run.products[0].origins);
+});
+
+test('invalid discovery imports leave saved run untouched and active/paused runs reject overwrite', async () => {
+  const r = rig({});
+  assert.equal(typeof r.runner().importDiscovery, 'function');
+  await r.runner().preview(site, listing1, 'discovery');
+  const before = structuredClone(r.memory.run);
+  const invalid = [[], [discoverySource([])], [{...discoverySource(), sha256:'bad'}],
+    [discoverySource(['https://other.test/bra'])], [discoverySource(['javascript:alert(1)'])],
+    [{...discoverySource(), report: {...discoverySource().report, format:'other'}}],
+    [discoverySource([bra]), discoverySource([sleep], 'b'.repeat(64), 'https://other.test/list')],
+    [{...discoverySource(), report:{...discoverySource().report, listings:null}}],
+    [discoverySource(Array.from({length:10001}, (_, i) => `https://${site.domain}/p/${i}`))]];
+  for (const sources of invalid) {
+    await assert.rejects(r.runner().importDiscovery(site, sources));
+    assert.deepEqual(r.memory.run, before);
+  }
+  for (const status of ['running','paused']) {
+    r.memory.run.status = status;
+    await assert.rejects(r.runner().importDiscovery(site, [discoverySource()]), /stop or finish/);
+    assert.equal(r.memory.run.status, status);
+  }
+});
+
+test('current discovery reuse preserves start and each listing origin before replacing saved run', async () => {
+  const r = rig({[first]: listing1, [second]: listing2});
+  const runner = r.runner();
+  assert.equal(typeof runner.importDiscovery, 'function');
+  await runner.preview(site, listing1, 'discovery');
+  await runner.start();
+  for (let i=0; i<3; i++) { await runner.tick(); r.advance(10000); }
+  await runner.importDiscovery(site);
+  assert.deepEqual(r.memory.run.products.find(row => row.url===bra).origins, [
+    {run_started_utc:'1970-01-01T00:01:40.000Z', listing_url:first},
+    {run_started_utc:'1970-01-01T00:01:40.000Z', listing_url:second}]);
+  assert.deepEqual(r.memory.run.listings.queue, []);
+});
+
+test('verified identities skip navigation and remain verified across restart; Downloads never skip', async () => {
+  const r = rig({[sleep]: sleepPage}, {[sleep]: {storage:'downloads'}});
+  assert.equal(typeof r.runner().importDiscovery, 'function');
+  r.io.verify = async identity => ({storage:'receiver', status: identity.product_url===bra ? 'already' : 'missing'});
+  await r.runner().importDiscovery(site, [discoverySource([bra,sleep])]);
+  await r.runner().start();
+  await r.runner().tick();
+  assert.equal(r.memory.run.products[0].status, 'skipped');
+  assert.deepEqual(r.visits, []);
+  r.advance(10000);
+  await r.runner().tick(); r.advance(10000); await r.runner().tick();
+  assert.deepEqual(r.visits, [sleep]);
+  assert.equal(r.memory.run.status,'finished_with_gaps');
+  assert.equal(summarizeTakeover(r.memory.run).skipped,1);
+  assert.equal(summarizeTakeover(r.memory.run).exportedUnverified,1);
+});
+
+test('fixed queue pause/restart never expands and challenge immediately pauses', async () => {
+  const r = rig({[bra]: {status:429}}, {}, {verifyResult:{storage:'receiver', status:'missing'}});
+  assert.equal(typeof r.runner().importDiscovery, 'function');
+  await r.runner().importDiscovery(site,[discoverySource()]);
+  await r.runner().start(); await r.runner().pause();
+  await r.runner().tick(); assert.deepEqual(r.visits,[]);
+  await r.runner().resume(); await r.runner().tick();
+  assert.equal(r.memory.run.status,'paused');
+  assert.match(r.memory.run.reason,/429/);
+  assert.equal(r.captureCalls.length,0);
+  assert.equal(r.memory.run.products.length,1);
 });
 
 test('new preview cannot inherit a completed run listing seed', async () => {
@@ -103,9 +278,9 @@ test('page-count evidence, unique URLs and exclusion accounting complete a run',
     await r.runner().tick(); r.advance(10000);
   }
   assert.equal(r.memory.run.status, 'complete');
-  assert.deepEqual(summarizeTakeover(r.memory.run), {listingPagesVisited: 2,
+  assert.deepEqual(summarizeTakeover(r.memory.run), {pacing:{minMs:9000,maxMs:12000}, listingPagesVisited: 2,
     productsFound: 3, productsCaptured: 2, colorsCaptured: 2, sizeOptionsTraversed: 0,
-    excluded: 1, failed: 0, pending: 0, exportedUnverified: 0});
+    excluded: 1, gone: 0, failed: 0, pending: 0, exportedUnverified: 0});
   assert.deepEqual(r.captureCalls.map(call => call.url), [bra, red]);
   assert.equal(r.captureCalls[0].scope.decision, 'include');
 });
@@ -239,7 +414,7 @@ test('challenge and 403/429 stop immediately; transient load failures are bounde
   assert.equal(r.visits.length, 3);
 });
 
-test('dead product 404 fails that item and still captures the next product', async () => {
+test('dead product 404 skips that item and still captures the next product', async () => {
   const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
   const r = rig({[first]: {...listing1, products: [bra, red], next: null,
     end: {type: 'explicit', present: true}}, [bra]: {status: 404},
@@ -248,8 +423,8 @@ test('dead product 404 fails that item and still captures the next product', asy
   for (let i = 0; i < 4 && r.memory.run.status === 'running'; i++) {
     await r.runner().tick(); r.advance(10000);
   }
-  assert.equal(r.memory.run.status, 'finished_with_gaps');
-  assert.equal(r.memory.run.products[0].status, 'failed');
+  assert.equal(r.memory.run.status, 'complete');
+  assert.equal(r.memory.run.products[0].status, 'skipped');
   assert.match(r.memory.run.products[0].reason, /HTTP 404/);
   assert.deepEqual(r.captureCalls.map(call => call.url), [red]);
   assert.deepEqual(r.visits, [first, bra, red]);
@@ -382,14 +557,99 @@ test('pause during saved completion verification cannot be overwritten by late r
   assert.equal(r.memory.run.status, 'paused');
 });
 
+test('fixed queue accepts added query parameters but preserves queued identity and inspected binding', async () => {
+  const r = rig({[bra]: {...braPage, url:bra+'?size=OS'}}, {},
+    {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource([bra])]);
+  await r.runner().start(); await r.runner().tick();
+  assert.equal(r.memory.run.products[0].status,'captured');
+  assert.equal(r.memory.run.products[0].identity.product_url,bra);
+  assert.equal(r.captureCalls[0].binding.documentUrl,bra+'?size=OS');
+});
+
+test('fixed queue rejects changed or removed existing query parameters', async () => {
+  for (const final of [bra, bra+'?color=red', bra+'?color=black&color=red']) {
+    const queued=bra+'?color=black';
+    const r=rig({[queued]:{...braPage,url:final}}, {}, {verifyResult:{storage:'receiver',status:'missing'}});
+    await r.runner().importDiscovery(site,[discoverySource([queued])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.products[0].status,'failed');
+    assert.equal(r.captureCalls.length,0);
+  }
+});
+
+test('five consecutive fixed queue failures pause across worker restarts', async () => {
+  const urls=Array.from({length:6},(_,i)=>bra+'/'+i);
+  const pages=Object.fromEntries(urls.map(url=>[url,{kind:'listing',url}]));
+  const r=rig(pages,{}, {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource(urls)]);
+  await r.runner().start();
+  for(let i=0;i<5;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'paused');
+  assert.match(r.memory.run.reason,/5 consecutive/);
+  assert.equal(r.memory.run.products[5].status,'pending');
+  assert.equal(r.visits.length,5);
+});
+
+test('capture errors trigger the five-failure guard and verified skips reset it', async () => {
+  const urls=Array.from({length:6},(_,i)=>bra+'/'+i);
+  const pages=Object.fromEntries(urls.map(url=>[url,{...braPage,url}]));
+  const failures=Object.fromEntries(urls.map(url=>[url,new Error('image decode failed')]));
+  const r=rig(pages,failures,{verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource(urls)]);
+  await r.runner().start();
+  for(let i=0;i<4;i++){await r.runner().tick();r.advance(10000);}
+  r.io.verify=async identity=>({storage:'receiver',status:identity.product_url===urls[4]?'already':'missing'});
+  await r.runner().tick(); r.advance(10000); await r.runner().tick();
+  assert.equal(r.memory.run.status,'running');
+  assert.equal(r.memory.run.consecutiveFailures,1);
+  assert.equal(r.memory.run.products[4].status,'skipped');
+  const s=rig(pages,failures,{verifyResult:{storage:'receiver',status:'missing'}});
+  await s.runner().importDiscovery(site,[discoverySource(urls)]);
+  await s.runner().start();
+  for(let i=0;i<5;i++){await s.runner().tick();s.advance(10000);}
+  assert.equal(s.memory.run.status,'paused');
+  assert.match(s.memory.run.reason,/5 consecutive.*image decode failed/);
+});
+
+test('fixed queue redirects skip gone sources or fail invalid URLs; capture only the destination once at its own turn', async () => {
+  for (const destination of [red, 'https://other.test/product', 'not a URL']) {
+    const r = rig({[bra]: {...redPage, url: destination}, [red]: redPage}, {},
+      {verifyResult: {storage:'receiver', status:'missing'}});
+    await r.runner().importDiscovery(site, [discoverySource([bra, red])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.status, 'running');
+    assert.equal(r.memory.run.products[0].status, destination === red ? 'skipped' : 'failed');
+    assert.match(r.memory.run.products[0].reason, /gone: redirected to |invalid inspected page URL/);
+    assert.equal(r.captureCalls.length, 0);
+    r.advance(10000); await r.runner().tick();
+    assert.deepEqual(r.captureCalls.map(row => row.url), [red]);
+    assert.equal(r.memory.run.products[1].status, 'captured');
+    assert.deepEqual(r.visits, [bra, red]);
+  }
+});
+
+test('fixed queue redirect with challenge or HTTP block still pauses without failing the product', async () => {
+  for (const page of [{status:403}, {status:429}, {status:200, kind:'challenge'}]) {
+    const r = rig({[bra]: {...redPage, ...page}}, {},
+      {verifyResult:{storage:'receiver', status:'missing'}});
+    await r.runner().importDiscovery(site, [discoverySource([bra, red])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.status, 'paused');
+    assert.equal(r.memory.run.products[0].status, 'pending');
+    assert.equal(r.captureCalls.length, 0);
+  }
+});
+
 test('same-site product redirect cannot satisfy a different queued URL', async () => {
   const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
   const r = rig({[first]: {...listing1, products: [bra], next: null,
     end: {type: 'explicit', present: true}}, [bra]: {...redPage, url: red}});
   await prepare(r, config); await r.runner().start();
   await r.runner().tick(); r.advance(10000); await r.runner().tick();
-  assert.equal(r.memory.run.status, 'paused');
-  assert.equal(r.memory.run.products[0].status, 'pending');
+  assert.equal(r.memory.run.status, 'running');
+  assert.equal(r.memory.run.products[0].status, 'skipped');
+  assert.equal(r.memory.run.products[0].reason, 'gone: redirected to ' + red);
   assert.equal(r.captureCalls.length, 0);
 });
 
@@ -407,4 +667,199 @@ test('exported run carries the saved accounting and reasons for a gap', async ()
   assert.equal(exported.accounting.failed, 1);
   assert.equal(exported.products[0].reason, 'exported_unverified');
   assert.equal(exported.status, 'finished_with_gaps');
+});
+test('fixed queue captures review scope and preserves named URL errors in its export', async () => {
+  const page = {...braPage, product: {name: 'Essie', category: ''}};
+  const r = rig({[bra]: page}, {}, {verifyResult: {storage: 'receiver', status: 'missing'}});
+  await r.runner().importDiscovery(site, [discoverySource()]);
+  await r.runner().start();
+  await r.runner().tick();
+  assert.equal(r.captureCalls[0].scope.decision, 'review');
+  assert.equal(r.memory.run.products[0].status, 'captured');
+  const {resolveGalleryOriginal} = require('../extension_helpers.js');
+  let reason;
+  try { resolveGalleryOriginal('https://[bad/', '.', bra); } catch (error) { reason = error.message; }
+  const failure = rig({[bra]: page}, {[bra]: new Error(reason)},
+    {verifyResult: {storage: 'receiver', status: 'missing'}});
+  await failure.runner().importDiscovery(site, [discoverySource()]);
+  await failure.runner().start();
+  await failure.runner().tick();
+  const exported = exportTakeoverReport(failure.memory.run);
+  assert.match(exported.products[0].reason, /gallery original.*https:\/\/\[bad/);
+});
+
+
+test('gone HTTP products preserve failure streak across restarts and export separately from verified skips', async () => {
+  const urls=Array.from({length:10},(_,i)=>bra+'/'+i);
+  const statuses=[500,404,410,500,404,404,500,500,500,200];
+  const pages=Object.fromEntries(urls.map((url,i)=>[url,{...braPage,url,status:statuses[i]}]));
+  const r=rig(pages,{}, {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource(urls)]);
+  await r.runner().start();
+  for(let i=0;i<9;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'paused');
+  assert.equal(r.memory.run.consecutiveFailures,5);
+  assert.equal(r.memory.run.products[9].status,'pending');
+  assert.deepEqual(r.visits,urls.slice(0,9));
+  assert.equal(r.captureCalls.length,0);
+  const report=exportTakeoverReport(r.memory.run);
+  assert.equal(report.accounting.gone,4);
+  assert.equal(report.accounting.skipped,0);
+  assert.equal(report.accounting.failed,5);
+  assert.equal(report.products[1].reason,'gone: HTTP 404');
+  assert.equal(report.products[2].reason,'gone: HTTP 410');
+  assert.equal(report.products[1].status,'skipped');
+});
+
+test('five gone products do not pause and reimport revisits gone but receiver-skips captures', async () => {
+  const urls=[...Array.from({length:5},(_,i)=>bra+'/'+i),red];
+  const pages=Object.fromEntries(urls.map(url=>[url,url===red?redPage:{url,status:404}]));
+  const r=rig(pages,{}, {verifyResult:{storage:'receiver',status:'missing'}});
+  const source=discoverySource(urls);
+  await r.runner().importDiscovery(site,[source]); await r.runner().start();
+  const runner=r.runner();
+  for(let i=0;i<7;i++){await runner.tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'complete');
+  assert.equal(summarizeTakeover(r.memory.run).gone,5);
+  assert.deepEqual(r.captureCalls.map(x=>x.url),[red]);
+  r.io.verify=async identity=>({storage:'receiver',status:identity.product_url===red?'already':'missing'});
+  await r.runner().importDiscovery(site,[source]); await r.runner().start();
+  for(let i=0;i<7;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'complete');
+  assert.equal(summarizeTakeover(r.memory.run).gone,5);
+  assert.equal(summarizeTakeover(r.memory.run).skipped,1);
+  assert.deepEqual(r.visits,[...urls,...urls.slice(0,5)]);
+});
+
+
+test('same-product locale and canonical redirects keep their existing failure handling', async () => {
+  const queued='https://shop.example.test/us_en/bra-239';
+  for (const url of [queued+'/', queued.replace('/us_en/','/uk_en/')]) {
+    const r=rig({[queued]:{...braPage,url}}, {}, {verifyResult:{storage:'receiver',status:'missing'}});
+    await r.runner().importDiscovery(site,[discoverySource([queued])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.products[0].status,'failed');
+    assert.equal(summarizeTakeover(r.memory.run).gone,0);
+    assert.equal(r.captureCalls.length,0);
+  }
+});
+
+
+for (const [sample, delay] of [[0,9000],[0.5,10500],[1-Number.EPSILON,12000]]) {
+  test(`navigation jitter persists ${delay}ms before load and survives restart`, async () => {
+    const r=rig({[bra]:braPage,[red]:redPage},{}, {verifyResult:{storage:'receiver',status:'missing'}});
+    r.io.verify=async identity=>({storage:'receiver',status:r.captureCalls.some(call=>call.url===identity.product_url)?'already':'missing'});
+    let rolls=0;
+    r.io.random=()=>{rolls++;return sample;};
+    const load=r.io.load;
+    r.io.load=async url=>{
+      assert.equal(r.memory.run.nextNavigationAt,r.memory.run.lastNavigationStarted+delay);
+      return load(url);
+    };
+    await r.runner().importDiscovery(site,[discoverySource([bra,red])]);
+    await r.runner().start(); await r.runner().tick();
+    assert.equal(r.memory.run.nextNavigationAt,100000+delay);
+    assert.equal(rolls,1);
+    r.advance(delay-1);
+    await r.runner().tick();
+    assert.deepEqual(r.visits,[bra]);
+    assert.equal(r.alarms.at(-1),100000+delay);
+    assert.equal(rolls,1,'restart/wait must not reroll');
+    r.advance(1); await r.runner().tick();
+    assert.deepEqual(r.visits,[bra,red]);
+    assert.equal(rolls,2,'one roll per navigation');
+    const exported=exportTakeoverReport(r.memory.run);
+    assert.deepEqual(exported.pacing,{minMs:9000,maxMs:12000});
+    assert.equal(exported.nextNavigationAt,100000+2*delay);
+  });
+}
+
+test('legacy run preserves its outstanding 10-second wait then adopts jitter',async()=>{
+  const r=rig({[bra]:braPage,[red]:redPage},{},{verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource([bra,red])]); await r.runner().start();
+  r.memory.run.lastNavigationStarted=100000;
+  delete r.memory.run.nextNavigationAt;
+  r.io.random=()=>0;
+  r.advance(9999); await r.runner().tick();
+  assert.equal(r.visits.length,0);
+  assert.equal(r.memory.run.nextNavigationAt,110000);
+  r.advance(1); await r.runner().tick();
+  assert.deepEqual(r.visits,[bra]);
+  assert.equal(r.memory.run.nextNavigationAt,119000);
+});
+
+
+test('shipped site configurations use the shared 9–12 second pacing range',()=>{
+  for (const config of [{}, require('../site_config/www.agentprovocateur.com.json'),
+      liseConfig, require('../site_config/www.sanscomplexe.com.json')]) {
+    assert.deepEqual(summarizeTakeover({config,products:[]}).pacing,{minMs:9000,maxMs:12000});
+  }
+});
+
+test('fixed VS queue captures encoded document while retaining saved literal identity',async()=>{
+  const url=require('./fixtures/victoriassecret-apostrophe-urls.json')[0];
+  const r=rig({[url]:{kind:'product',url:url.replaceAll("'",'%27'),product:{name:'Lace Bra'}}},{},
+    {verifyResult:{storage:'receiver',status:'missing'}});
+  const config={...site,domain:'www.victoriassecret.com'};
+  const source=discoverySource([url]); source.report.site=config.domain;
+  source.report.listings[0].url=source.report.listings[0].final_url='https://www.victoriassecret.com/list';
+  await r.runner().importDiscovery(config,[source]);await r.runner().start();await r.runner().tick();
+  assert.equal(r.memory.run.products[0].status,'captured');
+  assert.equal(r.memory.run.products[0].identity.product_url,url);
+});
+
+test('three plain readiness failures fail one product and continue with the next',async()=>{
+  const r=rig({[bra]:{status:0,error:'automatic product gallery readiness timeout'},[red]:redPage},{},
+    {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource([bra,red])]);await r.runner().start();
+  for(let i=0;i<3;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.status,'running');
+  assert.equal(r.memory.run.products[0].status,'failed');
+  assert.match(r.memory.run.products[0].reason,/3.*automatic product gallery readiness timeout/);
+  await r.runner().tick();
+  assert.equal(r.memory.run.products[1].status,'captured');
+});
+
+test('plain load failures on five different products pause; challenge errors pause immediately',async()=>{
+  const urls=Array.from({length:6},(_,i)=>`https://shop.example.test/bra-${i}`);
+  const r=rig(Object.fromEntries(urls.map(url=>[url,{status:0,error:'page load timeout'}])),{},
+    {verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource(urls)]);await r.runner().start();
+  for(let i=0;i<15;i++){await r.runner().tick();r.advance(10000);}
+  assert.equal(r.memory.run.products.filter(p=>p.status==='failed').length,5);
+  assert.equal(r.memory.run.status,'paused');
+  assert.match(r.memory.run.reason,/5 consecutive product failures.*page load timeout/);
+  for(const error of ['HTTP 403','HTTP 429','captcha challenge']) {
+    const b=rig({[bra]:{status:0,error}},{},{verifyResult:{storage:'receiver',status:'missing'}});
+    await b.runner().importDiscovery(site,[discoverySource([bra])]);await b.runner().start();await b.runner().tick();
+    assert.equal(b.memory.run.status,'paused');assert.equal(b.visits.length,1);
+  }
+});
+
+test('equivalent percent-encoded path letters capture but unknown inspection failures retain a clear pause', async()=>{
+  const encoded=bra.replace('bra','%62ra');
+  const r=rig({[bra]:{...braPage,url:encoded}},{},{verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource([bra])]);await r.runner().start();await r.runner().tick();
+  assert.equal(r.memory.run.products[0].status,'captured');
+  const b=rig({[bra]:{status:0,error:'page inspection failed'}},{},{verifyResult:{storage:'receiver',status:'missing'}});
+  await b.runner().importDiscovery(site,[discoverySource([bra])]);await b.runner().start();
+  for(let i=0;i<3;i++){await b.runner().tick();b.advance(10000);}
+  assert.equal(b.memory.run.status,'paused');
+  assert.match(b.memory.run.reason,/page inspection failed/);
+  assert.equal(b.memory.run.products[0].status,'pending');
+});
+
+for (const phase of ['inspection', 'capture']) test(`unavailable choices at ${phase} export gone without capture or failure pauses`, async () => {
+  const urls = Array.from({length: 6}, (_, i) => bra + '/' + i);
+  const reason = 'choice unavailable in region: 7OWG → 7WZZ';
+  const pages = Object.fromEntries(urls.map(url => [url, {...braPage, url, colorLinks: [], ...(phase === 'inspection' ? {goneReason: reason} : {})}]));
+  const r = rig(pages, {}, {verifyResult: {storage:'receiver',status:'missing'}});
+  if (phase === 'capture') r.io.capture = async () => {throw new Error(reason);};
+  await r.runner().importDiscovery(site, [discoverySource(urls)]); await r.runner().start();
+  for (let i=0;i<7;i++) {await r.runner().tick(); r.advance(10000);}
+  assert.equal(r.memory.run.status, 'complete');
+  assert.equal(summarizeTakeover(r.memory.run).gone, 6);
+  assert.equal(summarizeTakeover(r.memory.run).failed, 0);
+  assert.ok(r.memory.run.products.every(p => p.reason === reason));
+  assert.equal(r.captureCalls.length, 0);
 });

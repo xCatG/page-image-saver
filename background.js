@@ -62,11 +62,7 @@ function takeoverMessage(tabId, message) {
 }
 
 function takeoverSameUrl(actual, expected) {
-  try {
-    const url = new URL(actual);
-    url.hash = '';
-    return url.href === expected;
-  } catch (_) { return false; }
+  return globalThis.PageImageSaverHelpers.sameDocumentUrl(actual, expected);
 }
 
 async function takeoverOwnedTab(binding) {
@@ -76,11 +72,12 @@ async function takeoverOwnedTab(binding) {
       run.generation !== binding.generation || run.current?.phase !== 'product' ||
       run.current.url !== binding.expectedUrl ||
       run.current.binding?.documentId !== binding.documentId ||
+      run.current.binding?.documentUrl !== binding.documentUrl ||
       run.current.binding.tabId !== binding.tabId) {
     throw new Error('take-over run/tab binding changed');
   }
   const tab = await chromeCallback(callback => chrome.tabs.get(binding.tabId, callback));
-  if (!takeoverSameUrl(tab?.url, binding.expectedUrl)) {
+  if (!takeoverSameUrl(tab?.url, binding.documentUrl || binding.expectedUrl)) {
     throw new Error('take-over tab URL changed');
   }
   return tab;
@@ -109,7 +106,7 @@ const takeoverIo = {
     setTimeout(() => { void tickAfterSettingsReady().catch(console.error); }, Math.max(0, when - Date.now()));
   },
   clearAlarm: async () => chrome.alarms.clear(TAKEOVER_ALARM),
-  load: async url => {
+  load: async (url, options = {}) => {
     const old = await chromeCallback(callback => chrome.storage.local.get('catalogTakeoverTabId', callback));
     let tab = null;
     if (Number.isInteger(old.catalogTakeoverTabId)) {
@@ -134,7 +131,8 @@ const takeoverIo = {
     if (completed.url && new URL(completed.url).hostname !== run.domain)
       return {status: 0, error: 'redirected outside configured site'};
     if ([404, 410].includes(status)) return {status};
-    const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect'});
+    const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect', mode: run.mode || 'capture',
+      expect: options.expect || null});
     return {...reply.page, tabId: tab.id, status};
   },
   capture: async (url, scope, binding) => {
@@ -143,7 +141,7 @@ const takeoverIo = {
     const reply = await takeoverMessage(binding.tabId, {action: 'takeoverCapture', scope, binding});
     await takeoverOwnedTab(binding);
     const current = await takeoverMessage(binding.tabId, {action: 'takeoverDocumentCheck'});
-    if (current.documentId !== binding.documentId || !takeoverSameUrl(current.url, url)) {
+    if (current.documentId !== binding.documentId || !takeoverSameUrl(current.url, binding.documentUrl || url)) {
       throw new Error('take-over document changed during capture');
     }
     return reply.result;
@@ -175,7 +173,63 @@ function queueTakeoverControl(action) {
   takeoverControlTail = result.then(() => {}, () => {});
   return result;
 }
+// A browser-session reservation survives SW suspension and panel recreation.
+// There is one owner-driven feed at a time; no background feed scheduler.
+async function readActiveFeed() {
+  return (await chromeCallback(cb => chrome.storage.session.get('activeShopifyFeed', cb))).activeShopifyFeed;
+}
+function clearFeedForTab(tabId) {
+  void queueTakeoverControl(async () => {
+    if ((await readActiveFeed())?.tabId === tabId)
+      await chromeCallback(cb => chrome.storage.session.remove('activeShopifyFeed', cb));
+  }).catch(console.error);
+}
+chrome.tabs.onRemoved.addListener(clearFeedForTab);
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === 'loading') clearFeedForTab(tabId);
+});
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Probe unsaved options in the same worker context as real captures.
+  if (message.action === 'testReceiverConnection') {
+    if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('settings.html')) return false;
+    globalThis.PageImageSaverHelpers.testReceiverConnection(message.receiver, {
+      origin: `chrome-extension://${chrome.runtime.id}`
+    }).then(sendResponse, () => sendResponse({success: false, message: 'Receiver test failed.'}));
+    return true;
+  }
+
+  if (['shopifyFeedAcquire', 'shopifyFeedRelease'].includes(message.action)) {
+    queueTakeoverControl(async () => {
+      if (!sender.tab || !sender.documentId) throw new Error('Feed requires a browser tab document');
+      const active = await readActiveFeed();
+      if (message.action === 'shopifyFeedRelease') {
+        if (active?.tabId === sender.tab.id && active.documentId === sender.documentId)
+          await chromeCallback(cb => chrome.storage.session.remove('activeShopifyFeed', cb));
+        return;
+      }
+      if (active) throw new Error('Shopify feed already active; wait or close its tab');
+      if ((await takeoverRunner.read())?.status === 'running') throw new Error('Pause take-over before saving the feed');
+      await chromeCallback(cb => chrome.storage.session.set({activeShopifyFeed: {
+        tabId: sender.tab.id, documentId: sender.documentId
+      }}, cb));
+    }).then(() => sendResponse({success: true}))
+      .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+    return true;
+  }
+  if (message.action === 'saveShopifyFeedDownload') {
+    (async () => {
+      const report = message.report;
+      if (!sender.tab || new URL(sender.url || sender.tab.url).hostname !== report?.host ||
+          report.version !== 1 || !Array.isArray(report.pages) || !report.pages.length ||
+          report.pages.length !== report.fetched?.length) throw new Error('Invalid tab feed export');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `${report.host}-products-feed-${stamp}.json`;
+      const dataUrl = await blobToDataUrl(new Blob([JSON.stringify(report, null, 2)], {type: 'application/json'}));
+      await globalThis.PageImageSaverHelpers.saveCaptureDownload(chrome, dataUrl, filename);
+      sendResponse({success: true});
+    })().catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+    return true;
+  }
   if (message.action === 'autoCaptureAllowed') {
     assertAutoCaptureAllowed(sender)
       .then(() => sendResponse({success: true, allowed: true}))
@@ -183,12 +237,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (!['takeoverPreview', 'takeoverStart', 'takeoverPause', 'takeoverStop',
-    'takeoverResume', 'takeoverStatus', 'takeoverExport'].includes(message.action)) return false;
+    'takeoverResume', 'takeoverStatus', 'takeoverExport', 'takeoverImportDiscovery'].includes(message.action)) return false;
   const handle = async () => {
-    if (message.action === 'takeoverPreview') {
+    if (['takeoverStart', 'takeoverResume'].includes(message.action) && await readActiveFeed())
+      throw new Error('Shopify feed active; wait for it to finish before take-over');
+    if (['takeoverPreview', 'takeoverImportDiscovery'].includes(message.action)) {
       if (!sender.tab || new URL(sender.tab.url).hostname !== message.config?.domain)
         throw new Error('preview must come from the configured site tab');
-      return takeoverRunner.preview(message.config, message.page);
+      if (message.action === 'takeoverImportDiscovery') {
+        if (message.reuse !== true && !Array.isArray(message.sources)) throw new Error('discovery sources are missing');
+        return takeoverRunner.importDiscovery(message.config, message.reuse === true ? undefined : message.sources);
+      }
+      return takeoverRunner.preview(message.config, message.page, message.mode);
     }
     if (message.action === 'takeoverStatus') return takeoverRunner.read();
     if (message.domain) {
@@ -198,7 +258,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.action === 'takeoverExport') {
       const run = await takeoverRunner.read();
-      const report = globalThis.PageImageSaverTakeover.exportTakeoverReport(run);
+      const report = globalThis.PageImageSaverTakeover.exportTakeoverReport(run, {
+        exportedUtc: new Date().toISOString(), extensionVersion: chrome.runtime.getManifest().version
+      });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `PageImageSaver/catalog-runs/${run.domain}/${stamp}-run.json`;
       const dataUrl = await blobToDataUrl(new Blob([JSON.stringify(report, null, 2)],
@@ -215,7 +277,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return run;
     }
     await requireSettingsReady();
-    if (CONFIG.receiver?.enabled !== true) {
+    const preview = await takeoverRunner.read();
+    if (message.mode && message.mode !== (preview?.mode || 'capture'))
+      throw new Error('Please preview the selected mode before Take over.');
+    if (!['discovery', 'capture-discovery'].includes(preview?.mode) && CONFIG.receiver?.enabled !== true) {
       throw new Error('Configure the local receiver before Take over; verified skips require it.');
     }
     const run = await takeoverRunner.start();
@@ -268,14 +333,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const binding = message.runBinding;
       const identity = message.payload?.identity;
       if (sender.tab?.id !== binding.tabId ||
-          !takeoverSameUrl(sender.url || sender.tab?.url, binding.expectedUrl) ||
+          (!takeoverSameUrl(sender.url || sender.tab?.url, binding.documentUrl || binding.expectedUrl) &&
+           !takeoverSameUrl(sender.url || sender.tab?.url, binding.expectedUrl)) ||
           identity?.domain !== new URL(binding.expectedUrl).hostname ||
           identity?.color_key !== 'url' ||
           !takeoverSameUrl(identity.product_url, binding.expectedUrl)) {
         throw new Error('take-over capture sender or identity mismatch');
       }
       await takeoverOwnedTab(binding);
-      if (CONFIG.receiver?.enabled !== true) throw new Error('take-over receiver is not configured');
+      if (CONFIG.receiver?.enabled !== true && (await takeoverIo.read())?.mode !== 'capture-discovery')
+        throw new Error('take-over receiver is not configured');
     }
     return CONFIG.receiver?.enabled === true
       ? helpers.captureWithReceiver(message.payload, CONFIG.receiver, {
@@ -1133,6 +1200,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Process images in controlled batches
 async function processImagesInBatches(images, sourceInfo, tabId) {
+  images = globalThis.PageImageSaverHelpers.dedupeManualImages(images, sourceInfo?.url);
   const results = [];
   const batchSize = CONFIG.maxConcurrentUploads;
   let totalCompleted = 0;
@@ -1490,6 +1558,10 @@ function getFilename(url, contentType) {
       
       // If filename has a valid extension, use it
       if (filename && filename.includes('.')) {
+        // The proxy may encode PNG/WebP bytes behind a .jpg URL.
+        const mime = (contentType || '').split(';')[0].trim().toLowerCase();
+        const knownImage = /^image\/(jpeg|png|gif|webp|avif|svg\+xml|bmp|tiff)$/.test(mime);
+        if (knownImage) filename = filename.slice(0, filename.lastIndexOf('.')) + getExtensionFromContentType(mime);
         const sanitized = sanitizeFilename(filename);
         debugLog(`Using sanitized original filename: "${sanitized}"`);
         return sanitized;
@@ -1593,6 +1665,7 @@ function getExtensionFromContentType(contentType) {
   debugLog(`Getting file extension for content type: ${contentType}`);
   
   if (!contentType) return '.jpg';
+  contentType = contentType.split(';')[0].trim().toLowerCase();
   
   if (contentType.includes('mpegurl') || contentType.includes('m3u8')) {
     return '.m3u8';
@@ -1603,6 +1676,7 @@ function getExtensionFromContentType(contentType) {
     'image/png': '.png',
     'image/gif': '.gif',
     'image/webp': '.webp',
+    'image/avif': '.avif',
     'image/svg+xml': '.svg',
     'image/bmp': '.bmp',
     'image/tiff': '.tiff',
@@ -1641,7 +1715,7 @@ async function saveToDownloads(blob, filename, domain) {
 
   const dataUrl = await blobToDataUrl(blob);
   const savedPath = await globalThis.PageImageSaverHelpers.saveCaptureDownload(
-    chrome, dataUrl, localPath, 120000, {allowUniquified: true});
+    chrome, dataUrl, localPath, 120000, {conflictAction: 'overwrite'});
   return {success: true, type: 'local', fullPath: savedPath};
 }
 

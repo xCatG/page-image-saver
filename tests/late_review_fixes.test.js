@@ -111,14 +111,14 @@ test('legacy image save rejects an interrupted download after its ID callback', 
   await assert.rejects(pending, /FILE_FAILED/);
 });
 
-test('legacy single-file save reports a uniquified terminal filename', async () => {
+test('manual overwrite rejects an unexpected uniquified terminal filename', async () => {
   const bridge = legacyDownloadBridge('Gold Evidence/shop.example.test/one (1).jpg');
   const pending = bridge.save();
+  const rejected = assert.rejects(pending, /filename mismatch/);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(bridge.events.length, 1);
   bridge.events[0]({id: 7, state: {current: 'complete'}});
-  const result = await pending;
-  assert.equal(result.fullPath, 'Gold Evidence/shop.example.test/one (1).jpg');
+  await rejected;
 });
 
 test('renamed image and sidecar with different stems are reported as incomplete', async () => {

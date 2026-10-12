@@ -92,6 +92,7 @@ test('processScreenshot saves locally when cloud storage is invalid', async () =
       commands: { onCommand: chromeEvent() },
       scripting: { executeScript: () => Promise.resolve([]) },
       tabs: {
+        onRemoved: {addListener() {}}, onUpdated: {addListener() {}},
         create: tab => openedTabs.push(tab),
         sendMessage() {},
         query() {},
@@ -193,6 +194,7 @@ test('selected image reports incomplete evidence when its JSON sidecar download 
       commands: { onCommand: chromeEvent() },
       scripting: { executeScript: () => Promise.resolve([]) },
       tabs: {
+        onRemoved: {addListener() {}}, onUpdated: {addListener() {}},
         create() {}, query() {}, captureVisibleTab() {},
         sendMessage: (_tabId, message, callback) => {
           if (message.action === 'uploadComplete') completionMessages.push(message);
