@@ -863,3 +863,12 @@ for (const phase of ['inspection', 'capture']) test(`unavailable choices at ${ph
   assert.ok(r.memory.run.products.every(p => p.reason === reason));
   assert.equal(r.captureCalls.length, 0);
 });
+
+test('PDP-only VDV config previews products but refuses unevidenced listing discovery', async () => {
+  const config = require('../site_config/www.primadonna.com.json');
+  const url = 'https://www.primadonna.com/en-us/p/primadonna-bra-0163490WBL';
+  const r=rig({});
+  const run=await r.runner().preview(config,{kind:'product',url,product:{name:'Bra'},colorLinks:[],imageCount:3});
+  assert.equal(run.previews[0].imageCount,3);
+  await assert.rejects(r.runner().preview(config,{kind:'listing',url,products:[]},'discovery'),/saved listing evidence/i);
+});

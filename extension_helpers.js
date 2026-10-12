@@ -882,6 +882,38 @@
     return [...urls];
   }
 
+  function vandeveldeProduct(data, pageUrl) {
+    const url = new URL(pageUrl);
+    const page = data?.props?.pageProps;
+    const product = page?.product;
+    const fail = reason => { throw new Error(`VDV product: ${reason}`); };
+    if (!['www.primadonna.com', 'www.mariejo.com'].includes(url.hostname) ||
+        url.protocol !== 'https:' || url.port || url.username || url.password ||
+        page?.locale !== 'en-us' || !product || typeof product !== 'object')
+      fail('missing US product data');
+    if (!product.id || !product.slugs?.en || page.slug !== product.slugs.en ||
+        url.pathname !== `/en-us/p/${product.slugs.en}` || !product.slugs.en.endsWith(`-${product.id}`))
+      fail('URL and Next data identity differ; reload this product page');
+    const price = product.retailPrice;
+    const amount = price?.discountedPrice ?? price?.price;
+    if (price?.currency !== 'USD' || typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0)
+      fail('missing USD price');
+    if (![product.name, product.commercialColor, product.styleCode].every(v => typeof v === 'string' && v.trim()))
+      fail('missing name, colour or SKU');
+    if (!Array.isArray(product.media) || !product.media.length) fail('missing primary gallery');
+    const images = product.media.map(item => {
+      let image;
+      try { image = new URL(item.url); } catch (_) { fail('invalid media URL'); }
+      if (!['images.ctfassets.net', 'media.lingeriestyling.com'].includes(image.hostname) ||
+          image.protocol !== 'https:' || image.port || image.username || image.password || image.hash)
+        fail('invalid media host');
+      return item.url; // Preserve the original URL including any evidenced query parameters.
+    });
+    return {facts: {name: product.name, sku: product.styleCode, product_id: product.id,
+      color: product.commercialColor, offers: {price: String(amount), currency: 'USD'},
+      category: [product.rootCategory, product.category].filter(Boolean).join(' / ')}, images};
+  }
+
   function liseCharmelListingProducts(cards) {
     const products = new Map();
     for (const card of cards) {
@@ -929,6 +961,7 @@
   const helpers = {
     liseCharmelGallery,
     liseCharmelListingProducts,
+    vandeveldeProduct,
     listingResultTotal,
     comparableUrl, sameDocumentUrl,
     victoriasSecretImage, victoriasSecretSameProductChoice, victoriasSecretUnavailableChoice,

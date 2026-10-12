@@ -260,6 +260,37 @@ class SavedPageFixtures(unittest.TestCase):
         page.add_script_tag(content=self.extractor)
         return page
 
+    def test_vdv_saved_colour_pdps_preserve_facts_and_full_gallery(self):
+        cases = json.loads((FIXTURES / 'vdv-expected.json').read_text())
+        for row in cases:
+            with self.subTest(brand=row['brand'], kind=row['kind']):
+                host = f"www.{row['brand']}.com"
+                config = json.loads(source(f'site_config/{host}.json'))
+                page = self.open_fixture(host, row['fixture'])
+                try:
+                    page.evaluate("url => history.replaceState({}, '', url)", row['url'])
+                    facts = page.evaluate('capturePageProduct()')
+                    self.assertEqual({k:facts[k] for k in ['name','sku','product_id','color']},
+                        {k:row[k] for k in ['name','sku','product_id','color']})
+                    self.assertEqual(facts['offers'], {'price':str(row['price']), 'currency':'USD'})
+                    self.assertEqual(page.evaluate("c => captureGallery(c, 'site')", config), row['images'])
+                    self.assertTrue(page.evaluate('c => captureProductSeen(c)', config))
+                    content = source('content_script.js')
+                    page.add_script_tag(content='const takeoverDocumentId="fixture";' + content[
+                        content.index('function takeoverCategory()'):content.index('// A site must be explicitly enabled')])
+                    inspected = page.evaluate("c => inspectTakeoverPage(c, 'capture-discovery', 'product')", config)
+                    self.assertIn('lingerie', inspected['product']['category'])
+                    self.assertEqual(inspected['imageCount'],len(row['images']))
+                    # A same-tab SPA colour change must not capture stale embedded Next data.
+                    page.evaluate("history.replaceState({}, '', '/en-us/p/other-colour-OTHER')")
+                    error = page.evaluate("""c => { try {captureGallery(c, 'site'); return 'accepted';}
+                        catch(e) {return e.message;} }""", config)
+                    self.assertIn('identity differ',error)
+                    page.evaluate("history.replaceState({}, '', '/en-us/lingerie')")
+                    self.assertFalse(page.evaluate("c => captureProductSeen(c, {product_id:'cross-sell'})", config))
+                finally:
+                    page.close()
+
     def test_lise_numbered_listing_discovery_reads_real_totals(self):
         config = json.loads(source("site_config/www.lisecharmel.com.json"))
         for suffix, count, next_url in [("first", 24, "https://www.lisecharmel.com/lc_us_en/lingerie.html?p=2"), ("last", 9, None)]:
