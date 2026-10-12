@@ -1,0 +1,27 @@
+{
+  "domain": "www.lisecharmel.com",
+  "platform": "magento",
+  "locale": "en-US",
+  "market": "us",
+  "currency": "USD",
+  "colorVariantStrategy": "separate-url",
+  "listing": {
+    "productLinkSelector": "a.product-item-link[href*=\"/lc_us_en/\"]",
+    "pagination": {
+      "type": "numbered",
+      "nextSelector": "a.action.next"
+    },
+    "endCheck": {
+      "type": "result-total",
+      "selector": "#toolbar-amount"
+    }
+  },
+  "product": {
+    "pageSelector": "form#product_addtocart_form",
+    "colorLinkSelector": ".product-colors .colors-container .color-item a",
+    "allImagesSelector": "[data-gallery-role=\"gallery-placeholder\"]",
+    "renditionResolver": "lisecharmel-magento",
+    "lazyLoad": false
+  },
+  "notes": "US-English owner-browser capture only. Read primary mage/gallery/gallery init data.full verbatim; fail closed if missing. Microdata supplies name, USD price, SKU, Magento id and current-colour alt. Colours have separate URLs; no size or swatch clicks. Discover lingerie.html pages with visible result-total reconciliation; ambiguous/non-lingerie products remain under existing scope review. No Linux site requests."
+}

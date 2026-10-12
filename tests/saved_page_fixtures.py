@@ -241,7 +241,9 @@ class SavedPageFixtures(unittest.TestCase):
         content = source("content_script.js")
         start = content.index("function captureJsonLd()")
         end = content.index("function captureSwatchColor()", start)
-        cls.extractor = content[start:end]
+        cls.extractor = (content[start:end] +
+            content[content.index("function captureCanonicalUrl("):content.index("function capturePageHtml()")] +
+            content[content.index("function takeoverUnavailableChoice("):content.index("function assertTakeoverBinding(")])
         cls.helpers = source("extension_helpers.js")
 
     @classmethod
@@ -257,6 +259,61 @@ class SavedPageFixtures(unittest.TestCase):
         page.add_script_tag(content=self.helpers)
         page.add_script_tag(content=self.extractor)
         return page
+
+    def test_lise_numbered_listing_discovery_reads_real_totals(self):
+        config = json.loads(source("site_config/www.lisecharmel.com.json"))
+        for suffix, count, next_url in [("first", 24, "https://www.lisecharmel.com/lc_us_en/lingerie.html?p=2"), ("last", 9, None)]:
+            page = self.open_fixture(config["domain"], f"lisecharmel-listing-{suffix}.html")
+            try:
+                content = source("content_script.js")
+                inspector = content[content.index("function takeoverCategory()"):content.index("// A site must be explicitly enabled")]
+                page.add_script_tag(content='const takeoverDocumentId="fixture";' + inspector)
+                result = page.evaluate("c => inspectTakeoverPage(c, 'discovery', 'listing')", config)
+                self.assertEqual(len(result["products"]), count)
+                self.assertEqual(result["next"], next_url)
+                self.assertEqual(result["end"], {"type": "result-total", "total": 537})
+                self.assertTrue(all(u.startswith("https://www.lisecharmel.com/lc_us_en/") for u in result["products"]))
+            finally:
+                page.close()
+
+    def test_lise_early_observer_retains_init_removed_in_same_task(self):
+        page = self.open_fixture("www.lisecharmel.com", "lisecharmel-bra-magento.html")
+        try:
+            page.evaluate("window.initText=document.querySelector('script[type=\"text/x-magento-init\"]').textContent;document.querySelectorAll('script[type=\"text/x-magento-init\"]').forEach(n=>n.remove())")
+            page.add_script_tag(content=source("lisecharmel_gallery.js"))
+            page.evaluate("const s=document.createElement('script');s.type='text/x-magento-init';s.textContent=window.initText;document.body.append(s);s.remove()")
+            self.assertEqual(page.evaluate("PageImageSaverLiseGallery.length"), 1)
+        finally:
+            page.close()
+
+    def test_lise_magento_originals_and_colour_specific_facts(self):
+        config = json.loads(source("site_config/www.lisecharmel.com.json"))
+        cases = [("bra", "1/2 pad cup", "231451", "ACH7015_12087", "Deesse Aurore", "202", 8),
+                 ("brief", "Fancy Brief", "235803", "ACM0214_15093", "Vert Parme", "132", 6),
+                 ("body", "Bodysuit", "216181", "ALJ5249_18082", "Ombre Rouge", "253", 8)]
+        for kind, name, product_id, sku, color, price, count in cases:
+            with self.subTest(kind=kind):
+                page = self.open_fixture("www.lisecharmel.com", f"lisecharmel-{kind}-magento.html")
+                page.evaluate("history.replaceState({}, '', document.querySelector('link[rel=canonical]').href)")
+                try:
+                    result = page.evaluate("c => ({facts: capturePageProduct(), seen: captureProductSeen(c), gallery: captureGallery(c, 'site')})", config)
+                    self.assertTrue(result["seen"])
+                    self.assertEqual(result["facts"]["sku"], sku)
+                    self.assertEqual(result["facts"]["color"], color)
+                    self.assertEqual(result["facts"]["offers"], {"price": price, "currency": "USD"})
+                    self.assertEqual(result["facts"]["product_id"], product_id)
+                    self.assertEqual(result["facts"]["name"], name)
+                    self.assertEqual(len(result["gallery"]), count)
+                    self.assertTrue(all("height=&width=" in u for u in result["gallery"]))
+                    # Magento consumes init scripts during hydration: retain their original evidence.
+                    page.add_script_tag(content=source("lisecharmel_gallery.js"))
+                    page.evaluate("document.querySelectorAll('script[type=\"text/x-magento-init\"]').forEach(n=>n.remove())")
+                    self.assertEqual(page.evaluate("c => captureGallery(c, 'site')", config), result["gallery"])
+                    page.evaluate("globalThis.PageImageSaverLiseGallery = []")
+                    with self.assertRaisesRegex(Exception, "gallery"):
+                        page.evaluate("c => captureGallery(c, 'site')", config)
+                finally:
+                    page.close()
 
     def test_lise_saved_microdata_and_picture_gallery(self):
         config = json.loads(source("site_config/lisecharmel.com.json"))

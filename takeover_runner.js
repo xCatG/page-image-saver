@@ -42,12 +42,14 @@
       .replace(/\/+$/, '');
   }
 
-  function classifyTakeoverScope(product) {
+  function classifyTakeoverScope(product, config = null) {
     const name = String(product?.name || '').trim();
     const category = String(product?.category || '').trim();
     const evidence = category.toLowerCase();
     const title = name.toLowerCase();
-    const excluded = /\b(swimwear|swimsuits?|swim|bikini|maillot de bain|sleepwear|nightwear|nightdress(?:es)?|pyjamas?|pajamas?|menswear|mens?|men's|men’s|ready.to.wear|apparel)\b/i.test(`${evidence} ${title}`);
+    const accessory = config?.domain === 'www.lisecharmel.com' &&
+      /\b(accessories|jewelry|jewellery|masks?|stockings?)\b/i.test(`${evidence} ${title}`);
+    const excluded = accessory || /\b(swimwear|swimsuits?|swim|bikini|maillot de bain|sleepwear|nightwear|nightdress(?:es)?|pyjamas?|pajamas?|menswear|mens?|men's|men’s|ready.to.wear|apparel)\b/i.test(`${evidence} ${title}`);
     const intimate = /\b(lingerie|bras?|sports? bras?|panties|briefs|thongs|corsets?|bodies|bodysuits?|culottes?|soutiens?.gorge)\b/i.test(`${evidence} ${title}`);
     if (excluded && !intimate) return {decision: 'exclude', reason: `product/category evidence: ${category || name}`};
     if (excluded) return {decision: 'review', reason: `mixed category and product evidence: ${category}; ${name}`};
@@ -126,7 +128,7 @@
         next: page.next || null, end: page.end || null, product: page.product || null,
         imageCount: page.kind === 'product' ? page.imageCount : undefined,
         colorLinks: page.kind === 'product' ? (page.colorLinks || []).length : undefined,
-        scope: page.kind === 'product' ? classifyTakeoverScope(page.product) : undefined};
+        scope: page.kind === 'product' ? classifyTakeoverScope(page.product, config) : undefined};
       const run = {version: KEY_VERSION, generation: (existing?.generation || 0) + 1,
         status: 'preview', domain, mode, locale: page.locale || null, config, previews: [entry],
         preview: {endCheckConfigured: !!config.listing.endCheck,
@@ -455,7 +457,7 @@
             run.products.push({url: link, status: 'pending'}); known.add(link);
           }
         }
-        const scope = classifyTakeoverScope(page.product);
+        const scope = classifyTakeoverScope(page.product, run.config);
         item.scope = scope;
         if (scope.decision === 'exclude' && run.mode !== 'capture-discovery') {
           item.status = 'excluded'; item.reason = scope.reason;

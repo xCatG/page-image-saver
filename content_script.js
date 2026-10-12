@@ -2547,6 +2547,12 @@ function captureProductSeen(config, product = capturePageProduct()) {
 }
 
 function captureGallery(config, mode) {
+  if (mode === 'site' && config?.product?.renditionResolver === 'lisecharmel-magento') {
+    return globalThis.PageImageSaverHelpers.liseCharmelGallery(
+      [...new Set([...(globalThis.PageImageSaverLiseGallery || []),
+        ...Array.from(document.querySelectorAll('script[type="text/x-magento-init"]'), node => node.textContent)])],
+      window.location.href);
+  }
   if (mode === 'site' && config?.product?.renditionResolver === 'victoriassecret' &&
       window.location.hostname === 'www.victoriassecret.com') {
     const candidates = document.documentElement.innerHTML.match(/(?:https:\/\/)?www\.victoriassecret\.com\/p\/\d+x\d+\/[^\s"<>\\]+/g) || [];
@@ -2833,15 +2839,17 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   const selector = config.listing?.productLinkSelector;
   const nextSelector = config.listing?.pagination?.nextSelector;
   if (!selector || !nextSelector) throw new Error('listing selectors are missing');
+  const listingProductUrl = value => config.domain === 'www.lisecharmel.com' ?
+    globalThis.PageImageSaverHelpers.liseCharmelProductUrl(value) : value;
   let products = [];
   for (let attempt = 0; attempt < 20; attempt++) {
-    products = Array.from(document.querySelectorAll(selector), node => node.href).filter(Boolean);
+    products = Array.from(document.querySelectorAll(selector), node => node.href).filter(Boolean).map(listingProductUrl);
     if (products.length) break;
     await new Promise(resolve => setTimeout(resolve, 200));
   }
   const next = document.querySelector(nextSelector)?.href || null;
   const cards = mode === 'discovery' ? Array.from(document.querySelectorAll(selector), node => ({
-    url: node.href,
+    url: node.href ? listingProductUrl(node.href) : null,
     card_text: (node.closest('.product-card, [data-testid="ProductCard"], article') || node)
       .textContent.replace(/\s+/g, ' ').trim()
   })).filter(card => card.url) : undefined;
@@ -2854,8 +2862,8 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
     if (match) end = {type: 'page-count', current: Number(match[1]), total: Number(match[2])};
   }
   if (check?.type === 'result-total') {
-    const match = node?.textContent?.match(/\b(\d+)\s+(?:results?|items?|products?)\b/i);
-    if (match) end = {type: 'result-total', total: Number(match[1])};
+    const total = globalThis.PageImageSaverHelpers.listingResultTotal(node?.textContent || '');
+    if (total !== null) end = {type: 'result-total', total};
   }
   return {kind: 'listing', url: window.location.href,
     documentId: takeoverDocumentId, products, cards, locale: document.documentElement.lang || null, next, end};

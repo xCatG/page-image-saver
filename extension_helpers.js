@@ -850,6 +850,56 @@
     return null;
   }
 
+  // Read only the primary Magento gallery, never recommendation or swatch data.
+  function liseCharmelGallery(scripts, pageUrl) {
+    const base = new URL(pageUrl);
+    if (base.origin !== 'https://www.lisecharmel.com' || !base.pathname.startsWith('/lc_us_en/'))
+      throw new Error('LC gallery: wrong storefront');
+    const galleries = [];
+    for (const text of scripts) {
+      let data;
+      try { data = JSON.parse(text); }
+      catch (_) {
+        if (text.includes('mage/gallery/gallery')) throw new Error('LC gallery: malformed init');
+        continue;
+      }
+      const gallery = data?.['[data-gallery-role=gallery-placeholder]']?.['mage/gallery/gallery'];
+      if (gallery) galleries.push(gallery);
+    }
+    if (galleries.length !== 1 || !Array.isArray(galleries[0].data))
+      throw new Error('LC gallery: missing or ambiguous primary init');
+    const urls = new Set();
+    for (const image of galleries[0].data) {
+      if (image.type && image.type !== 'image') continue;
+      let url;
+      try { url = new URL(image.full); } catch (_) { throw new Error('LC gallery: missing full URL'); }
+      if (url.origin !== base.origin || url.username || url.password || url.hash ||
+          !url.pathname.startsWith('/media/catalog/product/'))
+        throw new Error('LC gallery: invalid full URL');
+      urls.add(url.href); // Preserve the evidenced full rendition, including its query.
+    }
+    if (!urls.size) throw new Error('LC gallery: no primary images');
+    return [...urls];
+  }
+
+  function liseCharmelProductUrl(raw) {
+    const url = new URL(raw);
+    const alias = url.pathname.match(/^\/lc_us_en\/catalog\/product\/view\/id\/\d+\/s\/([a-z0-9-]+-[a-z0-9]+-\d+)\/category\/\d+\/?$/i);
+    if (url.origin === 'https://www.lisecharmel.com' && !url.username && !url.password && alias)
+      url.pathname = `/lc_us_en/${alias[1]}.html`;
+    return url.href;
+  }
+
+  function listingResultTotal(text) {
+    const range = String(text).match(/^\s*Items\s+(\d+)\s*-\s*(\d+)\s+of\s+(\d+)\s*$/i);
+    if (range) {
+      const [start, end, total] = range.slice(1).map(Number);
+      return Number.isSafeInteger(total) && start >= 1 && start <= end && end <= total ? total : null;
+    }
+    const simple = String(text).match(/\b(\d+)\s+(?:results?|items?|products?)\b/i);
+    return simple && Number.isSafeInteger(Number(simple[1])) ? Number(simple[1]) : null;
+  }
+
   function victoriasSecretImage(raw, candidates = []) {
     const base = 'https://www.victoriassecret.com';
     const input = new URL(raw, base);
@@ -869,6 +919,9 @@
   }
 
   const helpers = {
+    liseCharmelGallery,
+    liseCharmelProductUrl,
+    listingResultTotal,
     comparableUrl, sameDocumentUrl,
     victoriasSecretImage, victoriasSecretSameProductChoice, victoriasSecretUnavailableChoice,
     takeoverStatusText,
