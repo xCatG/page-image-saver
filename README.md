@@ -167,3 +167,7 @@ Included in this repository is a `test-page.html` file that contains various typ
 ## License
 
 MIT
+
+### Lise Charmel alias retry (1.0.12)
+
+Discovery preserves saved listing links and deduplicates Magento category aliases by product id. A direct product link is preferred only when the listing actually contains it for that id; no `.html` URL is synthesized. Category suffixes remain intact. Capture binding stays strict: unexpected redirects or canonical rewrites pause with a URL mismatch instead of capturing another identity. Use the owner browser only; no Linux site requests. After updating/reloading 1.0.12, import the owner retry discovery file and capture its 62 products. If a URL mismatch pauses the run, save that PDP for offline diagnosis rather than weakening binding.

@@ -6,7 +6,7 @@
   "currency": "USD",
   "colorVariantStrategy": "separate-url",
   "listing": {
-    "productLinkSelector": "a.product-item-link[href*=\"/lc_us_en/\"]",
+    "productLinkSelector": "a.product-item-link[href*=\"/lc_us_en/\"], a.product-item-photo[href*=\"/lc_us_en/\"]",
     "pagination": {
       "type": "numbered",
       "nextSelector": "a.action.next"

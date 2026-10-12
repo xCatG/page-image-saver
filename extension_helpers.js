@@ -882,12 +882,20 @@
     return [...urls];
   }
 
-  function liseCharmelProductUrl(raw) {
-    const url = new URL(raw);
-    const alias = url.pathname.match(/^\/lc_us_en\/catalog\/product\/view\/id\/\d+\/s\/([a-z0-9-]+-[a-z0-9]+-\d+)\/category\/\d+\/?$/i);
-    if (url.origin === 'https://www.lisecharmel.com' && !url.username && !url.password && alias)
-      url.pathname = `/lc_us_en/${alias[1]}.html`;
-    return url.href;
+  function liseCharmelListingProducts(cards) {
+    const products = new Map();
+    for (const card of cards) {
+      const url = new URL(card.url);
+      const local = url.origin === 'https://www.lisecharmel.com' && !url.username && !url.password;
+      const alias = local && url.pathname.match(/^\/lc_us_en\/catalog\/product\/view\/id\/(\d+)\/s\/[^/]+\/(?:category\/\d+\/?)?$/);
+      const direct = local && /^\/lc_us_en\/[^/]+\.html$/.test(url.pathname);
+      const id = alias ? alias[1] : direct && /^\d+$/.test(card.product_id || '') ? card.product_id : null;
+      const key = id ? `id:${id}` : `url:${card.url}`;
+      const old = products.get(key);
+      // Never synthesize a route or trim its category: keep an actual listing link.
+      if (!old || (direct && !old.direct)) products.set(key, {card, direct});
+    }
+    return [...products.values()].map(({card}) => card);
   }
 
   function listingResultTotal(text) {
@@ -920,7 +928,7 @@
 
   const helpers = {
     liseCharmelGallery,
-    liseCharmelProductUrl,
+    liseCharmelListingProducts,
     listingResultTotal,
     comparableUrl, sameDocumentUrl,
     victoriasSecretImage, victoriasSecretSameProductChoice, victoriasSecretUnavailableChoice,

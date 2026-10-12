@@ -25,13 +25,25 @@ test('Magento listing totals preserve the total, not range endpoints; legacy tot
   assert.equal(listingResultTotal('Items 1-24'),null);
   assert.equal(listingResultTotal('Items 25-48 of 23'),null);
 });
-test('US Magento category aliases produce the colour-specific candidate URL without weakening capture binding', () => {
-  const normalize = require('../extension_helpers').liseCharmelProductUrl;
-  assert.equal(normalize('https://www.lisecharmel.com/lc_us_en/catalog/product/view/id/41637/s/3-parts-full-cup-soir-de-venise-noir-diamant-aca6103-8049/category/19/'),
-    'https://www.lisecharmel.com/lc_us_en/3-parts-full-cup-soir-de-venise-noir-diamant-aca6103-8049.html');
-  assert.equal(normalize(page), page);
-  const foreign = 'https://evil.test/lc_us_en/catalog/product/view/id/1/s/bra-aca6103-8049/category/19/';
-  assert.equal(normalize(foreign), foreign);
+const {liseCharmelListingProducts} = require('../extension_helpers');
+const alias = 'https://www.lisecharmel.com/lc_us_en/catalog/product/view/id/69666/s/non-wire-bra-sublime-en-dentelle-noir-ach6513-0005/category/13/';
+test('LC keeps an evidenced alias intact instead of inventing a slug URL', () => {
+  assert.deepEqual(liseCharmelListingProducts([{url:alias, product_id:'69666', card_text:'Non wire bra'}]),
+    [{url:alias, product_id:'69666', card_text:'Non wire bra'}]);
+});
+test('LC dedupes category aliases by id and prefers a direct link only when actually present', () => {
+  const direct = 'https://www.lisecharmel.com/lc_us_en/evidenced-bra.html';
+  const other = alias.replace('/69666/', '/69667/');
+  const rows = [{url:alias}, {url:other}, {url:alias.replace('/13/','/19/')},
+    {url:direct, product_id:'69666', card_text:'Bra'}];
+  assert.deepEqual(liseCharmelListingProducts(rows).map(x=>x.url), [direct,other]);
+  assert.deepEqual(liseCharmelListingProducts(rows.slice(0,3)).map(x=>x.url), [alias,other]);
+});
+test('LC does not conflate unrelated or foreign links by a claimed product id', () => {
+  const direct = 'https://www.lisecharmel.com/lc_us_en/evidenced-bra.html';
+  const foreign = 'https://other.test/lc_us_en/evidenced-bra.html';
+  assert.deepEqual(liseCharmelListingProducts([{url:alias},{url:foreign,product_id:'69666'},{url:direct}]).map(x=>x.url),
+    [alias,foreign,direct]);
 });
 test('LC accessory breadcrumbs cannot turn an out-of-scope item into approved lingerie', () => {
   const {classifyTakeoverScope} = require('../takeover_runner');
