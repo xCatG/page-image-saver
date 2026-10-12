@@ -276,6 +276,49 @@ class SavedPageFixtures(unittest.TestCase):
             finally:
                 page.close()
 
+    def test_lise_saved_alias_is_never_rewritten_to_a_nonexistent_slug(self):
+        config = json.loads(source("site_config/www.lisecharmel.com.json"))
+        page = self.open_fixture(config['domain'], 'lisecharmel-alias-listing.html')
+        try:
+            content = source('content_script.js')
+            page.add_script_tag(content='const takeoverDocumentId="fixture";' + content[
+                content.index('function takeoverCategory()'):content.index('// A site must be explicitly enabled')])
+            expected = 'https://www.lisecharmel.com/lc_us_en/catalog/product/view/id/69666/s/non-wire-bra-sublime-en-dentelle-noir-ach6513-0005/category/13/'
+            result = page.evaluate("c => inspectTakeoverPage(c, 'discovery', 'listing')", config)
+            self.assertEqual(result['products'], [expected])
+            self.assertEqual([c['url'] for c in result['cards']], [expected])
+            # A second category and a later direct URL for the same evidenced id.
+            page.evaluate("""url => {
+              const card = document.querySelector('li');
+              const duplicate = card.cloneNode(true); duplicate.querySelector('a.product-item-link').href = url.replace('/13/', '/19/');
+              document.querySelector('ol').append(duplicate);
+              const direct = card.cloneNode(true); direct.querySelector('a.product-item-photo').href = '/lc_us_en/linked-direct.html';
+              document.querySelector('ol').append(direct);
+            }""", expected)
+            result = page.evaluate("c => inspectTakeoverPage(c, 'discovery', 'listing')", config)
+            self.assertEqual(result['products'], ['https://www.lisecharmel.com/lc_us_en/linked-direct.html'])
+        finally:
+            page.close()
+
+    def test_lise_alias_binding_stays_exact_and_rejects_unknown_canonical_rewrites(self):
+        page = self.open_fixture('www.lisecharmel.com', 'lisecharmel-bra-magento.html')
+        alias = 'https://www.lisecharmel.com/lc_us_en/catalog/product/view/id/69666/s/non-wire-bra-sublime-en-dentelle-noir-ach6513-0005/category/13/'
+        try:
+            content = source('content_script.js')
+            page.add_script_tag(content='const takeoverDocumentId="fixture";' + content[
+                content.index('function captureCanonicalUrl('):content.index('function rescanCaptureImages(')])
+            page.evaluate("document.querySelectorAll('link[rel=canonical]').forEach(n => n.remove())")
+            page.evaluate("url => history.replaceState({}, '', url)", alias)
+            page.evaluate("url => assertTakeoverBinding({documentId:'fixture', expectedUrl:url})", alias)
+            # No canonical in the saved PDPs; an unexpected canonical must not grant a rewrite.
+            page.evaluate("""() => { const c = document.createElement('link'); c.rel='canonical';
+                c.href='/lc_us_en/non-wire-bra-sublime-en-dentelle-noir-ach6513-0005.html'; document.head.append(c); }""")
+            result = page.evaluate("""url => {try {assertTakeoverBinding({documentId:'fixture',expectedUrl:url}); return 'accepted';}
+                catch(e) {return e.message;} }""", alias)
+            self.assertIn('take-over document or product URL changed: canonical', result)
+        finally:
+            page.close()
+
     def test_lise_early_observer_retains_init_removed_in_same_task(self):
         page = self.open_fixture("www.lisecharmel.com", "lisecharmel-bra-magento.html")
         try:

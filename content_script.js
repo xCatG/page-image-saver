@@ -2839,20 +2839,21 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   const selector = config.listing?.productLinkSelector;
   const nextSelector = config.listing?.pagination?.nextSelector;
   if (!selector || !nextSelector) throw new Error('listing selectors are missing');
-  const listingProductUrl = value => config.domain === 'www.lisecharmel.com' ?
-    globalThis.PageImageSaverHelpers.liseCharmelProductUrl(value) : value;
-  let products = [];
+  let listingCards = [];
   for (let attempt = 0; attempt < 20; attempt++) {
-    products = Array.from(document.querySelectorAll(selector), node => node.href).filter(Boolean).map(listingProductUrl);
-    if (products.length) break;
+    listingCards = Array.from(document.querySelectorAll(selector), node => {
+      const card = node.closest('.product-item, .product-card, [data-testid="ProductCard"], article') || node;
+      return {url: node.href, card_text: card.textContent.replace(/\s+/g, ' ').trim(),
+        product_id: card.querySelector('[data-product-id]')?.getAttribute('data-product-id') || null};
+    }).filter(card => card.url);
+    if (listingCards.length) break;
     await new Promise(resolve => setTimeout(resolve, 200));
   }
+  if (config.domain === 'www.lisecharmel.com')
+    listingCards = globalThis.PageImageSaverHelpers.liseCharmelListingProducts(listingCards);
+  const products = listingCards.map(card => card.url);
   const next = document.querySelector(nextSelector)?.href || null;
-  const cards = mode === 'discovery' ? Array.from(document.querySelectorAll(selector), node => ({
-    url: node.href ? listingProductUrl(node.href) : null,
-    card_text: (node.closest('.product-card, [data-testid="ProductCard"], article') || node)
-      .textContent.replace(/\s+/g, ' ').trim()
-  })).filter(card => card.url) : undefined;
+  const cards = mode === 'discovery' ? listingCards : undefined;
   const check = config.listing?.endCheck;
   const node = check?.selector ? document.querySelector(check.selector) : null;
   let end = null;
