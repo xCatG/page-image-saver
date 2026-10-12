@@ -269,7 +269,9 @@ class SavedPageFixtures(unittest.TestCase):
                 page = self.open_fixture(host, row['fixture'])
                 try:
                     page.evaluate("url => history.replaceState({}, '', url)", row['url'])
-                    facts = page.evaluate('capturePageProduct()')
+                    evidence = page.evaluate('capturePageProductEvidence()')
+                    self.assertEqual(evidence['format'], 'page-image-saver-product-evidence/v1')
+                    facts = evidence['facts']
                     self.assertEqual({k:facts[k] for k in ['name','sku','product_id','color']},
                         {k:row[k] for k in ['name','sku','product_id','color']})
                     self.assertEqual(facts['offers'], {'price':str(row['price']), 'currency':'USD'})

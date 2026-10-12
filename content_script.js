@@ -2494,8 +2494,9 @@ function capturePageProductEvidence() {
     if (scripts.length !== 1) throw new Error('VDV product: missing or ambiguous Next data');
     const result = globalThis.PageImageSaverHelpers.vandeveldeProduct(
       JSON.parse(scripts[0].textContent), window.location.href);
-    return {facts: result.facts, fact_source: 'nextdata',
-      nextdata: {path: 'props.pageProps.product', product_id: result.facts.product_id}, jsonld: captureJsonLd()};
+    return {...globalThis.PageImageSaverHelpers.captureProductEvidence(captureJsonLd()),
+      facts: result.facts, fact_source: 'nextdata',
+      nextdata: {path: 'props.pageProps.product', product_id: result.facts.product_id}};
   }
   const readItem = selector => {
     const node = document.querySelector(selector);
