@@ -175,3 +175,26 @@ Discovery preserves saved listing links and deduplicates Magento category aliase
 ### PrimaDonna and Marie Jo (1.0.13)
 
 US-English owner-browser PDP capture is prepared for `www.primadonna.com` and `www.mariejo.com`. Import a saved fixed discovery queue, or preview a product page. Colours have separate `/en-us/p/` URLs; Next.js product data supplies the exact identity, USD facts and original gallery. Stale SPA colour data, non-US identity and unknown media hosts fail closed. Swim/nightwear/accessories stay under scope review/exclusion. Listing discovery is disabled pending saved pagination/total evidence. No Linux/automated site requests. See the companion lingerie_trends `docs/vandevelde-page-image-saver.md` runbook and the owner’s three-product smoke queues.
+
+### Shirohato Japan (1.0.14)
+
+`www.wakudoki.ne.jp` is the retailer source; carried brands (including HIMICO,
+Wing, Salute, Wacoal and Triumph) remain in the captured Product JSON-LD. The
+packaged config binds facts to the canonical JP PDP and requires JPY pricing.
+
+Each PDP holds a **gallery of all offered colors**. Capture uses one URL identity
+and unknown selected color; `separate-url` selects the existing queue/import
+policy, not a claim that Shirohato colors have separate URLs. There are no color
+or size clicks. Product evidence also records the gallery's color labels and the
+specification table's offered size text; these do not establish stock by size.
+Original main-slider `_LL.jpg` URLs are kept verbatim. Foreign images, thumbnails,
+missing originals and mismatched product identities stop capture.
+
+Discover from the owner's JP bra/category/brand listing. The config reads the
+visible `件` total, removes only the evidenced numeric `?bid=` brand-navigation
+query from discovered PDP links so they bind to their queryless canonicals, and follows the site's `pno` next link; completion requires the
+unique discovered URL count to equal the same displayed total on every page.
+The five saved pages establish pagination, not an exhaustive live catalog.
+Non-lingerie Japanese product evidence is excluded, and categories not evidenced
+by the saved pages remain review. See [fixture provenance](tests/fixtures/shirohato-README.md)
+for the offline audit and limitations. No Linux retailer or CDN fetch is needed.
