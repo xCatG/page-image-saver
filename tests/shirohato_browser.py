@@ -33,6 +33,8 @@ class ShirohatoBrowser(unittest.TestCase):
                     self.assertEqual(evidence['fact_source'], 'jsonld')
                     self.assertEqual(evidence['facts'], dict(name=row['name'],sku=row['product_id'],product_id=row['product_id'],color=None,offers=dict(price=row['price'],currency='JPY')))
                     self.assertEqual(evidence['jsonld'][0]['brand']['name'], row['brand'])
+                    self.assertEqual({k:evidence['microdata'].get(k) for k in ('sku','productID','url')},
+                        dict(sku=row['product_id'],productID=row['product_id'],url=row['url']))
                     self.assertEqual(evidence['microdata']['colors'], row['colors'])
                     self.assertEqual(evidence['microdata']['size'], row['size'])
                     self.assertEqual(page.evaluate("c => captureGallery(c,'site')", config), row['images'])
@@ -76,6 +78,12 @@ class ShirohatoBrowser(unittest.TestCase):
               const result = await captureCurrentProduct({manual:false,scopeOverride:{decision:'include',reason:'Offline JP bra fixture'}});
               return {files, completion:result.completion};
             }""", config)
+            product_file = next(data for name,data in result['files'].items() if name.endswith('/product.json'))
+            microdata = json.loads(bytes(product_file))['microdata']
+            self.assertEqual({k:microdata.get(k) for k in ('sku','productID','url')},
+                dict(sku='c6510226179ef',productID='c6510226179ef',url=url))
+            self.assertTrue(microdata['colors'])
+            self.assertTrue(microdata['size'])
             self.assertEqual(set(result['completion']['product']), {'name','sku','product_id','color','offers'})
             self.assertEqual(result['completion']['identity']['selected_color'], None)
             self.assertEqual(len(result['completion']['evidence']['images']), 14)

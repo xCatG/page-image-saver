@@ -23,7 +23,9 @@ No selected color is evidenced in the saved PDPs. All gallery color labels are
 retained as supplemental evidence. Size text is the offered specification range,
 not a selection or availability assertion. The capture envelope remains v1 with
 only name, sku, product_id, color and offers in its product object; carried brand
-and category remain in product.json JSON-LD, colors/size in microdata.
+and category remain in product.json JSON-LD, colors/size in microdata. Supplemental
+microdata also carries verified sku, productID and canonical url so the importer
+can independently bind these options to the selected product before retaining them.
 
 ## Saved PDP audit
 

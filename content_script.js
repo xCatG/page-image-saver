@@ -2491,15 +2491,17 @@ function capturePageProductEvidence() {
   if (window.location.hostname === 'www.wakudoki.ne.jp' &&
       window.location.pathname.startsWith('/productdetail/')) {
     const jsonld = captureJsonLd();
-    const facts = globalThis.PageImageSaverHelpers.shirohatoProduct(jsonld, window.location.href,
-      document.querySelector('link[rel="canonical"]')?.href);
+    const canonical = document.querySelector('link[rel="canonical"]')?.href;
+    const facts = globalThis.PageImageSaverHelpers.shirohatoProduct(jsonld, window.location.href, canonical);
     const colors = [...new Set(Array.from(document.querySelectorAll('#js-main-slider [data-variation-name1]'),
       node => node.getAttribute('data-variation-name1')).filter(Boolean))];
     const sizeRow = Array.from(document.querySelectorAll('.spec tr')).find(row =>
       row.querySelector('th')?.textContent.trim() === 'サイズ');
     const size = sizeRow?.querySelector('td')?.innerText?.trim().replace(/\s+/g, ' ') || null;
     return {...globalThis.PageImageSaverHelpers.captureProductEvidence(jsonld), facts,
-      microdata: {colors, size, field_sources: {colors: '#js-main-slider [data-variation-name1]',
+      microdata: {sku: facts.sku, productID: facts.product_id, url: canonical, colors, size,
+        field_sources: {sku: 'validated Product JSON-LD sku', productID: 'validated Product JSON-LD productID',
+          url: 'validated link[rel=canonical]', colors: '#js-main-slider [data-variation-name1]',
         size: '.spec tr: サイズ td (offered range, not stock)'}}};
   }
   if (['www.primadonna.com', 'www.mariejo.com'].includes(window.location.hostname) &&
