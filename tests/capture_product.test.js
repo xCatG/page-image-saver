@@ -378,3 +378,12 @@ test('Chrome download callback alone never marks capture evidence saved', async 
   await promise;
   assert.equal(completed, true);
 });
+
+test('readiness timeout retains the last gallery diagnostic without ending hydration early', async () => {
+  let now = 0;
+  await assert.rejects(() => helpers.waitForAutoCaptureReady(
+    () => ({productSeen: true, gallery: [], galleryError: now < 2 ? 'early' : 'Shirohato gallery: image 2 is not an absolute URL'}),
+    {timeoutMs: 3, pollMs: 1, now: () => now, delay: async ms => { now += ms; }}),
+    /gallery readiness timeout: Shirohato gallery: image 2 is not an absolute URL/);
+  assert.ok(now > 3);
+});

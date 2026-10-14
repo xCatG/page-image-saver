@@ -321,9 +321,11 @@
     const timeout = options.timeoutMs ?? 8000;
     const poll = options.pollMs ?? 200;
     let productSeen = false;
+    let galleryError = null;
     while (now() - start <= timeout) {
       const evidence = readEvidence();
       productSeen ||= evidence.productSeen === true;
+      galleryError = typeof evidence.galleryError === 'string' ? evidence.galleryError : null;
       if (evidence.productSeen === true && options.prepare) {
         await options.prepare();
         return true;
@@ -331,7 +333,8 @@
       if (evidence.productSeen === true && Array.isArray(evidence.gallery) && evidence.gallery.length > 0) return true;
       await delay(poll);
     }
-    if (productSeen) throw new Error('automatic product gallery readiness timeout');
+    if (productSeen) throw new Error('automatic product gallery readiness timeout' +
+      (galleryError ? `: ${galleryError}` : ''));
     return false;
   }
 
@@ -963,15 +966,19 @@
   }
 
   function shirohatoGallery(urls, productId) {
-    const fail = () => { throw new Error('Shirohato gallery: missing original or unrelated image'); };
-    if (!urls.length || !/^[a-z0-9]+$/.test(productId || '')) fail();
-    return [...new Set(urls.map(raw => {
-      let url; try { url = new URL(raw); } catch (_) { return fail(); }
-      const file = url.pathname.slice('/Contents/ProductImages/0/'.length);
+    const fail = reason => { throw new Error(`Shirohato gallery: ${reason}`); };
+    if (!urls.length) fail('no matching gallery images');
+    if (!/^[a-z0-9]+$/.test(productId || '')) fail('missing or invalid product ID');
+    return [...new Set(urls.map((raw, index) => {
+      const image = `image ${index + 1}`;
+      let url; try { url = new URL(raw); } catch (_) { return fail(`${image} is not an absolute URL`); }
       if (url.protocol !== 'https:' || !['img.wakudoki.ne.jp','www.wakudoki.ne.jp'].includes(url.hostname) ||
-          url.port || url.username || url.password || url.search || url.hash ||
-          !url.pathname.startsWith('/Contents/ProductImages/0/') ||
-          !new RegExp('^' + productId + '(?:[-_][a-zA-Z0-9]+)*_LL\\.jpg$').test(file)) fail();
+          url.port || url.username || url.password) fail(`${image} has an unapproved origin`);
+      if (url.search || url.hash) fail(`${image} has a query or fragment`);
+      const file = url.pathname.slice('/Contents/ProductImages/0/'.length);
+      if (!url.pathname.startsWith('/Contents/ProductImages/0/') ||
+          !new RegExp('^' + productId + '(?:[-_][a-zA-Z0-9]+)*_LL\\.jpg$').test(file))
+        fail(`${image} is not a current-product original`);
       return url.href;
     }))];
   }

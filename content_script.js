@@ -2863,9 +2863,12 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
       rescanCaptureImages();
     }
     await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
-      let gallery = [];
-      try { gallery = captureGallery(config, 'site'); } catch (_) { /* Still loading. */ }
-      return {productSeen: true, gallery};
+      let gallery = [], galleryError = null;
+      try { gallery = captureGallery(config, 'site'); } catch (error) {
+        // Shirohato errors contain condition/index only, never raw URL values.
+        if (config.product?.renditionResolver === 'shirohato') galleryError = error.message;
+      }
+      return {productSeen: true, gallery, galleryError};
     }, {timeoutMs: 8000, pollMs: 200});
     const selector = config.product?.colorLinkSelector ||
       config.product?.variantTriggers?.find(trigger => trigger.label === 'color')?.selector;
@@ -2925,9 +2928,11 @@ setTimeout(async () => {
       if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
       const ready = await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
         const product = capturePageProduct();
-        let gallery = [];
-        try { gallery = captureGallery(config, 'site'); } catch (_) { /* Gallery may render later. */ }
-        return {productSeen: captureProductSeen(config, product), gallery};
+        let gallery = [], galleryError = null;
+        try { gallery = captureGallery(config, 'site'); } catch (error) {
+          if (config.product?.renditionResolver === 'shirohato') galleryError = error.message;
+        }
+        return {productSeen: captureProductSeen(config, product), gallery, galleryError};
       }, {timeoutMs: 8000, pollMs: 200,
         prepare: config.product.lazyLoad ? async () => {
           await globalThis.PageImageSaverHelpers.prepareLazyGallery(config, document);

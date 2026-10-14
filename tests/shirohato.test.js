@@ -45,3 +45,17 @@ test('Shirohato discovery cannot claim completion from two saved pages or changi
  assert.equal(endCheckPasses(config,page,[{end:{type:'result-total',total:1992}}],1993),false);
  assert.equal(endCheckPasses(config,{end:null},visited,1993),false);
 });
+
+test('gallery diagnostics identify the rejecting condition without disclosing URL values', () => {
+  const id = 'c6510226179ef';
+  const cases = [
+    [[], 'no matching gallery images'],
+    [['//img.wakudoki.ne.jp/Contents/ProductImages/0/c6510226179ef_LL.jpg'], 'image 1 is not an absolute URL'],
+    [['https://evil.test/private?secret=value'], 'image 1 has an unapproved origin'],
+    [['https://img.wakudoki.ne.jp/Contents/ProductImages/0/c6510226179ef_LL.jpg?secret=value'], 'image 1 has a query or fragment'],
+    [['https://img.wakudoki.ne.jp/Contents/ProductImages/0/unrelated_LL.jpg'], 'image 1 is not a current-product original'],
+  ];
+  for (const [urls, reason] of cases) {
+    assert.throws(() => shirohatoGallery(urls, id), error => error.message === `Shirohato gallery: ${reason}`);
+  }
+});
