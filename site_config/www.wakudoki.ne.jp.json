@@ -1,0 +1,26 @@
+{
+  "domain": "www.wakudoki.ne.jp",
+  "platform": "w2",
+  "locale": "ja-JP",
+  "market": "jp",
+  "currency": "JPY",
+  "colorVariantStrategy": "separate-url",
+  "listing": {
+    "productLinkSelector": ".productlist__container .product__item--image a[href*=\"/productdetail/\"]",
+    "pagination": {
+      "type": "numbered",
+      "nextSelector": "a.c-pager__button--next"
+    },
+    "endCheck": {
+      "type": "result-total",
+      "selector": ".c-pager__totalcount"
+    }
+  },
+  "product": {
+    "pageSelector": "#js-main-slider",
+    "allImagesSelector": "#js-main-slider .swiper-slide:not(.swiper-slide-duplicate) img",
+    "renditionResolver": "shirohato",
+    "lazyLoad": false
+  },
+  "notes": "JP owner-browser only. separate-url selects existing URL identity/import policy: one PDP contains ALL colors; no color-link expansion, selected color is unknown. Strict JSON-LD canonical/SKU/JPY binding. Original main-slider _LL URLs preserved verbatim; no thumbnails, recommendations or guessed URL restoration at runtime. Colors and offered size text in product.json microdata; no size clicks or availability claims. Listing totals must reconcile exactly at end; unknown categories stay review. No Linux storefront/CDN requests."
+}

@@ -2488,6 +2488,20 @@ function captureJsonLd() {
 }
 
 function capturePageProductEvidence() {
+  if (window.location.hostname === 'www.wakudoki.ne.jp' &&
+      window.location.pathname.startsWith('/productdetail/')) {
+    const jsonld = captureJsonLd();
+    const facts = globalThis.PageImageSaverHelpers.shirohatoProduct(jsonld, window.location.href,
+      document.querySelector('link[rel="canonical"]')?.href);
+    const colors = [...new Set(Array.from(document.querySelectorAll('#js-main-slider [data-variation-name1]'),
+      node => node.getAttribute('data-variation-name1')).filter(Boolean))];
+    const sizeRow = Array.from(document.querySelectorAll('.spec tr')).find(row =>
+      row.querySelector('th')?.textContent.trim() === 'サイズ');
+    const size = sizeRow?.querySelector('td')?.innerText?.trim().replace(/\s+/g, ' ') || null;
+    return {...globalThis.PageImageSaverHelpers.captureProductEvidence(jsonld), facts,
+      microdata: {colors, size, field_sources: {colors: '#js-main-slider [data-variation-name1]',
+        size: '.spec tr: サイズ td (offered range, not stock)'}}};
+  }
   if (['www.primadonna.com', 'www.mariejo.com'].includes(window.location.hostname) &&
       window.location.pathname.includes('/p/')) {
     const scripts = document.querySelectorAll('script#__NEXT_DATA__');
@@ -2559,6 +2573,11 @@ function captureProductSeen(config, product = capturePageProduct()) {
 }
 
 function captureGallery(config, mode) {
+  if (mode === 'site' && config?.product?.renditionResolver === 'shirohato') {
+    return globalThis.PageImageSaverHelpers.shirohatoGallery(
+      Array.from(document.querySelectorAll(config.product.allImagesSelector), node => node.getAttribute('src')),
+      capturePageProduct().product_id);
+  }
   if (mode === 'site' && config?.product?.renditionResolver === 'vandevelde-nextdata') {
     const scripts = document.querySelectorAll('script#__NEXT_DATA__');
     if (scripts.length !== 1) throw new Error('VDV product: missing or ambiguous Next data');
@@ -2862,7 +2881,7 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   let listingCards = [];
   for (let attempt = 0; attempt < 20; attempt++) {
     listingCards = Array.from(document.querySelectorAll(selector), node => {
-      const card = node.closest('.product-item, .product-card, [data-testid="ProductCard"], article') || node;
+      const card = node.closest('.product-item, .product-card, .product__item, [data-testid="ProductCard"], article') || node;
       return {url: node.href, card_text: card.textContent.replace(/\s+/g, ' ').trim(),
         product_id: card.querySelector('[data-product-id]')?.getAttribute('data-product-id') || null};
     }).filter(card => card.url);

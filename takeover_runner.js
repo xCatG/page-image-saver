@@ -45,6 +45,12 @@
   function classifyTakeoverScope(product, config = null) {
     const name = String(product?.name || '').trim();
     const category = String(product?.category || '').trim();
+    if (config?.domain === 'www.wakudoki.ne.jp') {
+      const excluded = /メンズ|男性|キッズ|子供|ジュニア|水着|ビキニ|パジャマ|ルームウェア|ナイトウェア|ストッキング|靴下|インナーシャツ|\b(swimwear|swimsuit|bikini|sleepwear|nightwear|pajamas?|pyjamas?|mens?|kids?|stockings?|socks?)\b/i.test(`${category} ${name}`);
+      if (excluded) return {decision: 'exclude', reason: `Shirohato out-of-scope product: ${category}; ${name}`};
+      const included = ['ワイヤーブラ', 'スタンダード', 'Tバック・Gスト', 'ガーターベルト'].includes(category);
+      return {decision: included ? 'include' : 'review', reason: `Shirohato category evidence: ${category || 'missing'}`};
+    }
     const evidence = category.toLowerCase();
     const title = name.toLowerCase();
     const accessory = ['www.lisecharmel.com', 'www.primadonna.com', 'www.mariejo.com'].includes(config?.domain) &&

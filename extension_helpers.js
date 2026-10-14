@@ -930,7 +930,47 @@
     return [...products.values()].map(({card}) => card);
   }
 
+  // Bind structured facts to the actual JP PDP, never a recommendation or another market.
+  function shirohatoProduct(jsonld, pageUrl, canonicalUrl) {
+    const fail = () => { throw new Error('Shirohato product: invalid or ambiguous JP evidence'); };
+    const identity = raw => {
+      let url; try { url = new URL(raw); } catch (_) { return fail(); }
+      const match = url.pathname.match(/^\/productdetail\/([a-z0-9]+)\/1\/$/);
+      if (url.origin !== 'https://www.wakudoki.ne.jp' || url.username || url.password || !match) fail();
+      return match[1];
+    };
+    const id = identity(pageUrl);
+    if (identity(canonicalUrl) !== id) fail();
+    const products = jsonld.filter(item => item?.['@type'] === 'Product');
+    if (products.length !== 1) fail();
+    const p = products[0], offer = p.offers;
+    if (identity(p.url) !== id || p.productID !== id || p.sku !== id || !p.name ||
+        !p.brand?.name || !p.category || offer?.priceCurrency !== 'JPY' ||
+        !/^\d+(?:\.0+)?$/.test(String(offer.price)) || Number(offer.price) <= 0) fail();
+    return {name: p.name, sku: p.sku, product_id: id, color: null,
+      offers: {price: String(offer.price), currency: 'JPY'}};
+  }
+
+  function shirohatoGallery(urls, productId) {
+    const fail = () => { throw new Error('Shirohato gallery: missing original or unrelated image'); };
+    if (!urls.length || !/^[a-z0-9]+$/.test(productId || '')) fail();
+    return [...new Set(urls.map(raw => {
+      let url; try { url = new URL(raw); } catch (_) { return fail(); }
+      const file = url.pathname.slice('/Contents/ProductImages/0/'.length);
+      if (url.protocol !== 'https:' || !['img.wakudoki.ne.jp','www.wakudoki.ne.jp'].includes(url.hostname) ||
+          url.port || url.username || url.password || url.search || url.hash ||
+          !url.pathname.startsWith('/Contents/ProductImages/0/') ||
+          !new RegExp('^' + productId + '(?:[-_][a-zA-Z0-9]+)*_LL\\.jpg$').test(file)) fail();
+      return url.href;
+    }))];
+  }
+
   function listingResultTotal(text) {
+    const japanese = String(text).match(/^\s*(\d+|\d{1,3}(?:,\d{3})+)\s*件\s*$/);
+    if (japanese) {
+      const total = Number(japanese[1].replace(/,/g, ''));
+      return Number.isSafeInteger(total) ? total : null;
+    }
     const range = String(text).match(/^\s*Items\s+(\d+)\s*-\s*(\d+)\s+of\s+(\d+)\s*$/i);
     if (range) {
       const [start, end, total] = range.slice(1).map(Number);
@@ -959,6 +999,7 @@
   }
 
   const helpers = {
+    shirohatoProduct, shirohatoGallery,
     liseCharmelGallery,
     liseCharmelListingProducts,
     vandeveldeProduct,
