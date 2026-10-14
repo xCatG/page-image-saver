@@ -1,5 +1,6 @@
 """Offline saved-DOM contract: every request is fulfilled locally, including CDN images."""
 import json
+import re
 import os
 from pathlib import Path
 import tempfile
@@ -98,7 +99,10 @@ class ShirohatoBrowser(unittest.TestCase):
                     page.evaluate("url => history.replaceState({}, '', url)", row['url'])
                     result = self.inspect(page, config, 'discovery')
                     self.assertEqual(result['kind'], 'listing')
-                    self.assertEqual(result['products'], row['products'])
+                    # Numeric bid is the sole query in these independently saved listing links.
+                    expected = [re.sub(r'\?bid=[0-9]+$', '', url) for url in row['products']]
+                    self.assertEqual(result['products'], expected)
+                    self.assertEqual([card['url'] for card in result['cards']], expected)
                     self.assertEqual(len(result['products']), 60)
                     self.assertEqual(result['next'], row['next'])
                     self.assertEqual(result['end'], dict(type='result-total',total=row['total']))

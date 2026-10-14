@@ -951,6 +951,17 @@
       offers: {price: String(offer.price), currency: 'JPY'}};
   }
 
+  // The saved listing's numeric bid is a brand navigation context, not a variant.
+  // Keep every other query spelling intact so binding fails closed on unknown state.
+  function shirohatoListingUrl(raw) {
+    let url; try { url = new URL(raw); } catch (_) { return raw; }
+    if (url.origin !== 'https://www.wakudoki.ne.jp' || url.username || url.password ||
+        !/^\/productdetail\/[a-z0-9]+\/1\/$/.test(url.pathname) || url.hash ||
+        !/^\?bid=\d+$/.test(url.search)) return raw;
+    url.search = '';
+    return url.href;
+  }
+
   function shirohatoGallery(urls, productId) {
     const fail = () => { throw new Error('Shirohato gallery: missing original or unrelated image'); };
     if (!urls.length || !/^[a-z0-9]+$/.test(productId || '')) fail();
@@ -999,7 +1010,7 @@
   }
 
   const helpers = {
-    shirohatoProduct, shirohatoGallery,
+    shirohatoProduct, shirohatoGallery, shirohatoListingUrl,
     liseCharmelGallery,
     liseCharmelListingProducts,
     vandeveldeProduct,

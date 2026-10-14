@@ -52,6 +52,12 @@ and category remain in product.json JSON-LD, colors/size in microdata.
 | shirohato-listing-bra.html | 60 | 1件～60件 | 1993 | 2 |
 | shirohato-listing-bra-p2.html | 60 | 61件～120件 | 1993 | 3 |
 
+Saved listing URLs retain their original `?bid=<number>` evidence in the oracle.
+Discovery removes only that single numeric brand-navigation query before queuing
+the PDP; variant/unknown or repeated query keys remain unchanged and fail strict
+canonical binding. Bound capture regression uses the saved `40btj448df` link and
+its independently saved queryless PDP canonical.
+
 No final listing page was saved. Browser tests assert all five observed pages;
 a synthetic end-check test verifies that 120 observed bra URLs cannot complete a
 1,993-product listing and that changing totals fail. A future live run may pause

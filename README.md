@@ -191,7 +191,8 @@ Original main-slider `_LL.jpg` URLs are kept verbatim. Foreign images, thumbnail
 missing originals and mismatched product identities stop capture.
 
 Discover from the owner's JP bra/category/brand listing. The config reads the
-visible `件` total and follows the site's `pno` next link; completion requires the
+visible `件` total, removes only the evidenced numeric `?bid=` brand-navigation
+query from discovered PDP links so they bind to their queryless canonicals, and follows the site's `pno` next link; completion requires the
 unique discovered URL count to equal the same displayed total on every page.
 The five saved pages establish pagination, not an exhaustive live catalog.
 Non-lingerie Japanese product evidence is excluded, and categories not evidenced

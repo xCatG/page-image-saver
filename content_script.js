@@ -2890,6 +2890,9 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   }
   if (config.domain === 'www.lisecharmel.com')
     listingCards = globalThis.PageImageSaverHelpers.liseCharmelListingProducts(listingCards);
+  if (config.domain === 'www.wakudoki.ne.jp')
+    listingCards = listingCards.map(card => ({...card,
+      url: globalThis.PageImageSaverHelpers.shirohatoListingUrl(card.url)}));
   const products = listingCards.map(card => card.url);
   const next = document.querySelector(nextSelector)?.href || null;
   const cards = mode === 'discovery' ? listingCards : undefined;
