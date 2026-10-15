@@ -178,10 +178,11 @@ US-English owner-browser PDP capture is prepared for `www.primadonna.com` and `w
 
 ### Shirohato Japan (1.0.15)
 
-1.0.15 adds gallery-readiness diagnostics only. The owner's three-product smoke
-failed in 1.0.14; its live cause still needs the [read-only owner probe](evidence/owner-probe.js).
-See the [offline diagnosis](evidence/shirohato-smoke-diagnosis.md). Gallery acceptance
-is unchanged; this release does not claim to fix that smoke failure.
+1.0.15 fixes the owner-probed readiness timeout: numbered current-product
+`ProductSubImages/0/<id>_sub<digits>_LL.jpg` originals now join the existing
+`ProductImages` gallery. The stricter product/origin/original checks remain, and
+timeouts retain their rejection condition. See the [confirmed diagnosis and tests](evidence/shirohato-smoke-diagnosis.md).
+The [read-only probe](evidence/owner-probe.js) remains available for future diagnosis.
 
 `www.wakudoki.ne.jp` is the retailer source; carried brands (including HIMICO,
 Wing, Salute, Wacoal and Triumph) remain in the captured Product JSON-LD. The

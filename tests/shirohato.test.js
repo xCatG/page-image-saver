@@ -59,3 +59,26 @@ test('gallery diagnostics identify the rejecting condition without disclosing UR
     assert.throws(() => shirohatoGallery(urls, id), error => error.message === `Shirohato gallery: ${reason}`);
   }
 });
+
+test('owner-probed Triumph gallery preserves both original image directories', () => {
+  const row = rows.find(r => r.product_id === 'c6510226179ef');
+  assert.equal(row.images.filter(u => u.includes('/ProductImages/')).length, 3);
+  assert.equal(row.images.filter(u => u.includes('/ProductSubImages/')).length, 11);
+  assert.deepEqual(shirohatoGallery(row.images, row.product_id), row.images);
+});
+
+test('subimage acceptance requires this product, exact directory and numbered original filename', () => {
+  for (const id of ['c6510226179ef', '40pxb178ml', 'c2226hm038gb']) {
+    const base = 'https://img.wakudoki.ne.jp/Contents/ProductSubImages/0/';
+    const good = base + id + '_sub01_LL.jpg';
+    assert.deepEqual(shirohatoGallery([good, good], id), [good]);
+    for (const bad of [
+      base + 'other_sub01_LL.jpg', base + id + '_LL.jpg', base + id + '-cf01_LL.jpg',
+      base + id + '_sub_LL.jpg', base + id + '_subx_LL.jpg', base + id + '_sub01_L.jpg',
+      base + id + '_sub01_extra_LL.jpg', base.replace('/0/', '/1/') + id + '_sub01_LL.jpg',
+      good + '?v=1', good + '#x', good.replace('https:', 'http:'),
+      good.replace('img.wakudoki.ne.jp', 'evil.test'), good.replace('https:', ''),
+      good.replace('https://', 'https://user@'), good.replace('.jp/', '.jp:444/'),
+    ]) assert.throws(() => shirohatoGallery([good, bad], id), /Shirohato gallery/);
+  }
+});

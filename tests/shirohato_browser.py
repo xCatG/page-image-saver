@@ -83,6 +83,21 @@ class ShirohatoBrowser(unittest.TestCase):
                 finally:
                     page.close()
 
+    def test_owner_probed_subimages_pass_readiness(self):
+        config = json.loads(source('site_config/www.wakudoki.ne.jp.json'))
+        page = self.open_fixture(config['domain'], 'shirohato-c6510226179ef.html')
+        try:
+            page.evaluate("history.replaceState({}, '', '/productdetail/c6510226179ef/1/')")
+            result = self.inspect(page, config)
+            self.assertEqual(result['kind'], 'product')
+            self.assertEqual(result['imageCount'], 14)
+            gallery = page.evaluate("c => captureGallery(c, 'site')", config)
+            self.assertEqual(gallery[3:], [
+                f'https://img.wakudoki.ne.jp/Contents/ProductSubImages/0/c6510226179ef_sub{i:02d}_LL.jpg'
+                for i in range(1, 12)])
+        finally:
+            page.close()
+
     def test_real_capture_export_contract(self):
         config = json.loads(source('site_config/www.wakudoki.ne.jp.json'))
         page = self.open_fixture(config['domain'], 'shirohato-c6510226179ef.html')

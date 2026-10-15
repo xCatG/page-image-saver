@@ -976,9 +976,11 @@
           url.port || url.username || url.password) fail(`${image} has an unapproved origin`);
       if (url.search || url.hash) fail(`${image} has a query or fragment`);
       const file = url.pathname.slice('/Contents/ProductImages/0/'.length);
-      if (!url.pathname.startsWith('/Contents/ProductImages/0/') ||
-          !new RegExp('^' + productId + '(?:[-_][a-zA-Z0-9]+)*_LL\\.jpg$').test(file))
-        fail(`${image} is not a current-product original`);
+      const primary = url.pathname.startsWith('/Contents/ProductImages/0/') &&
+        new RegExp('^' + productId + '(?:[-_][a-zA-Z0-9]+)*_LL\\.jpg$').test(file);
+      const subimage = new RegExp('^/Contents/ProductSubImages/0/' + productId +
+        '_sub[0-9]+_LL\\.jpg$').test(url.pathname);
+      if (!primary && !subimage) fail(`${image} is not a current-product original`);
       return url.href;
     }))];
   }

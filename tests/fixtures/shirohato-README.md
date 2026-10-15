@@ -8,16 +8,22 @@ The fixtures retain only public product facts/specification rows, the main galle
 and listing cards/pager. Account forms, viewstate, tokens, trackers, recommendations,
 reviews, styles and executable scripts are omitted. Product JSON-LD is inert data.
 
-Chrome rewrote gallery image URLs to local filenames. **Test-only restoration**
-uses the directory of that page's explicit JSON-LD primary image
-(`https://img.wakudoki.ne.jp/Contents/ProductImages/0/`) with the unchanged saved
-`_LL.jpg` basename. This directory mapping is an inference from the primary image,
-not proof of each live URL or a network validation. Production never performs
-that restoration: it accepts only existing absolute gallery `_LL.jpg` URLs for
-this exact product on the retailer/CDN. The original saved filenames, gallery
-ordering and color labels independently establish the expected membership;
-Swiper's duplicated first/last slides are ignored. No thumbnails or recommendation
-images enter the gallery. Main-image URL is independently evidenced in JSON-LD.
+Chrome rewrote gallery image URLs to local filenames. The initial test-only
+restoration used the primary JSON-LD directory `ProductImages/0/` for every
+unchanged saved `_LL.jpg` basename. The returned live owner probe for Triumph
+`c6510226179ef` disproved that assumption for subimages: images 4–14 use
+`ProductSubImages/0/<id>_sub01_LL.jpg` through `_sub11_LL.jpg`. That fixture and
+its expected URL oracle now match the live probe (3 primary +11 subimages).
+
+For the other 11 PDPs, fixture directory restoration remains an inference, not a
+claim about each live URL. All 17 saved resource directories were audited. PDP
+gallery filenames are primary, `-cfNN` colours (`-czNN` for Mon cher pigeon), and
+numbered `_subNN` images; Wacoal and HIMICO smoke galleries have 7 and 15 numbered
+subimages respectively, fitting the new strict subimage rule. No additional
+filename/path allowance is needed. Runtime never restores or invents URLs:
+it accepts existing allowed original URLs verbatim for the current product.
+Swiper's duplicated first/last slides are ignored; thumbnails and recommendations
+are not gallery members. Primary-image URLs remain evidenced in JSON-LD.
 
 No selected color is evidenced in the saved PDPs. All gallery color labels are
 retained as supplemental evidence. Size text is the offered specification range,

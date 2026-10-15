@@ -1,71 +1,68 @@
-# Shirohato 1.0.14 smoke: root cause not yet determined
+# Shirohato 1.0.14 smoke: confirmed ProductSubImages rejection
 
-The owner run `2026-10-14T23-53-22-539Z-run.json` records three attempts per
-product, all failing `automatic product gallery readiness timeout`, and zero
-captures. The exact live gallery attributes were not included in that report.
+The owner's three-product smoke failed before any capture with gallery-readiness
+timeouts. The returned live probe on Triumph `c6510226179ef` identifies the cause:
 
-## What the code requires
+- One recognized slider, one matching Product JSON-LD, matching canonical and JPY.
+- All 14 selected image sources were absolute HTTPS on `img.wakudoki.ne.jp`,
+  without query/fragment; loaded at 1200×1200.
+- Images 1–3 use `/Contents/ProductImages/0/` (primary and `-cfNN` images).
+- Images 4–14 use `/Contents/ProductSubImages/0/c6510226179ef_sub01_LL.jpg`
+  through `_sub11_LL.jpg`.
 
-`inspectTakeoverPage` first calls `capturePageProduct` (strict Shirohato Product
-JSON-LD, canonical/URL/productID/SKU, JP/JPY binding). It recognizes the product
-using `#js-main-slider`, then polls gallery extraction every 200 ms for 8 seconds.
-A gallery must contain at least one URL and **every** selected image must pass:
+The old gallery validator accepted only `ProductImages`. Image 4 rejected the
+entire gallery on every readiness poll. Polling suppressed the extraction error
+and eventually reported a generic timeout. This was not a size, focus, lazy-load,
+canonical or slider-selection failure on the probed page.
 
-- Selector: `#js-main-slider .swiper-slide:not(.swiper-slide-duplicate) img`.
-- Read the literal `getAttribute('src')`, not resolved `img.src`, `currentSrc`,
-  `data-src`, or srcset.
-- `new URL(raw)` without a base: relative and protocol-relative forms fail.
-- HTTPS `img.wakudoki.ne.jp` or `www.wakudoki.ne.jp`, no credentials, nondefault
-  port, query or fragment; `/Contents/ProductImages/0/`, current product filename
-  with an `_LL.jpg` suffix. One invalid image rejects the entire gallery.
+## 1.0.15 fix
 
-There is no image-size, `naturalWidth`, `complete`, focus or visibility condition.
-`lazyLoad` is false in this config. Initial missing/invalid JSON-LD would throw its
-own product error before this gallery wait. This run's timeout therefore shows
-that initial product binding/slider recognition succeeded but no poll produced
-an accepted gallery; it does not establish which gallery check failed.
+Keep the existing primary-image rule and additionally accept exactly
+`/Contents/ProductSubImages/0/<current-product-id>_sub<digits>_LL.jpg`.
+Keep the HTTPS/retailer-CDN host restrictions, credential/port/query/fragment
+checks, current-product identity and original-image suffix. Wrong products,
+other subimage directories, thumbnails and non-numbered subimage names fail.
+Do not construct, rewrite or guess URLs: retain the accepted DOM source verbatim.
+Selectors, timing, selected-colour behavior and capture format are unchanged.
+The timeout also retains the last Shirohato condition and image index without
+printing raw URL values. The read-only owner probe remains available for future
+diagnosis, but no additional probe is needed to implement this fix.
 
-## Saved evidence and its limit
+## Saved-page audit and fixture correction
 
-All three owner saves still match the source hashes recorded in the fixtures:
+The 17 saved HTML pages comprise 12 PDPs and five listings. Chrome rewrote gallery
+URLs to local filenames. Initial fixtures incorrectly inferred `ProductImages`
+for every gallery image from the primary JSON-LD directory. Correct the Triumph
+fixture and oracle using the returned live paths: 3 primary +11 subimages.
 
-| Product | Slider roots | Selected images | `loading=lazy` | `data-src` |
-| --- | ---: | ---: | ---: | ---: |
-| Triumph `c6510226179ef` | 1 | 14 | 2 | 0 |
-| Wacoal `40pxb178ml` | 1 | 23 | 15 | 0 |
-| HIMICO `c2226hm038gb` | 1 | 19 | 3 | 0 |
+The 12 saved PDP galleries have primary `_LL`, colour `-cfNN_LL` (Mon cher pigeon
+uses `-czNN_LL`), and numbered `_subNN_LL` filenames. Wacoal smoke `40pxb178ml`
+has 7 numbered subimages; HIMICO smoke `c2226hm038gb` has 15. Both fit the same
+new exact subimage pattern. The `-czNN` primary family is already accepted by the
+existing primary rule; no extra allowance is needed. Filenames alone cannot
+prove original directories, so the other saved fixtures' directory restoration
+remains explicitly inferred. No live Wacoal/HIMICO directory observation is
+claimed, and no runtime URL restoration is introduced.
 
-Each canonical is the expected `/productdetail/<id>/1/` URL and each saved
-Product has the matching identity and JPY offer. Saved productdetail.js initializes
-Swiper on the same slider root; that does not prove the failed run's DOM state.
+## Tests and ingestion compatibility
 
-**Chrome rewrote every selected `src` to a local `./…_files/…_LL.jpg` path.** The
-existing scrubbed tests restore absolute CDN paths using the primary JSON-LD
-image directory, explicitly an inference. Those tests cannot distinguish whether
-the live attribute was absolute, protocol-relative, root-relative, or different.
-No original request was made to fill that gap. Missing matches, an alternate URL
-form, and another rejected live gallery entry remain distinguishable hypotheses.
-Do not change selectors, enable scrolling, normalize URLs or weaken validation
-until the live evidence identifies the condition.
+Before the fix, three Node regressions failed and the corrected owner-probed
+browser fixture reproduced `image 4 is not a current-product original` followed
+by the readiness timeout. After the fix, all 260 Node tests, five Shirohato browser
+tests and 21 existing browser tests pass. Strict negative cases cover unrelated
+IDs, wrong directories, malformed/non-numbered subimage filenames, thumbnails,
+queries/fragments, unsafe origins and relative URLs.
 
-## Minimal owner action
+The real extension capture/export of the corrected Triumph fixture passes
+unchanged through the `lingerie_trends` receiver, already-captured check, indexer,
+view and media-inventory publication in temporary local roots. All 14 URLs retain
+their exact spelling, including 11 ProductSubImages; brand, JP/JPY, sizes/colours
+and URL identity remain intact. Test image bytes are synthetic one-pixel PNGs.
+The importer validates generic HTTP(S) evidence URLs; neither its validator nor
+the Shirohato adapter restricts these directory families. No importer change or
+second PR is needed.
 
-On `https://www.wakudoki.ne.jp/productdetail/c6510226179ef/1/`, after loading,
-paste `evidence/owner-probe.js` into DevTools Console and return its JSON output.
-No extension update or smoke rerun is needed for this probe. It reads only the
-readiness-relevant DOM: selector counts, redacted source forms/resolved URLs,
-load dimensions, canonical and Product JSON-LD field checks. It makes no requests,
-clicks, DOM/storage writes or navigation. Query/fragment values and credentials
-are omitted. One PDP is sufficient to identify the next implementation step.
-
-## Diagnostics-only 1.0.15
-
-The readiness timeout now retains the last Shirohato extraction condition and
-image index (without raw URL values). Gallery validation, retry duration, capture
-format and acceptance remain unchanged. This improves the next failure report;
-**it is not a claimed fix for the three live smoke failures**.
-
-Tests reproduce diagnostic loss and cover a synthetic protocol-relative URL
-on each of the three saved PDPs. That synthetic condition is a test case, not
-live evidence. The probe is exercised against each DOM and checked for no DOM
-mutation or disclosure of a query-value sentinel.
+All test browser requests are fulfilled locally. No Linux retailer/CDN requests,
+owner Chrome/loaded checkout edits, NAS writes, or production receiver changes.
+A successful owner-browser rerun has not yet been observed; the confirmed
+validation failure is fixed and reproduced offline.
