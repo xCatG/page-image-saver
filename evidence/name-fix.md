@@ -33,3 +33,7 @@ UV_CACHE_DIR=/tmp/uv-bravissimo-name PYTHONPATH=/home/yenchi/src/lingerie_trends
 ```
 
 Chromium and Node localhost server tests require the ordinary local socket permissions blocked in the restricted sandbox. No retailer/CDN network was used. Actual temporary production exports are available at `/tmp/bravissimo-name-fix-exports/PageImageSaver/` for the coordinated importer regression.
+
+## Importer fixture follow-up
+
+The initial minimal DOM omitted rendered prices. The original failed saved pages each contain an ordinary public `c-product-details__price` paragraph ($74.00, $86.00, $7.00). Preserve those exact subtrees in the scrubbed fixtures; no price parsing changes are needed. A browser assertion now protects this evidence. Regenerated exports at `/tmp/bravissimo-name-fix-priced-exports/PageImageSaver/` pass both full receiver validation and the coordinated catalog branch's `derive_capture`: CK202 include, FA358 include, YB116 exclude; existing FY563, PN305, LG402 exports also pass. These checks use exported scrubbed HTML, not an original-HTML substitution.

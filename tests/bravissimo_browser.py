@@ -158,6 +158,7 @@ class BravissimoBrowser(unittest.TestCase):
                 envelope=json.loads(bytes(product))
                 _check_product_envelope(envelope,result['completion']['product'])
                 self.assertEqual(result['completion']['product']['name'],row['name'])
+                self.assertIn('$'+row['price'],page.locator('.c-product-details__price').inner_text())
                 with tempfile.TemporaryDirectory() as tmp:
                     root=Path(os.environ.get('PIS_BRAVISSIMO_EXPORT',tmp))
                     for name,data in result['files'].items():
