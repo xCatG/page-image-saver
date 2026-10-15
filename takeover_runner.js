@@ -441,7 +441,9 @@
         if (!found.length && !run.listings.visited.length)
           return interrupt(run, 'paused', `product-link selector found no products on first listing: ${url}`);
         if (!found.length) return interrupt(run, 'discovery_incomplete', `listing structure mismatch at ${url}`);
-        if (run.listings.visited.length >= MAX_LISTINGS || run.products.length + found.length > MAX_PRODUCTS)
+        const known = new Set(run.products.map(row => row.url));
+        const newProducts = found.filter(url => !known.has(url));
+        if (run.listings.visited.length >= MAX_LISTINGS || known.size + newProducts.length > MAX_PRODUCTS)
           return interrupt(run, 'discovery_incomplete', 'catalog safety bound reached');
         run.listings.queue.shift();
         const listing = {url, found: found.length, end: page.end || null};
@@ -454,9 +456,8 @@
             })?.card_text || ''}))
         });
         run.listings.visited.push(listing);
-        const known = new Set(run.products.map(row => row.url));
-        for (const productUrl of found) if (!known.has(productUrl)) {
-          run.products.push({url: productUrl, status: run.mode === 'discovery' ? 'discovered' : 'pending'}); known.add(productUrl);
+        for (const productUrl of newProducts) {
+          run.products.push({url: productUrl, status: run.mode === 'discovery' ? 'discovered' : 'pending'});
         }
         let next = null;
         try { if (page.next) next = canonical(page.next, run.domain); }

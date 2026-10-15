@@ -947,3 +947,15 @@ test('seed discovery rejects changing totals even when final unique count matche
   assert.equal(r.memory.run.status, 'discovery_incomplete');
   assert.equal(r.memory.run.listings.discoveryComplete, false);
 });
+
+for (const [start, total, status] of [[3000,9000,'complete'],[4000,10000,'complete'],[4001,6000,'discovery_incomplete']]) {
+  test(`seed discovery applies product safety limit to unique union (${start})`, async () => {
+    const urls = offset => Array.from({length:6000},(_,i)=>`https://${site.domain}/product/${offset+i}`);
+    const r = rig({[first]:seedPage(first,urls(0),6000),[second]:seedPage(second,urls(start),6000)});
+    await r.runner().importDiscovery(resultSite,[seedSource([first,second])]);
+    await r.runner().start();
+    for(let i=0;i<3;i++){await r.runner().tick();r.advance(12000);}
+    assert.equal(r.memory.run.status,status);
+    assert.equal(r.memory.run.products.length,total);
+  });
+}
