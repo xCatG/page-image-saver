@@ -176,7 +176,13 @@ Discovery preserves saved listing links and deduplicates Magento category aliase
 
 US-English owner-browser PDP capture is prepared for `www.primadonna.com` and `www.mariejo.com`. Import a saved fixed discovery queue, or preview a product page. Colours have separate `/en-us/p/` URLs; Next.js product data supplies the exact identity, USD facts and original gallery. Stale SPA colour data, non-US identity and unknown media hosts fail closed. Swim/nightwear/accessories stay under scope review/exclusion. Listing discovery is disabled pending saved pagination/total evidence. No Linux/automated site requests. See the companion lingerie_trends `docs/vandevelde-page-image-saver.md` runbook and the owner’s three-product smoke queues.
 
-### Shirohato Japan (1.0.14)
+### Shirohato Japan (1.0.15)
+
+1.0.15 fixes the owner-probed readiness timeout: numbered current-product
+`ProductSubImages/0/<id>_sub<digits>_LL.jpg` originals now join the existing
+`ProductImages` gallery. The stricter product/origin/original checks remain, and
+timeouts retain their rejection condition. See the [confirmed diagnosis and tests](evidence/shirohato-smoke-diagnosis.md).
+The [read-only probe](evidence/owner-probe.js) remains available for future diagnosis.
 
 `www.wakudoki.ne.jp` is the retailer source; carried brands (including HIMICO,
 Wing, Salute, Wacoal and Triumph) remain in the captured Product JSON-LD. The

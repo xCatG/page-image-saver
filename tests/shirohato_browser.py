@@ -51,6 +51,53 @@ class ShirohatoBrowser(unittest.TestCase):
                 finally:
                     page.close()
 
+    def test_readiness_diagnostic_and_read_only_probe(self):
+        # Synthetic URL form, NOT a claim about the unknown live DOM.
+        config = json.loads(source('site_config/www.wakudoki.ne.jp.json'))
+        for row in json.loads((FIXTURES / 'shirohato-expected.json').read_text()):
+            if row.get('product_id') not in ('c6510226179ef', '40pxb178ml', 'c2226hm038gb'):
+                continue
+            with self.subTest(product=row['product_id']):
+                page = self.open_fixture(config['domain'], row['fixture'])
+                try:
+                    page.evaluate("url => history.replaceState({}, '', url)", row['url'])
+                    page.evaluate("""selector => {
+                        const n = document.querySelector(selector);
+                        n.setAttribute('src', n.getAttribute('src').replace('https:', '') + '?secret=do-not-print');
+                        const original = PageImageSaverHelpers.waitForAutoCaptureReady;
+                        PageImageSaverHelpers.waitForAutoCaptureReady = (read, options) => {
+                            let now = 0;
+                            return original(read, {...options, timeoutMs: 0, now: () => now,
+                                delay: async () => {now++;}});
+                        };
+                    }""", config['product']['allImagesSelector'])
+                    before = page.content()
+                    report = page.evaluate(source('evidence/owner-probe.js'))
+                    self.assertEqual(page.content(), before)
+                    self.assertEqual(report['matchingImages'], len(row['images']))
+                    self.assertEqual(report['images'][0]['src']['form'], 'protocol-relative')
+                    self.assertTrue(report['images'][0]['src']['hasQuery'])
+                    self.assertNotIn('do-not-print', json.dumps(report))
+                    with self.assertRaisesRegex(Exception, 'gallery readiness timeout: Shirohato gallery: image 1 is not an absolute URL'):
+                        self.inspect(page, config)
+                finally:
+                    page.close()
+
+    def test_owner_probed_subimages_pass_readiness(self):
+        config = json.loads(source('site_config/www.wakudoki.ne.jp.json'))
+        page = self.open_fixture(config['domain'], 'shirohato-c6510226179ef.html')
+        try:
+            page.evaluate("history.replaceState({}, '', '/productdetail/c6510226179ef/1/')")
+            result = self.inspect(page, config)
+            self.assertEqual(result['kind'], 'product')
+            self.assertEqual(result['imageCount'], 14)
+            gallery = page.evaluate("c => captureGallery(c, 'site')", config)
+            self.assertEqual(gallery[3:], [
+                f'https://img.wakudoki.ne.jp/Contents/ProductSubImages/0/c6510226179ef_sub{i:02d}_LL.jpg'
+                for i in range(1, 12)])
+        finally:
+            page.close()
+
     def test_real_capture_export_contract(self):
         config = json.loads(source('site_config/www.wakudoki.ne.jp.json'))
         page = self.open_fixture(config['domain'], 'shirohato-c6510226179ef.html')
