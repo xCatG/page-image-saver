@@ -49,3 +49,16 @@ test('BN explicit excluded evidence wins over intimate categories', () => {
     assert.equal(classifyTakeoverScope({name:'Full Brief',category},config).decision,'exclude',category);
   assert.equal(classifyTakeoverScope({name:'Rive Gauche Bikini',category:'Panties'},config).decision,'include');
 });
+
+test('BN childrenswear evidence excludes in either title or category', () => {
+  const config={domain:'www.barenecessities.com'};
+  for (const term of ['Child', "Child's", 'Children', "Children's", 'Children’s', 'Childrens', 'Childrenswear', 'Children’s Wear']) {
+    for (const product of [{name:term+' Bra', category:'Bras'}, {name:'Collection Essential', category:term}])
+      assert.equal(classifyTakeoverScope(product,config).decision,'exclude',JSON.stringify(product));
+  }
+});
+test('BN womens lingerie titles remain included', () => {
+  const config={domain:'www.barenecessities.com'};
+  for (const name of ['Womens Support Bra', "Women's Support Bra", 'Women’s Support Bra'])
+    assert.equal(classifyTakeoverScope({name,category:'Bras'},config).decision,'include',name);
+});

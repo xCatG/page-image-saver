@@ -52,7 +52,7 @@
       return {decision: included ? 'include' : 'review', reason: `Shirohato category evidence: ${category || 'missing'}`};
     }
     if (config?.domain === 'www.barenecessities.com') {
-      const excluded = /\b(swimwear|swimsuits?|swim|maillot de bain|sleepwear|nightwear|nightdress(?:es)?|pyjamas?|pajamas?|menswear|mens?|men's|men’s|kids?|ready.to.wear|apparel)\b/i.test(`${category} ${name}`);
+      const excluded = /\b(swimwear|swimsuits?|swim|maillot de bain|sleepwear|nightwear|nightdress(?:es)?|pyjamas?|pajamas?|menswear|mens?|men's|men’s|kids?|child(?:ren)?(?:['’]?s)?(?:wear)?|ready.to.wear|apparel)\b/i.test(`${category} ${name}`);
       if (excluded) return {decision: 'exclude', reason: `Bare Necessities out-of-scope product: ${category}; ${name}`};
       if (['Bras', 'Panties'].includes(category) ||
           (category === 'Sexy Lingerie, Accessories' && /\bgarter belt\b/i.test(name)))
