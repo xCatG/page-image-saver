@@ -65,7 +65,26 @@ class BravissimoBrowser(unittest.TestCase):
                   const inspected=await inspectTakeoverPage(config);
                   const scope=PageImageSaverTakeover.classifyTakeoverScope(inspected.product,config);
                   if(scope.decision!=='include') throw new Error('Smoke product scope must include');
-                  const result=await captureCurrentProduct({manual:false,scopeOverride:{...scope,reason:scope.reason+'; Offline Bravissimo fixture; synthetic PNG image bytes fulfilled locally'}});
+                  let saved=null, result, testClock=100000;
+                  const runner=PageImageSaverTakeover.createTakeoverRunner({
+                    now:()=>testClock, random:()=>0.5, read:async()=>structuredClone(saved),
+                    save:async run=>{saved=structuredClone(run);},alarm:async()=>{},notify:async()=>{},
+                    verify:async()=>({storage:'receiver',status:'missing'}),
+                    load:async()=>({...await inspectTakeoverPage(config),tabId:7}),
+                    capture:async(url,actualScope,binding)=>{
+                      result=await captureCurrentProduct({manual:false,binding,scopeOverride:{...actualScope,
+                        reason:actualScope.reason+'; Offline Bravissimo fixture; synthetic PNG image bytes fulfilled locally'}});
+                      return result;
+                    }});
+                  await runner.importDiscovery(config,[{sha256:'a'.repeat(64),report:{format:'page-image-saver-discovery/v1',
+                    schema_version:1,mode:'discovery',site:config.domain,started_utc:'2026-10-14T00:00:00Z',
+                    listings:[{url:'https://www.bravissimo.com/us/collections/all-bras/',
+                      final_url:'https://www.bravissimo.com/us/collections/all-bras/',
+                      products:[{url:window.location.href,card_text:'Offline public fixture'}],
+                      next_url:null,end_check:{observed:null,passed:false}}]}}]);
+                  await runner.start();await runner.tick();testClock+=12000;await runner.tick();
+                  if(saved.status!=='finished_with_gaps' || saved.products[0].reason!=='exported_unverified')
+                    throw new Error('Downloads queue must finish with unverified export, not pause: '+saved.status+' '+saved.reason);
                   return {files,completion:result.completion}; }""",CONFIG)
                 self.assertEqual(result['completion']['identity']['selected_color'],row['color'])
                 self.assertEqual(result['completion']['identity']['color_key'],'color')
