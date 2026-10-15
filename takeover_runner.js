@@ -540,6 +540,7 @@
             const binding = {generation: run.generation, tabId: page.tabId,
               documentId: page.documentId, expectedUrl: url};
             if (queryEquivalent && !sameDocumentUrl(canonical(page.url, run.domain), url)) binding.documentUrl = canonical(page.url, run.domain);
+            if (captureColorPolicy(run.config) === 'color') binding.selectedColor = page.product.color || null;
             run.current.binding = binding;
             await save(run); // Bind this document before any image acquisition.
             const result = await io.capture(url, scope, binding);
@@ -582,7 +583,7 @@
     return {preview, importDiscovery, start, pause, stop, resume, tick, read};
   }
   const api = {createTakeoverRunner, classifyTakeoverScope, summarizeTakeover,
-    exportTakeoverReport, endCheckPasses};
+    exportTakeoverReport, endCheckPasses, captureIdentityMatches};
   root.PageImageSaverTakeover = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

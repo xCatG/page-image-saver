@@ -3011,7 +3011,7 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
     const total = globalThis.PageImageSaverHelpers.listingResultTotal(node?.textContent || '');
     if (total !== null) end = {type: 'result-total', total};
   }
-  if (check?.type === 'bravissimo-total') {
+  if (check?.type === 'result-total' && check.source === 'bravissimo') {
     const values = Array.from(document.scripts).flatMap(node => {
       const match = node.textContent.match(/setDataLayer\((\{.*?\})\);/s);
       try { const value = match && JSON.parse(match[1]); return value?.productListing ? [value.productListing] : []; }

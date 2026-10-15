@@ -1039,6 +1039,8 @@
     const nodes = jsonld.flat();
     const variant = nodes.find(x => x['@type'] === 'Product' && x.sku === product.styleColourCode);
     const group = nodes.find(x => x['@type'] === 'ProductGroup' && x['@id'] === product.styleCode);
+    if (nodes.some(x => x['@type'] === 'Product') && !variant ||
+        nodes.some(x => x['@type'] === 'ProductGroup') && !group) fail('current JSON-LD identity missing');
     if (currency !== 'USD' || (variant && (variant.color !== selectedColor ||
         variant.offers?.priceCurrency !== 'USD' || Number(variant.offers.price) !== product.prices?.price)) ||
         (group && group.brand?.name !== product.brand) ||

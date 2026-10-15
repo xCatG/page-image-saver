@@ -80,7 +80,7 @@ function bridge() {
   };
   const sandbox = {chrome, URL, Date, Promise, console,
     setTimeout() { return 1; }, clearTimeout() {},
-    PageImageSaverTakeover: {createTakeoverRunner(value) {
+    PageImageSaverTakeover: {...require('../takeover_runner.js'), createTakeoverRunner(value) {
       io = value;
       return {tick: async () => {}, read: async () => stored.catalogTakeoverRun,
         preview: async config => {
@@ -430,4 +430,32 @@ test('tab URL comparison accepts real VS apostrophe encodings but not another pr
   }
   assert.equal(b.sandbox.takeoverSameUrl('https://shop.example.test/a%2Fb','https://shop.example.test/a/b'),false);
   assert.equal(b.sandbox.takeoverSameUrl('https://shop.example.test/a%2527','https://shop.example.test/a%27'),false);
+});
+
+ test('bound Bravissimo color capture publishes only the inspected color under saved policy', async () => {
+  const b = captureBridge();
+  const f = require('./fixtures/bravissimo-fy563.json');
+  const config = require('../site_config/www.bravissimo.com.json');
+  const binding = {tabId:7, documentId:'doc-bravissimo', generation:2, expectedUrl:f.canonical, selectedColor:f.color};
+  b.tab.url = f.canonical;
+  b.stored.catalogTakeoverRun = {domain:config.domain, config, status:'running', generation:2,
+    current:{phase:'product', url:f.canonical, binding}};
+  const message = {action:'captureProductLocal', runBinding:binding, payload:{identity:{
+    domain:config.domain, product_url:f.canonical, color_key:'color', selected_color:f.color}}};
+  const dispatch = msg => b.dispatch(msg, 7, f.canonical);
+  assert.equal((await dispatch(message)).success, true);
+  for (const identity of [
+    {...message.payload.identity, selected_color:'Beige/Black'},
+    {...message.payload.identity, selected_color:''},
+    {...message.payload.identity, color_key:'url'},
+    {...message.payload.identity, domain:'other.test'},
+    {...message.payload.identity, product_url:f.canonical.replace('fy563','fy564')}
+  ]) assert.equal((await dispatch({...message,payload:{identity}})).success, false);
+  assert.equal((await dispatch({...message,runBinding:{...binding,selectedColor:'Beige/Black'},
+    payload:{identity:{...message.payload.identity,selected_color:'Beige/Black'}}})).success,false);
+  delete b.stored.catalogTakeoverRun.current.binding.selectedColor;
+  assert.equal((await dispatch(message)).success, false);
+  b.stored.catalogTakeoverRun.config = {...config, captureColorPolicy:undefined};
+  assert.equal((await dispatch(message)).success, false);
+  assert.equal(b.acquisitions.length, 1);
 });

@@ -73,7 +73,8 @@ async function takeoverOwnedTab(binding) {
       run.current.url !== binding.expectedUrl ||
       run.current.binding?.documentId !== binding.documentId ||
       run.current.binding?.documentUrl !== binding.documentUrl ||
-      run.current.binding.tabId !== binding.tabId) {
+      run.current.binding.tabId !== binding.tabId ||
+      run.current.binding.selectedColor !== binding.selectedColor) {
     throw new Error('take-over run/tab binding changed');
   }
   const tab = await chromeCallback(callback => chrome.tabs.get(binding.tabId, callback));
@@ -332,12 +333,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.runBinding) {
       const binding = message.runBinding;
       const identity = message.payload?.identity;
+      const run = await takeoverIo.read();
       if (sender.tab?.id !== binding.tabId ||
           (!takeoverSameUrl(sender.url || sender.tab?.url, binding.documentUrl || binding.expectedUrl) &&
            !takeoverSameUrl(sender.url || sender.tab?.url, binding.expectedUrl)) ||
-          identity?.domain !== new URL(binding.expectedUrl).hostname ||
-          identity?.color_key !== 'url' ||
-          !takeoverSameUrl(identity.product_url, binding.expectedUrl)) {
+          !globalThis.PageImageSaverTakeover.captureIdentityMatches(
+            identity, run, binding.expectedUrl, run.current?.binding?.selectedColor ?? null)) {
         throw new Error('take-over capture sender or identity mismatch');
       }
       await takeoverOwnedTab(binding);

@@ -45,6 +45,27 @@ class BravissimoBrowser(unittest.TestCase):
                 self.assertEqual(result['end'],dict(type='result-total',total=row['total']))
             finally:page.close()
 
+    def test_production_seed_discovery_completes_with_saved_terminal_grid(self):
+        row=next(r for r in ROWS if r['fixture']=='bravissimo-all-bras-200.html')
+        page=self.open(row)
+        try:
+            page.add_script_tag(content=source('takeover_runner.js'))
+            result=page.evaluate("""async config => {
+              let saved=null, clock=100000;
+              const runner=PageImageSaverTakeover.createTakeoverRunner({now:()=>clock,random:()=>0.5,
+                read:async()=>structuredClone(saved),save:async run=>{saved=structuredClone(run);},
+                alarm:async()=>{},notify:async()=>{},load:async()=>inspectTakeoverPage(config,'discovery')});
+              await runner.importDiscovery(config,[{sha256:'a'.repeat(64),report:{
+                format:'page-image-saver-listing-seeds/v1',schema_version:1,site:config.domain,
+                seeds:[window.location.href]}}]);
+              await runner.start(); await runner.tick(); clock+=12000; await runner.tick();
+              return saved;
+            }""",CONFIG)
+            self.assertEqual(result['status'],'complete')
+            self.assertTrue(result['listings']['discoveryComplete'])
+            self.assertEqual(len(result['listings']['visited'][0]['products']),129)
+        finally: page.close()
+
     def test_real_export_three_smoke_candidates(self):
         handles=['fy563','pn305','lg402']
         for handle in handles:
@@ -52,20 +73,38 @@ class BravissimoBrowser(unittest.TestCase):
             try:
                 content=source('content_script.js')
                 page.add_script_tag(content=source('takeover_runner.js'))
-                page.add_script_tag(content=content[content.index('function captureSwatchColor()'):content.index('function captureCanonicalUrl(')]+content[content.index('function capturePageHtml()'):content.index('async function recordCaptureFailure(')]+content[content.index('async function captureCurrentProduct('):content.index('function takeoverRequest(')])
+                page.add_script_tag(content=content[content.index('function captureSwatchColor()'):content.index('function captureCanonicalUrl(')]+content[content.index('function captureCanonicalUrl('):content.index('async function recordCaptureFailure(')]+content[content.index('function takeoverUnavailableChoice('):content.index('function rescanCaptureImages(')]+content[content.index('async function captureCurrentProduct('):content.index('function takeoverRequest(')])
+                background=source('background.js')
+                page.evaluate("""() => {
+                  globalThis.captureListeners=[];
+                  globalThis.chrome={runtime:{onMessage:{addListener:fn=>captureListeners.push(fn)}}};
+                }""")
+                page.add_script_tag(content=
+                    background[background.index('function chromeCallback('):background.index('async function takeoverTabComplete(')]+
+                    background[background.index('function takeoverSameUrl('):background.index('async function assertAutoCaptureAllowed(')]+
+                    background[background.index('chrome.runtime.onMessage.addListener(',background.index('// Product capture is always local.')):background.index('/*\n  The product capture path')])
                 result=page.evaluate("""async config => {
                   globalThis.previousCaptureStates=new Map(); globalThis.loadCaptureSiteConfig=async()=>config;
-                  globalThis.assertTakeoverBinding=()=>{}; const files={};
-                  globalThis.chrome={runtime:{sendMessage:async(message,reply)=>{
-                    const completion=await PageImageSaverHelpers.exportProductCapture(message.payload,{
-                      attemptId:'0123456789abcdef',
-                      fetchImage:async()=>({bytes:Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jx1sAAAAASUVORK5CYII='),c=>c.charCodeAt(0)),contentType:'image/png'}),
-                      saveBytes:async(path,bytes)=>{files[path]=Array.from(bytes);}});
-                    reply({success:true,storage:'downloads',completion});}}};
+                  const files={};
+                  globalThis.CONFIG={receiver:{enabled:false}};
+                  globalThis.requireSettingsReady=async()=>{};
+                  globalThis.fetch=async url=>({ok:true,url,headers:{get:()=> 'image/png'},
+                    arrayBuffer:async()=>Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jx1sAAAAASUVORK5CYII='),c=>c.charCodeAt(0)).buffer});
+                  globalThis.blobToDataUrl=blob=>new Promise(resolve=>{
+                    const reader=new FileReader(); reader.onload=()=>resolve(reader.result);reader.readAsDataURL(blob);});
+                  PageImageSaverHelpers.saveCaptureDownload=async(_chrome,data,path)=>{
+                    files[path]=Array.from(Uint8Array.from(atob(data.split(',')[1]),c=>c.charCodeAt(0)));};
+                  chrome.storage={local:{get:(_key,reply)=>reply({catalogTakeoverTabId:7})}};
+                  chrome.tabs={get:(_id,reply)=>reply({id:7,url:window.location.href})};
+                  chrome.runtime.sendMessage=(message,reply)=>{
+                    for(const listener of captureListeners)
+                      if(listener(message,{tab:{id:7,url:window.location.href},url:window.location.href},reply)) return;
+                    throw new Error('No background capture handler');};
                   const inspected=await inspectTakeoverPage(config);
                   const scope=PageImageSaverTakeover.classifyTakeoverScope(inspected.product,config);
                   if(scope.decision!=='include') throw new Error('Smoke product scope must include');
                   let saved=null, result, testClock=100000;
+                  globalThis.takeoverIo={read:async()=>structuredClone(saved)};
                   const runner=PageImageSaverTakeover.createTakeoverRunner({
                     now:()=>testClock, random:()=>0.5, read:async()=>structuredClone(saved),
                     save:async run=>{saved=structuredClone(run);},alarm:async()=>{},notify:async()=>{},
@@ -84,8 +123,8 @@ class BravissimoBrowser(unittest.TestCase):
                       next_url:null,end_check:{observed:null,passed:false}}]}}]);
                   await runner.start();await runner.tick();testClock+=12000;await runner.tick();
                   if(saved.status!=='finished_with_gaps' || saved.products[0].reason!=='exported_unverified')
-                    throw new Error('Downloads queue must finish with unverified export, not pause: '+saved.status+' '+saved.reason);
-                  return {files,completion:result.completion}; }""",CONFIG)
+                    throw new Error('Downloads queue must finish with unverified export, not pause: '+saved.status+' '+saved.reason+' '+JSON.stringify(saved.products));
+                  return {files,completion:result.record}; }""",CONFIG)
                 self.assertEqual(result['completion']['identity']['selected_color'],row['color'])
                 self.assertEqual(result['completion']['identity']['color_key'],'color')
                 self.assertEqual(result['completion']['product']['product_id'],row['product_id'])
