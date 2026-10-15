@@ -88,7 +88,9 @@
       selectors: {productLinkSelector: run.config.listing.productLinkSelector,
         nextSelector: run.config.listing.pagination.nextSelector,
         endCheck: run.config.listing.endCheck || null},
+      ...(run.listingSeeds ? {seeds: run.listingSeeds, seed_file_sha256: run.seedFileSha256} : {}),
       listings: run.listings.visited.map(row => ({url: row.url, final_url: row.final_url,
+        ...(row.seed ? {seed_url: row.seed} : {}),
         products: row.products, next_url: row.next_url,
         end_check: {observed: row.end, passed: row.endPassed}})),
       totals: {listing_pages: run.listings.visited.length, product_urls: run.products.length},
@@ -117,7 +119,7 @@
     const verifiedHere = new Set();
     async function save(run) { await io.save(run); return run; }
     async function read() { return io.read(); }
-    async function preview(config, page, mode = 'capture') {
+    async function preview(config, page, mode = 'capture', seedSource = null) {
       if (!['capture', 'discovery'].includes(mode)) throw new Error('unknown catalog mode');
       if (config?.listing?.enabled === false && (mode === 'discovery' || page?.kind !== 'product'))
         throw new Error('Discovery needs saved listing evidence for pagination and totals');
@@ -146,6 +148,12 @@
         listings: {queue: [], visited: [], discoveryComplete: false}, products: [],
         current: null, lastNavigationStarted: null, nextNavigationAt: null,
         pacing: pacingFor(config), loadFailures: {}, reason: null};
+      if (seedSource) {
+        run.listingSeeds = seedSource.seeds;
+        run.seedFileSha256 = seedSource.sha256;
+        run.listings.pendingSeeds = seedSource.seeds.slice(1);
+        run.listings.activeSeed = seedSource.seeds[0];
+      }
       return save(run);
     }
     async function importDiscovery(config, sources) {
@@ -163,6 +171,18 @@
       }
       if (!Array.isArray(sources) || !sources.length || sources.length > MAX_LISTINGS)
         throw new Error('discovery exports are missing or exceed the safety bound');
+      if (sources.some(source => source?.report?.format === 'page-image-saver-listing-seeds/v1')) {
+        if (sources.length !== 1) throw new Error('import one listing seed file at a time');
+        const {report, sha256} = sources[0];
+        if (report.schema_version !== 1 || report.site !== domain ||
+            typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256) ||
+            !Array.isArray(report.seeds) || !report.seeds.length || report.seeds.length > MAX_LISTINGS)
+          throw new Error('invalid listing seed file');
+        const seeds = report.seeds.map(url => canonical(url, domain));
+        if (new Set(seeds).size !== seeds.length) throw new Error('duplicate listing seeds');
+        // Commit the complete seed plan once, never a partial single-seed preview.
+        return preview(config, {kind: 'listing', url: seeds[0], products: []}, 'discovery', {seeds, sha256});
+      }
       const products = new Map();
       let listingCount = 0;
       for (const source of sources) {
@@ -421,10 +441,13 @@
         if (!found.length && !run.listings.visited.length)
           return interrupt(run, 'paused', `product-link selector found no products on first listing: ${url}`);
         if (!found.length) return interrupt(run, 'discovery_incomplete', `listing structure mismatch at ${url}`);
-        if (run.listings.visited.length >= MAX_LISTINGS || run.products.length + found.length > MAX_PRODUCTS)
+        const known = new Set(run.products.map(row => row.url));
+        const newProducts = found.filter(url => !known.has(url));
+        if (run.listings.visited.length >= MAX_LISTINGS || known.size + newProducts.length > MAX_PRODUCTS)
           return interrupt(run, 'discovery_incomplete', 'catalog safety bound reached');
         run.listings.queue.shift();
         const listing = {url, found: found.length, end: page.end || null};
+        if (run.listingSeeds) listing.seed = run.listings.activeSeed;
         if (run.mode === 'discovery') Object.assign(listing, {
           final_url: page.url, next_url: page.next || null, endPassed: false,
           products: found.map(productUrl => ({url: productUrl,
@@ -433,24 +456,36 @@
             })?.card_text || ''}))
         });
         run.listings.visited.push(listing);
-        const known = new Set(run.products.map(row => row.url));
-        for (const productUrl of found) if (!known.has(productUrl)) {
-          run.products.push({url: productUrl, status: run.mode === 'discovery' ? 'discovered' : 'pending'}); known.add(productUrl);
+        for (const productUrl of newProducts) {
+          run.products.push({url: productUrl, status: run.mode === 'discovery' ? 'discovered' : 'pending'});
         }
         let next = null;
         try { if (page.next) next = canonical(page.next, run.domain); }
         catch (_) { return interrupt(run, 'discovery_incomplete', `invalid next page at ${url}`); }
+        const categoryPages = run.listingSeeds
+          ? run.listings.visited.filter(row => row.seed === run.listings.activeSeed) : run.listings.visited;
+        const categoryCount = run.listingSeeds
+          ? new Set(categoryPages.flatMap(row => row.products.map(product => product.url))).size : run.products.length;
+        const endPassed = !next && endCheckPasses(run.config, page, categoryPages, categoryCount);
         if (run.mode === 'discovery') {
           listing.next_url = next;
-          listing.endPassed = !next && endCheckPasses(run.config, page, run.listings.visited, run.products.length);
+          listing.endPassed = endPassed;
         }
         if (next) {
           if (run.listings.visited.some(row => row.url === next) || run.listings.queue.includes(next))
             return interrupt(run, 'discovery_incomplete', `pagination cycle at ${url}`);
           run.listings.queue.push(next);
-        } else if (endCheckPasses(run.config, page, run.listings.visited, run.products.length)) {
-          run.listings.discoveryComplete = true;
+        } else if (endPassed) {
+          const seed = run.listings.pendingSeeds?.shift();
+          if (seed) {
+            if (run.listings.visited.some(row => row.url === seed))
+              return interrupt(run, 'discovery_incomplete', 'listing seed overlaps a visited page');
+            run.listings.activeSeed = seed;
+            run.listings.queue.push(seed);
+          } else run.listings.discoveryComplete = true;
         } else {
+          if (run.listingSeeds) return interrupt(run, 'discovery_incomplete',
+            `missing next page without passing end check at ${url}`);
           run.listings.discoveryReason = `missing next page without passing end check at ${url}`;
         }
       } else {

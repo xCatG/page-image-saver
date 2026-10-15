@@ -897,7 +897,7 @@ function createImageSelectionUI(images) {
     <details id="catalog-capture-section" style="margin-bottom: 4px; max-height: 35vh; overflow-y: auto; font-size: 12px;">
       <summary style="cursor: pointer; padding: 4px 0; font-weight: bold;">Catalog capture</summary>
       <label>Run mode <select id="takeover-mode"><option value="capture">Product capture</option><option value="discovery">Listing discovery only</option><option value="capture-discovery">Capture discovery queue</option></select></label>
-      <label style="display:block;">Discovery exports <input id="takeover-discovery-files" type="file" multiple accept=".json,application/json" style="width:100%;"></label>
+      <label style="display:block;">Discovery exports or listing seeds <input id="takeover-discovery-files" type="file" multiple accept=".json,application/json" style="width:100%;"></label>
       <button id="takeover-reuse-discovery-btn" type="button">Reuse current discovery</button>
       <button id="shopify-feed-btn" type="button" hidden>Save Shopify feed</button>
       <div id="takeover-start-url" style="overflow-wrap:anywhere;">Start URL: no preview yet</div>
@@ -1144,11 +1144,12 @@ document.body.appendChild(container);
         sources.push({sha256, report: JSON.parse(new TextDecoder().decode(bytes))});
       }
       await takeoverRequest('takeoverImportDiscovery', {config, sources, reuse: files === null});
-      modeControl.value = 'capture-discovery';
+      const seedImport = sources.some(source => source.report?.format === 'page-image-saver-listing-seeds/v1');
+      modeControl.value = seedImport ? 'discovery' : 'capture-discovery';
       modeControl.dataset.userChanged = 'true';
       delete takeoverProgress.dataset.previewPending;
       await refreshTakeoverProgress();
-      takeoverFeedback.textContent = 'Fixed queue ready. Take over starts at the URL shown.';
+      takeoverFeedback.textContent = seedImport ? 'Listing seeds ready. Take over discovers all categories; then Reuse current discovery to capture.' : 'Fixed queue ready. Take over starts at the URL shown.';
     } catch (error) {
       const reloadHint = /message port closed|message channel closed|Receiving end does not exist/i.test(error.message) ?
         ' Reload the extension in chrome://extensions, then refresh this page and import again.' : '';

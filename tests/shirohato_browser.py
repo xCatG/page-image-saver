@@ -20,6 +20,38 @@ class ShirohatoBrowser(unittest.TestCase):
         page.add_script_tag(content='const takeoverDocumentId="fixture"; function rescanCaptureImages() {}' + inspector)
         return page.evaluate('([c,m]) => inspectTakeoverPage(c,m)', [config, mode])
 
+    def test_listing_seed_file_input_uses_discovery_mode(self):
+        page = self.browser.new_page()
+        page.route('**/*', lambda route: route.fulfill(status=200, body=''))
+        page.goto('https://www.wakudoki.ne.jp/')
+        content = source('content_script.js')
+        start = content.index('<label>Run mode <select id="takeover-mode">')
+        end = content.index('<button id="shopify-feed-btn"', start)
+        page.set_content(content[start:end] + '<div id="takeover-progress"></div><div id="takeover-feedback"></div>')
+        try:
+            page.add_script_tag(content=source('extension_helpers.js'))
+            page.add_script_tag(content=source('takeover_runner.js'))
+            page.evaluate("""config => {
+                window.savedRun = null;
+                window.runner = PageImageSaverTakeover.createTakeoverRunner({
+                    read: async () => structuredClone(window.savedRun),
+                    save: async run => {window.savedRun = structuredClone(run);}
+                });
+                window.loadCaptureSiteConfig = async () => config;
+                window.takeoverRequest = async (action, args) => runner.importDiscovery(args.config, args.reuse ? undefined : args.sources);
+            }""", json.loads(source('site_config/www.wakudoki.ne.jp.json')))
+            wiring = content[content.index("  const takeoverFeedback = container.querySelector"):content.index("  previewButton.addEventListener('click', async () => {", content.index("  const takeoverFeedback = container.querySelector"))]
+            page.add_script_tag(content="const container=document; let takeoverRefreshSequence=0; async function refreshTakeoverProgress() {} function showStatusMessage() {}" + wiring)
+            report = dict(format='page-image-saver-listing-seeds/v1', schema_version=1,
+                          site='www.wakudoki.ne.jp', seeds=['https://www.wakudoki.ne.jp/c/000010001/?dpt=pro&udns=1'])
+            page.locator('#takeover-discovery-files').set_input_files(dict(name='seeds.json',mimeType='application/json',buffer=json.dumps(report).encode()))
+            page.wait_for_function("window.savedRun?.listingSeeds?.length === 1 && document.querySelector('#takeover-mode').value === 'discovery'")
+            self.assertEqual(page.evaluate('savedRun.status'), 'preview')
+            self.assertEqual(page.evaluate('savedRun.listings.queue'), [])
+            self.assertIn('Listing seeds ready', page.locator('#takeover-feedback').inner_text())
+        finally:
+            page.close()
+
     def test_all_saved_products(self):
         config = json.loads(source('site_config/www.wakudoki.ne.jp.json'))
         for row in json.loads((FIXTURES / 'shirohato-expected.json').read_text()):

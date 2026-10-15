@@ -872,3 +872,90 @@ test('PDP-only VDV config previews products but refuses unevidenced listing disc
   assert.equal(run.previews[0].imageCount,3);
   await assert.rejects(r.runner().preview(config,{kind:'listing',url,products:[]},'discovery'),/saved listing evidence/i);
 });
+
+function seedSource(urls) {
+  return {sha256: 'a'.repeat(64), report: {format: 'page-image-saver-listing-seeds/v1',
+    schema_version: 1, site: site.domain, seeds: urls}};
+}
+const resultSite = {...site, listing: {...site.listing, endCheck: {type: 'result-total'}}};
+const seedPage = (url, products, total, next = null) => ({kind: 'listing', url, products, next,
+  end: {type: 'result-total', total}});
+
+test('import listing seeds traverses each category, checks independent totals, deduplicates capture queue after restart', async () => {
+  const third = first + '?page=2';
+  const r = rig({[first]: seedPage(first, [bra], 2, third),
+    [third]: seedPage(third, [red], 2), [second]: seedPage(second, [bra, sleep], 2)});
+  const writes = [];
+  const save = r.io.save;
+  r.io.save = async run => {writes.push(structuredClone(run)); return save(run);};
+  await r.runner().importDiscovery(resultSite, [seedSource([first, second])]);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].listingSeeds, [first, second]);
+  assert.equal(r.memory.run.mode, 'discovery');
+  assert.equal(r.memory.run.status, 'preview');
+  assert.deepEqual(r.visits, []);
+  await r.runner().start();
+  for (let i=0;i<4;i++) {await r.runner().tick(); r.advance(12000);}
+  assert.equal(r.memory.run.status, 'complete');
+  assert.deepEqual(r.visits, [first, third, second]);
+  const report = exportTakeoverReport(r.memory.run);
+  assert.equal(report.totals.product_urls, 3);
+  assert.deepEqual(report.listings.map(row => row.end_check.passed), [false,true,true]);
+  await r.runner().importDiscovery(resultSite);
+  assert.equal(r.memory.run.mode, 'capture-discovery');
+  assert.equal(r.memory.run.products.length, 3);
+});
+
+test('listing seed terminal shortfall stops before another category or product capture', async () => {
+  const r = rig({[first]: seedPage(first, [bra], 2), [second]: seedPage(second, [red], 1)});
+  await r.runner().importDiscovery(resultSite, [seedSource([first, second])]);
+  await r.runner().start(); await r.runner().tick();
+  assert.equal(r.memory.run.status, 'discovery_incomplete');
+  assert.deepEqual(r.visits, [first]);
+  assert.deepEqual(r.captureCalls, []);
+});
+
+test('invalid listing seeds never replace an existing run', async () => {
+  for (const urls of [[], [first,first], [first,'https://evil.test/list'], ['https://user@shop.example.test/list']]) {
+    const r = rig({});
+    await r.runner().preview(site, listing1);
+    const before = structuredClone(r.memory.run);
+    await assert.rejects(r.runner().importDiscovery(resultSite, [seedSource(urls)]));
+    assert.deepEqual(r.memory.run, before);
+  }
+});
+
+test('seed discovery pauses on denial and retains remaining seeds across resume', async () => {
+  const pages = {[first]: seedPage(first, [bra], 1), [second]: {status: 429}};
+  const r = rig(pages);
+  await r.runner().importDiscovery(resultSite, [seedSource([first,second])]);
+  await r.runner().start(); await r.runner().tick(); r.advance(12000); await r.runner().tick();
+  assert.equal(r.memory.run.status, 'paused');
+  assert.deepEqual(r.memory.run.listings.queue, [second]);
+  assert.equal(r.memory.run.listings.discoveryComplete, false);
+  pages[second] = seedPage(second, [bra,red], 2);
+  await r.runner().resume(); r.advance(12000);
+  await r.runner().tick(); r.advance(12000); await r.runner().tick();
+  assert.equal(r.memory.run.status, 'complete');
+  assert.equal(r.memory.run.products.length, 2);
+});
+
+test('seed discovery rejects changing totals even when final unique count matches', async () => {
+  const r = rig({[first]: seedPage(first, [bra], 3, second), [second]: seedPage(second, [red], 2)});
+  await r.runner().importDiscovery(resultSite, [seedSource([first])]);
+  await r.runner().start(); await r.runner().tick(); r.advance(12000); await r.runner().tick();
+  assert.equal(r.memory.run.status, 'discovery_incomplete');
+  assert.equal(r.memory.run.listings.discoveryComplete, false);
+});
+
+for (const [start, total, status] of [[3000,9000,'complete'],[4000,10000,'complete'],[4001,6000,'discovery_incomplete']]) {
+  test(`seed discovery applies product safety limit to unique union (${start})`, async () => {
+    const urls = offset => Array.from({length:6000},(_,i)=>`https://${site.domain}/product/${offset+i}`);
+    const r = rig({[first]:seedPage(first,urls(0),6000),[second]:seedPage(second,urls(start),6000)});
+    await r.runner().importDiscovery(resultSite,[seedSource([first,second])]);
+    await r.runner().start();
+    for(let i=0;i<3;i++){await r.runner().tick();r.advance(12000);}
+    assert.equal(r.memory.run.status,status);
+    assert.equal(r.memory.run.products.length,total);
+  });
+}
