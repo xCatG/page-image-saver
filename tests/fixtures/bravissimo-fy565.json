@@ -1,0 +1,67 @@
+{
+  "canonical": "https://www.bravissimo.com/us/products/entwined-thong-fy565/",
+  "product": {
+    "styleCode": "FY565",
+    "styleColourCode": "FY565BFL",
+    "styleName": "Entwined Thong",
+    "styleColourName": "Entwined Thong in Blue Floral by Freya",
+    "brand": "Freya",
+    "category": "Lingerie",
+    "productGroup": "Thong",
+    "colour": {
+      "colour": "Blue Floral"
+    },
+    "prices": {
+      "price": 32,
+      "originalPrice": 32,
+      "promotions": []
+    },
+    "url": "/products/entwined-thong-fy565/#blue-floral-fy565bfl",
+    "sizes": {
+      "value": "size",
+      "variants": [
+        {
+          "label": "XS",
+          "value": "XS"
+        },
+        {
+          "label": "S",
+          "value": "S"
+        },
+        {
+          "label": "M",
+          "value": "M"
+        },
+        {
+          "label": "L",
+          "value": "L"
+        },
+        {
+          "label": "XL",
+          "value": "XL"
+        }
+      ]
+    },
+    "availableColours": [
+      {
+        "name": "Blue Floral",
+        "styleColourCode": "FY565BFL",
+        "url": "/products/entwined-thong-fy565/#blue-floral-fy565bfl"
+      }
+    ],
+    "images": [
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/2OjHFmw6AZg4ZgO3I9aChH/92bc0f4ff69c7ca323b0a859a760825f/FY565BFL-main.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/2OjHFmw6AZg4ZgO3I9aChH/92bc0f4ff69c7ca323b0a859a760825f/FY565BFL-main.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/2OjHFmw6AZg4ZgO3I9aChH/92bc0f4ff69c7ca323b0a859a760825f/FY565BFL-main.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/7rMrWZ6hC9aGIvSom65jfv/a2ccd3426097ddf4f1daecb8ec859c41/FY565BFL-1.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/7rMrWZ6hC9aGIvSom65jfv/a2ccd3426097ddf4f1daecb8ec859c41/FY565BFL-1.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/7rMrWZ6hC9aGIvSom65jfv/a2ccd3426097ddf4f1daecb8ec859c41/FY565BFL-1.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      }
+    ]
+  },
+  "jsonld": [],
+  "color": "Blue Floral"
+}

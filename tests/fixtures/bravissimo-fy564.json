@@ -1,0 +1,67 @@
+{
+  "canonical": "https://www.bravissimo.com/us/products/entwined-brief-fy564/",
+  "product": {
+    "styleCode": "FY564",
+    "styleColourCode": "FY564BFL",
+    "styleName": "Entwined Brief",
+    "styleColourName": "Entwined Brief in Blue Floral by Freya",
+    "brand": "Freya",
+    "category": "Lingerie",
+    "productGroup": "Brief",
+    "colour": {
+      "colour": "Blue Floral"
+    },
+    "prices": {
+      "price": 35,
+      "originalPrice": 35,
+      "promotions": []
+    },
+    "url": "/products/entwined-brief-fy564/#blue-floral-fy564bfl",
+    "sizes": {
+      "value": "size",
+      "variants": [
+        {
+          "label": "XS",
+          "value": "XS"
+        },
+        {
+          "label": "S",
+          "value": "S"
+        },
+        {
+          "label": "M",
+          "value": "M"
+        },
+        {
+          "label": "L",
+          "value": "L"
+        },
+        {
+          "label": "XL",
+          "value": "XL"
+        }
+      ]
+    },
+    "availableColours": [
+      {
+        "name": "Blue Floral",
+        "styleColourCode": "FY564BFL",
+        "url": "/products/entwined-brief-fy564/#blue-floral-fy564bfl"
+      }
+    ],
+    "images": [
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/64u0L3t9rHIIQB354g7Miy/f8c0aa008e3204602d0f9ac8998e3da4/FY564BFL-main.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/64u0L3t9rHIIQB354g7Miy/f8c0aa008e3204602d0f9ac8998e3da4/FY564BFL-main.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/64u0L3t9rHIIQB354g7Miy/f8c0aa008e3204602d0f9ac8998e3da4/FY564BFL-main.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/1pb6yx77gjleDfAY5UJa80/759bb8f0f01ca014221d4d182e1c6f11/FY564BFL-1.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/1pb6yx77gjleDfAY5UJa80/759bb8f0f01ca014221d4d182e1c6f11/FY564BFL-1.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/1pb6yx77gjleDfAY5UJa80/759bb8f0f01ca014221d4d182e1c6f11/FY564BFL-1.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      }
+    ]
+  },
+  "jsonld": [],
+  "color": "Blue Floral"
+}

@@ -1063,7 +1063,7 @@ document.body.appendChild(container);
     if (config) {
       document.getElementById('capture-image-mode').value = 'site';
       document.getElementById('capture-color-policy').value =
-        config.colorVariantStrategy === 'separate-url' ? 'url' : 'color';
+        config.captureColorPolicy || (config.colorVariantStrategy === 'separate-url' ? 'url' : 'color');
     }
     document.getElementById('capture-color').value = capturePageProduct().color || '';
   });
@@ -2488,6 +2488,26 @@ function captureJsonLd() {
     .filter(value => value !== null);
 }
 
+function captureBravissimoProduct() {
+  const candidates = Array.from(document.scripts).flatMap(node => {
+    const match = node.textContent.match(/setDataLayer\((\{.*?\})\);/s);
+    if (!match) return [];
+    try { const value = JSON.parse(match[1]); return value.product ? [value.product] : []; }
+    catch (_) { return []; }
+  });
+  if (candidates.length !== 1) throw new Error('Bravissimo: missing or ambiguous current product');
+  const result = globalThis.PageImageSaverHelpers.bravissimoProduct(candidates[0], captureJsonLd(),
+    window.location.href, document.querySelector('link[rel="canonical"]')?.href,
+    document.querySelector('.c-product-details__selected-colour-name')?.textContent.trim(),
+    JSON.parse(document.querySelector('script#__STATE__')?.textContent || '{}').app?.config?.currency);
+  const rendered = Array.from(document.querySelectorAll('#product-gallery .c-product-gallery__carousel--feature picture source'),
+    node => node.getAttribute('srcset')?.split(',')[0].trim().split(/\s+/)[0]).filter(Boolean);
+  const paths = new Set(rendered.map(raw => new URL(raw, window.location.href).pathname));
+  if (paths.size !== result.images.length || result.images.some(raw => !paths.has(new URL(raw).pathname)))
+    throw new Error('Bravissimo: current gallery not bound to product data');
+  return result;
+}
+
 function captureBareNecessitiesProduct() {
   const scripts = document.querySelectorAll('script#swym-snippet');
   if (scripts.length !== 1) throw new Error('Bare Necessities product: missing or ambiguous Shopify JSON');
@@ -2499,6 +2519,12 @@ function captureBareNecessitiesProduct() {
 }
 
 function capturePageProductEvidence() {
+  if (window.location.hostname === 'www.bravissimo.com' && window.location.pathname.startsWith('/us/products/')) {
+    const result = captureBravissimoProduct();
+    return {...globalThis.PageImageSaverHelpers.captureProductEvidence(captureJsonLd(), result.microdata),
+      facts: result.facts, microdata: result.microdata, fact_source: 'microdata'};
+  }
+
   if (window.location.hostname === 'www.barenecessities.com' && window.location.pathname.startsWith('/products/')) {
     const {facts} = captureBareNecessitiesProduct();
     const microdata = {name: facts.name, productID: facts.product_id,
@@ -2596,6 +2622,9 @@ function captureProductSeen(config, product = capturePageProduct()) {
 }
 
 function captureGallery(config, mode) {
+  if (mode === 'site' && config?.product?.renditionResolver === 'bravissimo')
+    return captureBravissimoProduct().images;
+
   if (mode === 'site' && config?.product?.renditionResolver === 'bare-necessities') {
     const rendered = Array.from(document.querySelectorAll(config.product.allImagesSelector), node =>
       node.getAttribute('srcset')?.split(',')[0].trim().split(/\s+/)[0] || node.getAttribute('src'));
@@ -2732,7 +2761,7 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
     throw new Error('Same-color image reselection requires selected checkboxes');
   }
   const policy = manual ? document.getElementById('capture-color-policy').value :
-    config?.colorVariantStrategy === 'separate-url' ? 'url' : 'color';
+    config?.captureColorPolicy || (config?.colorVariantStrategy === 'separate-url' ? 'url' : 'color');
   const readState = () => {
     const product = capturePageProduct();
     const gallery = selectedGallery || captureGallery(config, mode);
@@ -2853,6 +2882,9 @@ async function refreshTakeoverProgress() {
 }
 
 function takeoverCategory() {
+  if (window.location.hostname === 'www.bravissimo.com' && window.location.pathname.startsWith('/us/products/'))
+    return captureBravissimoProduct().category;
+
   if (window.location.hostname === 'www.barenecessities.com' && window.location.pathname.startsWith('/products/'))
     return captureBareNecessitiesProduct().category;
   for (const raw of captureJsonLd()) {
@@ -2915,7 +2947,7 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   let listingCards = [];
   for (let attempt = 0; attempt < 20; attempt++) {
     listingCards = Array.from(document.querySelectorAll(selector), node => {
-      const card = (config.domain === 'www.barenecessities.com' ? node.closest('.br-product-tile') : null) ||
+      const card = (config.domain === 'www.bravissimo.com' ? node.closest('.c-product-summary') : null) || (config.domain === 'www.barenecessities.com' ? node.closest('.br-product-tile') : null) ||
         node.closest('.product-item, .product-card, .product__item, [data-testid="ProductCard"], article') || node;
       return {url: node.href, card_text: card.textContent.replace(/\s+/g, ' ').trim(),
         product_id: card.querySelector('[data-product-id]')?.getAttribute('data-product-id') || null};
@@ -2938,7 +2970,7 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
       return {...card, url: url.href};
     });
   }
-  const products = listingCards.map(card => card.url);
+  let products = listingCards.map(card => card.url);
   let next = document.querySelector(nextSelector)?.href || null;
   if (config.domain === 'www.barenecessities.com') {
     const current = Number(document.querySelector('.br-collection .br-pagination__item--current')?.textContent.trim());
@@ -2951,6 +2983,21 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
       next = url.href;
     }
   }
+  if (config.domain === 'www.bravissimo.com') {
+    if (!window.location.pathname.startsWith('/us/collections/')) throw new Error('Bravissimo listing: US only');
+    for (const card of listingCards) {
+      const url = new URL(card.url);
+      if (url.origin !== window.location.origin || !/^\/us\/products\/[^/]+\/$/.test(url.pathname))
+        throw new Error('Bravissimo listing: invalid product link');
+      url.search = ''; url.hash = ''; card.url = url.href;
+    }
+    if (next) {
+      const url = new URL(next);
+      if (url.origin !== window.location.origin || url.pathname !== window.location.pathname)
+        throw new Error('Bravissimo listing: foreign pagination');
+    }
+  }
+  products = listingCards.map(card => card.url);
   const cards = mode === 'discovery' ? listingCards : undefined;
   const check = config.listing?.endCheck;
   const node = check?.selector ? document.querySelector(check.selector) : null;
@@ -2963,6 +3010,20 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   if (check?.type === 'result-total') {
     const total = globalThis.PageImageSaverHelpers.listingResultTotal(node?.textContent || '');
     if (total !== null) end = {type: 'result-total', total};
+  }
+  if (check?.type === 'bravissimo-total') {
+    const values = Array.from(document.scripts).flatMap(node => {
+      const match = node.textContent.match(/setDataLayer\((\{.*?\})\);/s);
+      try { const value = match && JSON.parse(match[1]); return value?.productListing ? [value.productListing] : []; }
+      catch (_) { return []; }
+    });
+    if (values.length !== 1 || !Number.isSafeInteger(values[0].total) || values[0].total < 0 || !products.length)
+      throw new Error('Bravissimo listing: current total/grid missing');
+    const pagination = values[0].pagination;
+    const page = Number(new URL(window.location.href).searchParams.get('page') || 1);
+    if (pagination.page !== page || (page < pagination.total) !== !!next)
+      throw new Error('Bravissimo listing: pagination mismatch');
+    end = {type: 'result-total', total: values[0].total};
   }
   return {kind: 'listing', url: window.location.href,
     documentId: takeoverDocumentId, products, cards, locale: document.documentElement.lang || null, next, end};

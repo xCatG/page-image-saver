@@ -1,0 +1,525 @@
+{
+  "canonical": "https://www.bravissimo.com/us/products/millie-luxe-bra-lg402/",
+  "product": {
+    "styleCode": "LG402",
+    "styleColourCode": "LG402BLA",
+    "styleName": "Millie Luxe Bra",
+    "styleColourName": "Mille Luxe Bra in Black by Bravissimo",
+    "brand": "Bravissimo",
+    "category": "Lingerie",
+    "productGroup": "Balconette Bra",
+    "colour": {
+      "colour": "Black"
+    },
+    "prices": {
+      "price": 88,
+      "originalPrice": 88,
+      "promotions": []
+    },
+    "url": "/products/millie-luxe-bra-lg402/#black-lg402bla",
+    "sizes": {
+      "value": "back",
+      "variants": [
+        {
+          "value": "28",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "28DD",
+                "value": "DD"
+              },
+              {
+                "label": "28E",
+                "value": "E"
+              },
+              {
+                "label": "28F",
+                "value": "F"
+              },
+              {
+                "label": "28FF",
+                "value": "FF"
+              },
+              {
+                "label": "28G",
+                "value": "G"
+              },
+              {
+                "label": "28GG",
+                "value": "GG"
+              },
+              {
+                "label": "28H",
+                "value": "H"
+              },
+              {
+                "label": "28HH",
+                "value": "HH"
+              },
+              {
+                "label": "28J",
+                "value": "J"
+              },
+              {
+                "label": "28JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "28K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "30",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "30D",
+                "value": "D"
+              },
+              {
+                "label": "30DD",
+                "value": "DD"
+              },
+              {
+                "label": "30E",
+                "value": "E"
+              },
+              {
+                "label": "30F",
+                "value": "F"
+              },
+              {
+                "label": "30FF",
+                "value": "FF"
+              },
+              {
+                "label": "30G",
+                "value": "G"
+              },
+              {
+                "label": "30GG",
+                "value": "GG"
+              },
+              {
+                "label": "30H",
+                "value": "H"
+              },
+              {
+                "label": "30HH",
+                "value": "HH"
+              },
+              {
+                "label": "30J",
+                "value": "J"
+              },
+              {
+                "label": "30JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "30K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "32",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "32D",
+                "value": "D"
+              },
+              {
+                "label": "32DD",
+                "value": "DD"
+              },
+              {
+                "label": "32E",
+                "value": "E"
+              },
+              {
+                "label": "32F",
+                "value": "F"
+              },
+              {
+                "label": "32FF",
+                "value": "FF"
+              },
+              {
+                "label": "32G",
+                "value": "G"
+              },
+              {
+                "label": "32GG",
+                "value": "GG"
+              },
+              {
+                "label": "32H",
+                "value": "H"
+              },
+              {
+                "label": "32HH",
+                "value": "HH"
+              },
+              {
+                "label": "32J",
+                "value": "J"
+              },
+              {
+                "label": "32JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "32K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "34",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "34D",
+                "value": "D"
+              },
+              {
+                "label": "34DD",
+                "value": "DD"
+              },
+              {
+                "label": "34E",
+                "value": "E"
+              },
+              {
+                "label": "34F",
+                "value": "F"
+              },
+              {
+                "label": "34FF",
+                "value": "FF"
+              },
+              {
+                "label": "34G",
+                "value": "G"
+              },
+              {
+                "label": "34GG",
+                "value": "GG"
+              },
+              {
+                "label": "34H",
+                "value": "H"
+              },
+              {
+                "label": "34HH",
+                "value": "HH"
+              },
+              {
+                "label": "34J",
+                "value": "J"
+              },
+              {
+                "label": "34JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "34K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "36",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "36D",
+                "value": "D"
+              },
+              {
+                "label": "36DD",
+                "value": "DD"
+              },
+              {
+                "label": "36E",
+                "value": "E"
+              },
+              {
+                "label": "36F",
+                "value": "F"
+              },
+              {
+                "label": "36FF",
+                "value": "FF"
+              },
+              {
+                "label": "36G",
+                "value": "G"
+              },
+              {
+                "label": "36GG",
+                "value": "GG"
+              },
+              {
+                "label": "36H",
+                "value": "H"
+              },
+              {
+                "label": "36HH",
+                "value": "HH"
+              },
+              {
+                "label": "36J",
+                "value": "J"
+              },
+              {
+                "label": "36JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "36K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "38",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "38D",
+                "value": "D"
+              },
+              {
+                "label": "38DD",
+                "value": "DD"
+              },
+              {
+                "label": "38E",
+                "value": "E"
+              },
+              {
+                "label": "38F",
+                "value": "F"
+              },
+              {
+                "label": "38FF",
+                "value": "FF"
+              },
+              {
+                "label": "38G",
+                "value": "G"
+              },
+              {
+                "label": "38GG",
+                "value": "GG"
+              },
+              {
+                "label": "38H",
+                "value": "H"
+              },
+              {
+                "label": "38HH",
+                "value": "HH"
+              },
+              {
+                "label": "38J",
+                "value": "J"
+              },
+              {
+                "label": "38JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "38K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "40",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "40D",
+                "value": "D"
+              },
+              {
+                "label": "40DD",
+                "value": "DD"
+              },
+              {
+                "label": "40E",
+                "value": "E"
+              },
+              {
+                "label": "40F",
+                "value": "F"
+              },
+              {
+                "label": "40FF",
+                "value": "FF"
+              },
+              {
+                "label": "40G",
+                "value": "G"
+              },
+              {
+                "label": "40GG",
+                "value": "GG"
+              },
+              {
+                "label": "40H",
+                "value": "H"
+              },
+              {
+                "label": "40HH",
+                "value": "HH"
+              },
+              {
+                "label": "40J",
+                "value": "J"
+              },
+              {
+                "label": "40JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "40K",
+                "value": "K"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "availableColours": [
+      {
+        "name": "Black",
+        "styleColourCode": "LG402BLA",
+        "url": "/products/millie-luxe-bra-lg402/#black-lg402bla"
+      },
+      {
+        "name": "Amber",
+        "styleColourCode": "LG402AMB",
+        "url": "/products/millie-luxe-bra-lg402/#amber-lg402amb"
+      },
+      {
+        "name": "Forest Green",
+        "styleColourCode": "LG402FGN",
+        "url": "/products/millie-luxe-bra-lg402/#forest-green-lg402fgn"
+      },
+      {
+        "name": "White",
+        "styleColourCode": "LG402WHT",
+        "url": "/products/millie-luxe-bra-lg402/#white-lg402wht"
+      },
+      {
+        "name": "Burgundy",
+        "styleColourCode": "LG402BUR",
+        "url": "/products/millie-luxe-bra-lg402/#burgundy-lg402bur"
+      },
+      {
+        "name": "Teal",
+        "styleColourCode": "LG402TEL",
+        "url": "/products/millie-luxe-bra-lg402/#teal-lg402tel"
+      }
+    ],
+    "images": [
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/BobwNMYXtHYvHsn5Q62qB/2a3a68ef6760673a3c7aed924c48a791/LG402BLK-main.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/BobwNMYXtHYvHsn5Q62qB/2a3a68ef6760673a3c7aed924c48a791/LG402BLK-main.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/BobwNMYXtHYvHsn5Q62qB/2a3a68ef6760673a3c7aed924c48a791/LG402BLK-main.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/4MnBhrdLgTll62qxVJWwlL/93baaeedb173aacc6c3c0e558389cfc6/LG402BLK-2.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/4MnBhrdLgTll62qxVJWwlL/93baaeedb173aacc6c3c0e558389cfc6/LG402BLK-2.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/4MnBhrdLgTll62qxVJWwlL/93baaeedb173aacc6c3c0e558389cfc6/LG402BLK-2.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/7DhfXZaQpLzSFOTC2lPfpb/9a18a58fd4690979f51e613938e75192/LG402BLK-1.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/7DhfXZaQpLzSFOTC2lPfpb/9a18a58fd4690979f51e613938e75192/LG402BLK-1.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/7DhfXZaQpLzSFOTC2lPfpb/9a18a58fd4690979f51e613938e75192/LG402BLK-1.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/36upmVCLhmrIEkJFOytL5D/3d2f4027224cd73e51a999f054779e85/LG402BLA-3.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/36upmVCLhmrIEkJFOytL5D/3d2f4027224cd73e51a999f054779e85/LG402BLA-3.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/36upmVCLhmrIEkJFOytL5D/3d2f4027224cd73e51a999f054779e85/LG402BLA-3.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/4Z4hERMiOLedQUIQDDkmHI/9b18d1f0891b9593e3a8d902cf30aea2/LG402BLA-4.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/4Z4hERMiOLedQUIQDDkmHI/9b18d1f0891b9593e3a8d902cf30aea2/LG402BLA-4.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/4Z4hERMiOLedQUIQDDkmHI/9b18d1f0891b9593e3a8d902cf30aea2/LG402BLA-4.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/4dOr2FcftjX0jMpQWI9SmS/67b9ef7c9b398f8dfb3d0c9c8294f265/LG402BLA-5.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/4dOr2FcftjX0jMpQWI9SmS/67b9ef7c9b398f8dfb3d0c9c8294f265/LG402BLA-5.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/4dOr2FcftjX0jMpQWI9SmS/67b9ef7c9b398f8dfb3d0c9c8294f265/LG402BLA-5.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/3inOYdlwwqe8x9NRXvi3SD/d2f0b95d92e27e723672189c07300e39/LG402BLK-3.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/3inOYdlwwqe8x9NRXvi3SD/d2f0b95d92e27e723672189c07300e39/LG402BLK-3.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/3inOYdlwwqe8x9NRXvi3SD/d2f0b95d92e27e723672189c07300e39/LG402BLK-3.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/2dlLiC4NARKiyH4G5TeNQw/16fc597ae3129d9d7cd469184e2a4fd4/LG402BLK-6.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/2dlLiC4NARKiyH4G5TeNQw/16fc597ae3129d9d7cd469184e2a4fd4/LG402BLK-6.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/2dlLiC4NARKiyH4G5TeNQw/16fc597ae3129d9d7cd469184e2a4fd4/LG402BLK-6.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/1ashiqA0L1MDFqyJNTM2yx/b808e73bc0d2d956d9ac9c2fed6a75b7/LG402BLK-7.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/1ashiqA0L1MDFqyJNTM2yx/b808e73bc0d2d956d9ac9c2fed6a75b7/LG402BLK-7.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/1ashiqA0L1MDFqyJNTM2yx/b808e73bc0d2d956d9ac9c2fed6a75b7/LG402BLK-7.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/6PNNRpJMJuynUC1yMSF3Rv/ce8ad5ab611bc205d8f8bde5773ad38a/LG402BLK-8.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/6PNNRpJMJuynUC1yMSF3Rv/ce8ad5ab611bc205d8f8bde5773ad38a/LG402BLK-8.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/6PNNRpJMJuynUC1yMSF3Rv/ce8ad5ab611bc205d8f8bde5773ad38a/LG402BLK-8.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/48nfJZlwl7lo0k8ZxAkNHA/597f1a706d181a4012762e881870f594/LG402BLK_-_3.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/48nfJZlwl7lo0k8ZxAkNHA/597f1a706d181a4012762e881870f594/LG402BLK_-_3.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/48nfJZlwl7lo0k8ZxAkNHA/597f1a706d181a4012762e881870f594/LG402BLK_-_3.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/6q0kTbcOFMjjkYeRHwvUGF/77c317663839d3aa42bae98b71194f25/LG402BLK_-_5.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/6q0kTbcOFMjjkYeRHwvUGF/77c317663839d3aa42bae98b71194f25/LG402BLK_-_5.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/6q0kTbcOFMjjkYeRHwvUGF/77c317663839d3aa42bae98b71194f25/LG402BLK_-_5.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/6FhNNEAt5mwZGHqFbfAxzv/36325f1515a45753ee43bd63f254ed25/LG402BLK_-_2_.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/6FhNNEAt5mwZGHqFbfAxzv/36325f1515a45753ee43bd63f254ed25/LG402BLK_-_2_.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/6FhNNEAt5mwZGHqFbfAxzv/36325f1515a45753ee43bd63f254ed25/LG402BLK_-_2_.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/5g3kT8v19cUxMrY2bW1tr8/b2710e6b92901adc4395a79df24ccf1f/LG402BLK_-_1.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/5g3kT8v19cUxMrY2bW1tr8/b2710e6b92901adc4395a79df24ccf1f/LG402BLK_-_1.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/5g3kT8v19cUxMrY2bW1tr8/b2710e6b92901adc4395a79df24ccf1f/LG402BLK_-_1.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/1hiMv5abRNt33DhtTUPYc6/eb8324e28043e8e1c3923f0f70c97821/LG402BLK_-_4.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/1hiMv5abRNt33DhtTUPYc6/eb8324e28043e8e1c3923f0f70c97821/LG402BLK_-_4.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/1hiMv5abRNt33DhtTUPYc6/eb8324e28043e8e1c3923f0f70c97821/LG402BLK_-_4.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      }
+    ]
+  },
+  "jsonld": [],
+  "color": "Black"
+}

@@ -1,0 +1,287 @@
+{
+  "canonical": "https://www.bravissimo.com/us/products/entwined-bra-fy563/",
+  "product": {
+    "styleCode": "FY563",
+    "styleColourCode": "FY563BFL",
+    "styleName": "Entwined Bra",
+    "styleColourName": "Entwined Plunge Bra in Blue Floral by Freya",
+    "brand": "Freya",
+    "category": "Lingerie",
+    "productGroup": "Plunge Bra",
+    "colour": {
+      "colour": "Blue Floral"
+    },
+    "prices": {
+      "price": 66,
+      "originalPrice": 66,
+      "promotions": []
+    },
+    "url": "/products/entwined-bra-fy563/#blue-floral-fy563bfl",
+    "sizes": {
+      "value": "back",
+      "variants": [
+        {
+          "value": "30",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "30E",
+                "value": "E"
+              },
+              {
+                "label": "30F",
+                "value": "F"
+              },
+              {
+                "label": "30FF",
+                "value": "FF"
+              },
+              {
+                "label": "30G",
+                "value": "G"
+              },
+              {
+                "label": "30GG",
+                "value": "GG"
+              },
+              {
+                "label": "30H",
+                "value": "H"
+              }
+            ]
+          }
+        },
+        {
+          "value": "32",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "32DD",
+                "value": "DD"
+              },
+              {
+                "label": "32E",
+                "value": "E"
+              },
+              {
+                "label": "32F",
+                "value": "F"
+              },
+              {
+                "label": "32FF",
+                "value": "FF"
+              },
+              {
+                "label": "32G",
+                "value": "G"
+              },
+              {
+                "label": "32GG",
+                "value": "GG"
+              },
+              {
+                "label": "32H",
+                "value": "H"
+              }
+            ]
+          }
+        },
+        {
+          "value": "34",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "34DD",
+                "value": "DD"
+              },
+              {
+                "label": "34E",
+                "value": "E"
+              },
+              {
+                "label": "34F",
+                "value": "F"
+              },
+              {
+                "label": "34FF",
+                "value": "FF"
+              },
+              {
+                "label": "34G",
+                "value": "G"
+              },
+              {
+                "label": "34GG",
+                "value": "GG"
+              },
+              {
+                "label": "34H",
+                "value": "H"
+              }
+            ]
+          }
+        },
+        {
+          "value": "36",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "36DD",
+                "value": "DD"
+              },
+              {
+                "label": "36E",
+                "value": "E"
+              },
+              {
+                "label": "36F",
+                "value": "F"
+              },
+              {
+                "label": "36FF",
+                "value": "FF"
+              },
+              {
+                "label": "36G",
+                "value": "G"
+              },
+              {
+                "label": "36GG",
+                "value": "GG"
+              },
+              {
+                "label": "36H",
+                "value": "H"
+              }
+            ]
+          }
+        },
+        {
+          "value": "38",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "38DD",
+                "value": "DD"
+              },
+              {
+                "label": "38E",
+                "value": "E"
+              },
+              {
+                "label": "38F",
+                "value": "F"
+              },
+              {
+                "label": "38FF",
+                "value": "FF"
+              },
+              {
+                "label": "38G",
+                "value": "G"
+              },
+              {
+                "label": "38GG",
+                "value": "GG"
+              },
+              {
+                "label": "38H",
+                "value": "H"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "availableColours": [
+      {
+        "name": "Blue Floral",
+        "styleColourCode": "FY563BFL",
+        "url": "/products/entwined-bra-fy563/#blue-floral-fy563bfl"
+      },
+      {
+        "name": "Beige/Black",
+        "styleColourCode": "FY563BEB",
+        "url": "/products/entwined-bra-fy563/#beigeblack-fy563beb"
+      }
+    ],
+    "images": [
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/72ZaWzr9B4Fc8QREgqcYDj/c49ba5afc60d230519cf514f285885bf/FY563BFL-main.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/72ZaWzr9B4Fc8QREgqcYDj/c49ba5afc60d230519cf514f285885bf/FY563BFL-main.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/72ZaWzr9B4Fc8QREgqcYDj/c49ba5afc60d230519cf514f285885bf/FY563BFL-main.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/3Zkb282dzDUeI3sqVxRaKR/bdcdd5fdc55e3de5a0684fc7a1159fd3/FY563BFL-4.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/3Zkb282dzDUeI3sqVxRaKR/bdcdd5fdc55e3de5a0684fc7a1159fd3/FY563BFL-4.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/3Zkb282dzDUeI3sqVxRaKR/bdcdd5fdc55e3de5a0684fc7a1159fd3/FY563BFL-4.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/1Jhb8V5VKljvwvwN2uy2K6/b63eae575d9e4861e7911ef7d27b76ba/FY563BFL-3.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/1Jhb8V5VKljvwvwN2uy2K6/b63eae575d9e4861e7911ef7d27b76ba/FY563BFL-3.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/1Jhb8V5VKljvwvwN2uy2K6/b63eae575d9e4861e7911ef7d27b76ba/FY563BFL-3.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/60GQczxq7uKsHY96KwP26R/fe593bda64f6f48d39f0e483a5662b79/FY563BFL-2.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/60GQczxq7uKsHY96KwP26R/fe593bda64f6f48d39f0e483a5662b79/FY563BFL-2.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/60GQczxq7uKsHY96KwP26R/fe593bda64f6f48d39f0e483a5662b79/FY563BFL-2.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/2kyOnBMlTwqNU79sYRWmdr/92a554fee04df45a60a59df98c7b1c91/FY563BFL-5.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/2kyOnBMlTwqNU79sYRWmdr/92a554fee04df45a60a59df98c7b1c91/FY563BFL-5.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/2kyOnBMlTwqNU79sYRWmdr/92a554fee04df45a60a59df98c7b1c91/FY563BFL-5.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      }
+    ]
+  },
+  "jsonld": [
+    {
+      "@type": "ProductGroup",
+      "@id": "FY563",
+      "name": "Entwined Bra",
+      "brand": {
+        "@type": "Brand",
+        "name": "Freya"
+      }
+    },
+    {
+      "@type": "Product",
+      "name": "Entwined Plunge Bra in Blue Floral by Freya",
+      "sku": "FY563BFL",
+      "color": "Blue Floral",
+      "offers": {
+        "@type": "Offer",
+        "url": "https://www.bravissimo.com/us/products/entwined-bra-fy563/#blue-floral-fy563bfl",
+        "priceCurrency": "USD",
+        "price": 66,
+        "itemCondition": "https://schema.org/NewCondition",
+        "availability": "InStock"
+      },
+      "isVariantOf": {
+        "@id": "FY563"
+      }
+    },
+    {
+      "@type": "Product",
+      "name": "Entwined Plunge Bra in Beige/Black by Freya",
+      "sku": "FY563BEB",
+      "color": "Beige/Black",
+      "offers": {
+        "@type": "Offer",
+        "url": "https://www.bravissimo.com/us/products/entwined-bra-fy563/#beigeblack-fy563beb",
+        "priceCurrency": "USD",
+        "price": 59,
+        "itemCondition": "https://schema.org/NewCondition",
+        "availability": "InStock"
+      },
+      "isVariantOf": {
+        "@id": "FY563"
+      }
+    }
+  ],
+  "color": "Blue Floral"
+}

@@ -45,6 +45,12 @@
   function classifyTakeoverScope(product, config = null) {
     const name = String(product?.name || '').trim();
     const category = String(product?.category || '').trim();
+    if (config?.domain === 'www.bravissimo.com') {
+      const excluded = /\b(swim(?:wear|suits?)?|bikini|sleepwear|nightwear|nightdress(?:es)?|pyjamas?|pajamas?|mens?|men['’]s|kids?|child(?:ren)?|sportswear|accessories|apparel)\b/i.test(`${category} ${name}`);
+      if (excluded) return {decision: 'exclude', reason: `Bravissimo out-of-scope product: ${category}; ${name}`};
+      const included = ['Plunge Bra', 'Full Cup Bra', 'Balconette Bra', 'Brief', 'Thong', 'High Waisted Brief'].includes(category);
+      return {decision: included ? 'include' : 'review', reason: `Bravissimo productGroup evidence: ${category || 'missing'}`};
+    }
     if (config?.domain === 'www.wakudoki.ne.jp') {
       const excluded = /メンズ|男性|キッズ|子供|ジュニア|水着|ビキニ|パジャマ|ルームウェア|ナイトウェア|ストッキング|靴下|インナーシャツ|\b(swimwear|swimsuit|bikini|sleepwear|nightwear|pajamas?|pyjamas?|mens?|kids?|stockings?|socks?)\b/i.test(`${category} ${name}`);
       if (excluded) return {decision: 'exclude', reason: `Shirohato out-of-scope product: ${category}; ${name}`};
