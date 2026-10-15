@@ -51,6 +51,11 @@
       const included = ['ワイヤーブラ', 'スタンダード', 'Tバック・Gスト', 'ガーターベルト'].includes(category);
       return {decision: included ? 'include' : 'review', reason: `Shirohato category evidence: ${category || 'missing'}`};
     }
+    if (config?.domain === 'www.barenecessities.com' &&
+        (['Bras', 'Panties'].includes(category) ||
+          (category === 'Sexy Lingerie, Accessories' && /\bgarter belt\b/i.test(name))) &&
+        !/\b(swim|swimwear|swimsuit|sleepwear|nightwear|pajamas?|mens?|kids?)\b/i.test(name))
+      return {decision: 'include', reason: `Bare Necessities Shopify category: ${category}; ${name}`};
     const evidence = category.toLowerCase();
     const title = name.toLowerCase();
     const accessory = ['www.lisecharmel.com', 'www.primadonna.com', 'www.mariejo.com'].includes(config?.domain) &&

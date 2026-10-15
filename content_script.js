@@ -2488,7 +2488,27 @@ function captureJsonLd() {
     .filter(value => value !== null);
 }
 
+function captureBareNecessitiesProduct() {
+  const scripts = document.querySelectorAll('script#swym-snippet');
+  if (scripts.length !== 1) throw new Error('Bare Necessities product: missing or ambiguous Shopify JSON');
+  let pageEvidence;
+  try { pageEvidence = JSON.parse(document.querySelector('#elevar-product-view')?.textContent); }
+  catch (_) { throw new Error('Bare Necessities product: USD evidence missing'); }
+  return globalThis.PageImageSaverHelpers.bareNecessitiesProduct(scripts[0].textContent,
+    window.location.href, document.querySelector('link[rel="canonical"]')?.href, pageEvidence.currencyCode, pageEvidence.defaultVariant);
+}
+
 function capturePageProductEvidence() {
+  if (window.location.hostname === 'www.barenecessities.com' && window.location.pathname.startsWith('/products/')) {
+    const {facts} = captureBareNecessitiesProduct();
+    const microdata = {name: facts.name, productID: facts.product_id,
+      offers: {price: facts.offers.price, priceCurrency: facts.offers.currency},
+      field_sources: {productID: 'window.SwymProductInfo.product.id (canonical handle bound)',
+        price: '#elevar-product-view.defaultVariant variantId/price bound to Shopify variants (saved page default)',
+        priceCurrency: '#elevar-product-view currencyCode'}};
+    return {...globalThis.PageImageSaverHelpers.captureProductEvidence([], microdata), facts};
+  }
+
   if (window.location.hostname === 'www.wakudoki.ne.jp' &&
       window.location.pathname.startsWith('/productdetail/')) {
     const jsonld = captureJsonLd();
@@ -2576,6 +2596,12 @@ function captureProductSeen(config, product = capturePageProduct()) {
 }
 
 function captureGallery(config, mode) {
+  if (mode === 'site' && config?.product?.renditionResolver === 'bare-necessities') {
+    const rendered = Array.from(document.querySelectorAll(config.product.allImagesSelector), node =>
+      node.getAttribute('srcset')?.split(',')[0].trim().split(/\s+/)[0] || node.getAttribute('src'));
+    return globalThis.PageImageSaverHelpers.bareNecessitiesGallery(captureBareNecessitiesProduct().images, rendered);
+  }
+
   if (mode === 'site' && config?.product?.renditionResolver === 'shirohato') {
     return globalThis.PageImageSaverHelpers.shirohatoGallery(
       Array.from(document.querySelectorAll(config.product.allImagesSelector), node => node.getAttribute('src')),
@@ -2827,6 +2853,8 @@ async function refreshTakeoverProgress() {
 }
 
 function takeoverCategory() {
+  if (window.location.hostname === 'www.barenecessities.com' && window.location.pathname.startsWith('/products/'))
+    return captureBareNecessitiesProduct().category;
   for (const raw of captureJsonLd()) {
     const candidates = Array.isArray(raw) ? raw : raw?.['@graph'] || [raw];
     for (const item of candidates) {
@@ -2899,8 +2927,29 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   if (config.domain === 'www.wakudoki.ne.jp')
     listingCards = listingCards.map(card => ({...card,
       url: globalThis.PageImageSaverHelpers.shirohatoListingUrl(card.url)}));
+  if (config.domain === 'www.barenecessities.com') {
+    if (!listingCards.length) throw new Error('Bare Necessities product grid not rendered — Insider search blocked?');
+    listingCards = listingCards.map(card => {
+      const url = new URL(card.url);
+      if (url.origin !== window.location.origin || !/^\/products\/[^/]+$/.test(url.pathname))
+        throw new Error('Bare Necessities listing: foreign or invalid product link');
+      url.search = ''; url.hash = '';
+      return {...card, url: url.href};
+    });
+  }
   const products = listingCards.map(card => card.url);
-  const next = document.querySelector(nextSelector)?.href || null;
+  let next = document.querySelector(nextSelector)?.href || null;
+  if (config.domain === 'www.barenecessities.com') {
+    const current = Number(document.querySelector('.br-collection .br-pagination__item--current')?.textContent.trim());
+    const page = Number(new URL(window.location.href).searchParams.get('page') || 1);
+    if (!Number.isSafeInteger(current) || current < 1 || current !== page)
+      throw new Error('Bare Necessities listing: pagination does not match URL');
+    if (document.querySelector(nextSelector)) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('page', String(current + 1));
+      next = url.href;
+    }
+  }
   const cards = mode === 'discovery' ? listingCards : undefined;
   const check = config.listing?.endCheck;
   const node = check?.selector ? document.querySelector(check.selector) : null;
