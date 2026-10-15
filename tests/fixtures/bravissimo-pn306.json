@@ -1,0 +1,80 @@
+{
+  "canonical": "https://www.bravissimo.com/us/products/evangeline-deep-brief-pn306/",
+  "product": {
+    "styleCode": "PN306",
+    "styleColourCode": "PN306WHT",
+    "styleName": "Evangeline Deep Brief",
+    "styleColourName": "Evangeline Deep Brief in White by Panache",
+    "brand": "Panache",
+    "category": "Lingerie",
+    "productGroup": "High Waisted Brief",
+    "colour": {
+      "colour": "White"
+    },
+    "prices": {
+      "price": 44,
+      "originalPrice": 44,
+      "promotions": []
+    },
+    "url": "/products/evangeline-deep-brief-pn306/#white-pn306wht",
+    "sizes": {
+      "value": "size",
+      "variants": [
+        {
+          "label": "4",
+          "value": "4"
+        },
+        {
+          "label": "6",
+          "value": "6"
+        },
+        {
+          "label": "8",
+          "value": "8"
+        },
+        {
+          "label": "10",
+          "value": "10"
+        },
+        {
+          "label": "12",
+          "value": "12"
+        },
+        {
+          "label": "14",
+          "value": "14"
+        },
+        {
+          "label": "16",
+          "value": "16"
+        }
+      ]
+    },
+    "availableColours": [
+      {
+        "name": "White",
+        "styleColourCode": "PN306WHT",
+        "url": "/products/evangeline-deep-brief-pn306/#white-pn306wht"
+      }
+    ],
+    "images": [
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/5HMYK7bmRe0vgN2VReW64N/5b14a1999e23f032b83ce491d9df9b3a/PN306WHT-main.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/5HMYK7bmRe0vgN2VReW64N/5b14a1999e23f032b83ce491d9df9b3a/PN306WHT-main.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/5HMYK7bmRe0vgN2VReW64N/5b14a1999e23f032b83ce491d9df9b3a/PN306WHT-main.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/2pO53BBO8EJN1Eli2STLE0/c56d06536245f4234ba29a8d594d1145/PN306WHT-1.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/2pO53BBO8EJN1Eli2STLE0/c56d06536245f4234ba29a8d594d1145/PN306WHT-1.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/2pO53BBO8EJN1Eli2STLE0/c56d06536245f4234ba29a8d594d1145/PN306WHT-1.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/6sHzyngGqEWWhRPX14SPJq/5a82b985828c9f8a7685910868708ead/PN306WHT-2.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/6sHzyngGqEWWhRPX14SPJq/5a82b985828c9f8a7685910868708ead/PN306WHT-2.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/6sHzyngGqEWWhRPX14SPJq/5a82b985828c9f8a7685910868708ead/PN306WHT-2.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      }
+    ]
+  },
+  "jsonld": [],
+  "color": "White"
+}

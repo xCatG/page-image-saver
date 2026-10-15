@@ -1,0 +1,212 @@
+{
+  "canonical": "https://www.bravissimo.com/us/products/millie-luxe-brief-lg403/",
+  "product": {
+    "styleCode": "LG403",
+    "styleColourCode": "LG403FGN",
+    "styleName": "Millie Luxe Brief",
+    "styleColourName": "Millie Luxe Brief Forest Green by Bravissimo",
+    "brand": "Bravissimo",
+    "category": "Lingerie",
+    "productGroup": "Brief",
+    "colour": {
+      "colour": "Forest Green"
+    },
+    "prices": {
+      "price": 39,
+      "originalPrice": 39,
+      "promotions": []
+    },
+    "url": "/products/millie-luxe-brief-lg403/#forest-green-lg403fgn",
+    "sizes": {
+      "value": "size",
+      "variants": [
+        {
+          "label": "XS",
+          "value": "XS"
+        },
+        {
+          "label": "S",
+          "value": "S"
+        },
+        {
+          "label": "M",
+          "value": "M"
+        },
+        {
+          "label": "L",
+          "value": "L"
+        },
+        {
+          "label": "XL",
+          "value": "XL"
+        },
+        {
+          "label": "2XL",
+          "value": "2XL"
+        },
+        {
+          "label": "3XL",
+          "value": "3XL"
+        }
+      ]
+    },
+    "availableColours": [
+      {
+        "name": "Black",
+        "styleColourCode": "LG403BLA",
+        "url": "/products/millie-luxe-brief-lg403/#black-lg403bla"
+      },
+      {
+        "name": "Amber",
+        "styleColourCode": "LG403AMB",
+        "url": "/products/millie-luxe-brief-lg403/#amber-lg403amb"
+      },
+      {
+        "name": "Forest Green",
+        "styleColourCode": "LG403FGN",
+        "url": "/products/millie-luxe-brief-lg403/#forest-green-lg403fgn"
+      },
+      {
+        "name": "White",
+        "styleColourCode": "LG403WHT",
+        "url": "/products/millie-luxe-brief-lg403/#white-lg403wht"
+      },
+      {
+        "name": "Burgundy",
+        "styleColourCode": "LG403BUR",
+        "url": "/products/millie-luxe-brief-lg403/#burgundy-lg403bur"
+      },
+      {
+        "name": "Teal",
+        "styleColourCode": "LG403TEL",
+        "url": "/products/millie-luxe-brief-lg403/#teal-lg403tel"
+      }
+    ],
+    "images": [
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/18oKZtT0NADUPVw84zNmNC/68c336ebae312bb01596a7db92257375/LG403FGN-main.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/18oKZtT0NADUPVw84zNmNC/68c336ebae312bb01596a7db92257375/LG403FGN-main.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/18oKZtT0NADUPVw84zNmNC/68c336ebae312bb01596a7db92257375/LG403FGN-main.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/7ywyCxpOtsDKws2zu6Dyrl/86987310539e646386c38d059da16fde/LG403FGN-1.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/7ywyCxpOtsDKws2zu6Dyrl/86987310539e646386c38d059da16fde/LG403FGN-1.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/7ywyCxpOtsDKws2zu6Dyrl/86987310539e646386c38d059da16fde/LG403FGN-1.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      }
+    ]
+  },
+  "jsonld": [
+    {
+      "@type": "ProductGroup",
+      "@id": "LG403",
+      "name": "Millie Luxe Brief",
+      "brand": {
+        "@type": "Brand",
+        "name": "Bravissimo"
+      }
+    },
+    {
+      "@type": "Product",
+      "name": "Milly Luxe Brief in Black by Bravissimo",
+      "sku": "LG403BLA",
+      "color": "Black",
+      "offers": {
+        "@type": "Offer",
+        "url": "https://www.bravissimo.com/us/products/millie-luxe-brief-lg403/#black-lg403bla",
+        "priceCurrency": "USD",
+        "price": 39,
+        "itemCondition": "https://schema.org/NewCondition",
+        "availability": "InStock"
+      },
+      "isVariantOf": {
+        "@id": "LG403"
+      }
+    },
+    {
+      "@type": "Product",
+      "name": "Millie Luxe Brief in Amber by Bravissimo",
+      "sku": "LG403AMB",
+      "color": "Amber",
+      "offers": {
+        "@type": "Offer",
+        "url": "https://www.bravissimo.com/us/products/millie-luxe-brief-lg403/#amber-lg403amb",
+        "priceCurrency": "USD",
+        "price": 39,
+        "itemCondition": "https://schema.org/NewCondition",
+        "availability": "InStock"
+      },
+      "isVariantOf": {
+        "@id": "LG403"
+      }
+    },
+    {
+      "@type": "Product",
+      "name": "Millie Luxe Brief Forest Green by Bravissimo",
+      "sku": "LG403FGN",
+      "color": "Forest Green",
+      "offers": {
+        "@type": "Offer",
+        "url": "https://www.bravissimo.com/us/products/millie-luxe-brief-lg403/#forest-green-lg403fgn",
+        "priceCurrency": "USD",
+        "price": 39,
+        "itemCondition": "https://schema.org/NewCondition",
+        "availability": "InStock"
+      },
+      "isVariantOf": {
+        "@id": "LG403"
+      }
+    },
+    {
+      "@type": "Product",
+      "name": "Millie Luxe Brief in White by Bravissimo",
+      "sku": "LG403WHT",
+      "color": "White",
+      "offers": {
+        "@type": "Offer",
+        "url": "https://www.bravissimo.com/us/products/millie-luxe-brief-lg403/#white-lg403wht",
+        "priceCurrency": "USD",
+        "price": 39,
+        "itemCondition": "https://schema.org/NewCondition",
+        "availability": "InStock"
+      },
+      "isVariantOf": {
+        "@id": "LG403"
+      }
+    },
+    {
+      "@type": "Product",
+      "name": "Millie Luxe Brief in Burgundy by Bravissimo",
+      "sku": "LG403BUR",
+      "color": "Burgundy",
+      "offers": {
+        "@type": "Offer",
+        "url": "https://www.bravissimo.com/us/products/millie-luxe-brief-lg403/#burgundy-lg403bur",
+        "priceCurrency": "USD",
+        "price": 35,
+        "itemCondition": "https://schema.org/NewCondition",
+        "availability": "InStock"
+      },
+      "isVariantOf": {
+        "@id": "LG403"
+      }
+    },
+    {
+      "@type": "Product",
+      "name": "Millie Luxe Brief in Teal by Bravissimo",
+      "sku": "LG403TEL",
+      "color": "Teal",
+      "offers": {
+        "@type": "Offer",
+        "url": "https://www.bravissimo.com/us/products/millie-luxe-brief-lg403/#teal-lg403tel",
+        "priceCurrency": "USD",
+        "price": 35,
+        "itemCondition": "https://schema.org/NewCondition",
+        "availability": "InStock"
+      },
+      "isVariantOf": {
+        "@id": "LG403"
+      }
+    }
+  ],
+  "color": "Forest Green"
+}

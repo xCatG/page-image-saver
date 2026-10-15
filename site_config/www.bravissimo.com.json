@@ -1,0 +1,7 @@
+{
+  "domain": "www.bravissimo.com", "platform": "custom-react-contentful", "locale": "en-US", "market": "us", "currency": "USD",
+  "colorVariantStrategy": "separate-url", "captureColorPolicy": "color",
+  "listing": {"productLinkSelector": ".c-results-list a.c-product-summary__container", "pagination": {"type": "numbered", "nextSelector": "a.c-pagination__label[aria-label='Next page']"}, "endCheck": {"type": "result-total", "source": "bravissimo"}},
+  "product": {"pageSelector": "#product-gallery", "allImagesSelector": "#product-gallery .c-product-gallery__carousel--feature .c-product-gallery__img", "renditionResolver": "bravissimo", "lazyLoad": false},
+  "notes": "US/USD only; custom React with Contentful images, not Shopify. Current setDataLayer product bound canonical and rendered color; __STATE__.product is stale and prohibited. Explicit product brand never defaults to retailer. Exact evidenced zoom URLs preserved. Current selected color only; hash swatch variants not expanded. Sizes descriptive, not stock. Standard Next links; show=200 saved view has all 129 products and no Next, but saved Show links contain doubled /us/us/ and must not be followed. Total from current setDataLayer productListing; do not assume 48 products per page. No Linux storefront/CDN requests."
+}

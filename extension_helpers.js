@@ -1027,6 +1027,47 @@
       offers: {price: (price / 100).toFixed(2), currency}}, images, category: product.type || ''};
   }
 
+  function bravissimoProduct(product, jsonld, pageUrl, canonicalUrl, selectedColor, currency) {
+    const fail = message => { throw new Error('Bravissimo product: ' + message); };
+    const page = new URL(pageUrl), canonical = new URL(canonicalUrl);
+    if (page.origin !== 'https://www.bravissimo.com' || canonical.origin !== page.origin ||
+        !/^\/us\/products\/[^/]+\/$/.test(page.pathname) || page.pathname !== canonical.pathname ||
+        canonical.search || canonical.hash) fail('US canonical mismatch');
+    if (!product?.brand || !product.styleCode || !product.styleColourCode ||
+        !canonical.pathname.endsWith('-' + product.styleCode.toLowerCase() + '/') ||
+        product.colour?.colour !== selectedColor) fail('identity or rendered colour mismatch');
+    const nodes = jsonld.flat();
+    const variant = nodes.find(x => x['@type'] === 'Product' && x.sku === product.styleColourCode);
+    const group = nodes.find(x => x['@type'] === 'ProductGroup' && x['@id'] === product.styleCode);
+    if (nodes.some(x => x['@type'] === 'Product') && !variant ||
+        nodes.some(x => x['@type'] === 'ProductGroup') && !group) fail('current JSON-LD identity missing');
+    if (currency !== 'USD' || (variant && (variant.color !== selectedColor ||
+        variant.offers?.priceCurrency !== 'USD' || Number(variant.offers.price) !== product.prices?.price)) ||
+        (group && group.brand?.name !== product.brand) ||
+        !Number.isFinite(product.prices.price) || product.prices.price < 0) fail('USD variant or explicit brand missing');
+    const images = product.images.map(image => {
+      const url = new URL(image.zoom, page.origin);
+      if (url.protocol !== 'https:' || url.hostname !== 'images.ctfassets.net' ||
+          !url.pathname.startsWith('/bz0fvtkbk5r1/') || url.username || url.password ||
+          !url.pathname.split('/').pop().startsWith(product.styleCode)) fail('foreign gallery image');
+      return url.href;
+    });
+    if (!images.length) fail('gallery missing');
+    const sizeLabels = node => node?.label ? [node.label] : (node?.variants || []).flatMap(item => sizeLabels(item.sizes || item));
+    const facts = {name: product.styleName, sku: product.styleColourCode, product_id: product.styleCode,
+      color: selectedColor, offers: {price: product.prices.price.toFixed(2), currency: 'USD'}};
+    return {facts, images: [...new Set(images)], category: product.productGroup,
+      microdata: {name: facts.name, sku: facts.sku, productID: facts.product_id, url: canonical.href,
+        brand: product.brand, color: selectedColor, category: product.category, productGroup: product.productGroup,
+        offers: {price: facts.offers.price, priceCurrency: 'USD'},
+        colors: product.availableColours?.map(x => x.name) || [], sizes: [...new Set(sizeLabels(product.sizes))],
+        field_sources: {productID: 'setDataLayer product.styleCode; canonical bound',
+          brand: 'setDataLayer product.brand; ProductGroup JSON-LD corroborated when present',
+          color: 'rendered selected-colour; matching Product JSON-LD corroborated when present',
+          offers: 'setDataLayer product.prices; __STATE__.app.config.currency USD; matching JSON-LD corroborated when present',
+          sizes: 'setDataLayer product.sizes (descriptive, not stock)'}}};
+  }
+
   function bareNecessitiesGallery(originals, rendered) {
     const urls = rendered.map(raw => {
       let url;
@@ -1080,7 +1121,7 @@
     liseCharmelGallery,
     liseCharmelListingProducts,
     vandeveldeProduct,
-    listingResultTotal, bareNecessitiesProduct, bareNecessitiesGallery,
+    bravissimoProduct, listingResultTotal, bareNecessitiesProduct, bareNecessitiesGallery,
     comparableUrl, sameDocumentUrl,
     victoriasSecretImage, victoriasSecretSameProductChoice, victoriasSecretUnavailableChoice,
     takeoverStatusText,

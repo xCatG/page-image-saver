@@ -1,0 +1,350 @@
+{
+  "canonical": "https://www.bravissimo.com/us/products/evangeline-bra-pn305/",
+  "product": {
+    "styleCode": "PN305",
+    "styleColourCode": "PN305WHT",
+    "styleName": "Evangeline Bra",
+    "styleColourName": "Evangeline Full Cup Bra in White by Panache",
+    "brand": "Panache",
+    "category": "Lingerie",
+    "productGroup": "Full Cup Bra",
+    "colour": {
+      "colour": "White"
+    },
+    "prices": {
+      "price": 76,
+      "originalPrice": 76,
+      "promotions": []
+    },
+    "url": "/products/evangeline-bra-pn305/#white-pn305wht",
+    "sizes": {
+      "value": "back",
+      "variants": [
+        {
+          "value": "30",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "30E",
+                "value": "E"
+              },
+              {
+                "label": "30F",
+                "value": "F"
+              },
+              {
+                "label": "30FF",
+                "value": "FF"
+              },
+              {
+                "label": "30G",
+                "value": "G"
+              },
+              {
+                "label": "30GG",
+                "value": "GG"
+              },
+              {
+                "label": "30H",
+                "value": "H"
+              },
+              {
+                "label": "30HH",
+                "value": "HH"
+              },
+              {
+                "label": "30J",
+                "value": "J"
+              },
+              {
+                "label": "30JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "30K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "32",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "32E",
+                "value": "E"
+              },
+              {
+                "label": "32F",
+                "value": "F"
+              },
+              {
+                "label": "32FF",
+                "value": "FF"
+              },
+              {
+                "label": "32G",
+                "value": "G"
+              },
+              {
+                "label": "32GG",
+                "value": "GG"
+              },
+              {
+                "label": "32H",
+                "value": "H"
+              },
+              {
+                "label": "32HH",
+                "value": "HH"
+              },
+              {
+                "label": "32J",
+                "value": "J"
+              },
+              {
+                "label": "32JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "32K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "34",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "34E",
+                "value": "E"
+              },
+              {
+                "label": "34F",
+                "value": "F"
+              },
+              {
+                "label": "34FF",
+                "value": "FF"
+              },
+              {
+                "label": "34G",
+                "value": "G"
+              },
+              {
+                "label": "34GG",
+                "value": "GG"
+              },
+              {
+                "label": "34H",
+                "value": "H"
+              },
+              {
+                "label": "34HH",
+                "value": "HH"
+              },
+              {
+                "label": "34J",
+                "value": "J"
+              },
+              {
+                "label": "34JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "34K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "36",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "36E",
+                "value": "E"
+              },
+              {
+                "label": "36F",
+                "value": "F"
+              },
+              {
+                "label": "36FF",
+                "value": "FF"
+              },
+              {
+                "label": "36G",
+                "value": "G"
+              },
+              {
+                "label": "36GG",
+                "value": "GG"
+              },
+              {
+                "label": "36H",
+                "value": "H"
+              },
+              {
+                "label": "36HH",
+                "value": "HH"
+              },
+              {
+                "label": "36J",
+                "value": "J"
+              },
+              {
+                "label": "36JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "36K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "38",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "38E",
+                "value": "E"
+              },
+              {
+                "label": "38F",
+                "value": "F"
+              },
+              {
+                "label": "38FF",
+                "value": "FF"
+              },
+              {
+                "label": "38G",
+                "value": "G"
+              },
+              {
+                "label": "38GG",
+                "value": "GG"
+              },
+              {
+                "label": "38H",
+                "value": "H"
+              },
+              {
+                "label": "38HH",
+                "value": "HH"
+              },
+              {
+                "label": "38J",
+                "value": "J"
+              },
+              {
+                "label": "38JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "38K",
+                "value": "K"
+              }
+            ]
+          }
+        },
+        {
+          "value": "40",
+          "sizes": {
+            "value": "cup",
+            "variants": [
+              {
+                "label": "40E",
+                "value": "E"
+              },
+              {
+                "label": "40F",
+                "value": "F"
+              },
+              {
+                "label": "40FF",
+                "value": "FF"
+              },
+              {
+                "label": "40G",
+                "value": "G"
+              },
+              {
+                "label": "40GG",
+                "value": "GG"
+              },
+              {
+                "label": "40H",
+                "value": "H"
+              },
+              {
+                "label": "40HH",
+                "value": "HH"
+              },
+              {
+                "label": "40J",
+                "value": "J"
+              },
+              {
+                "label": "40JJ",
+                "value": "JJ"
+              },
+              {
+                "label": "40K",
+                "value": "K"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "availableColours": [
+      {
+        "name": "White",
+        "styleColourCode": "PN305WHT",
+        "url": "/products/evangeline-bra-pn305/#white-pn305wht"
+      }
+    ],
+    "images": [
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/5ca3Wf2ZNxANXsEmqRO41A/064baf8ffa928ae087716bf77c6a1135/PN305WHT-main.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/5ca3Wf2ZNxANXsEmqRO41A/064baf8ffa928ae087716bf77c6a1135/PN305WHT-main.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/5ca3Wf2ZNxANXsEmqRO41A/064baf8ffa928ae087716bf77c6a1135/PN305WHT-main.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/7fi6Wx3LPTmYmW23VYxVXN/f100e2a6dd00f7a173aad9d0ddef1414/PN305WHT-1.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/7fi6Wx3LPTmYmW23VYxVXN/f100e2a6dd00f7a173aad9d0ddef1414/PN305WHT-1.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/7fi6Wx3LPTmYmW23VYxVXN/f100e2a6dd00f7a173aad9d0ddef1414/PN305WHT-1.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/1CiuZoLmKN2JGYjhGothWv/af8174b61f38770735e427ed7b50d9cb/PN305WHT-2.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/1CiuZoLmKN2JGYjhGothWv/af8174b61f38770735e427ed7b50d9cb/PN305WHT-2.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/1CiuZoLmKN2JGYjhGothWv/af8174b61f38770735e427ed7b50d9cb/PN305WHT-2.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/5RJ5Iv1wDcWFLUslwdkXFW/dd43bc9c6061ce988f230602b0fb4f94/PN305WHT-3.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/5RJ5Iv1wDcWFLUslwdkXFW/dd43bc9c6061ce988f230602b0fb4f94/PN305WHT-3.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/5RJ5Iv1wDcWFLUslwdkXFW/dd43bc9c6061ce988f230602b0fb4f94/PN305WHT-3.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      },
+      {
+        "detail": "//images.ctfassets.net/bz0fvtkbk5r1/4Ta43XePSpOZA0CeFWBmRk/0067a0ac6ff738da50f24e30f59c06a6/PN305WHT-4.jpg?q=80&w=700&fit=fill&f=top&h=896",
+        "zoom": "//images.ctfassets.net/bz0fvtkbk5r1/4Ta43XePSpOZA0CeFWBmRk/0067a0ac6ff738da50f24e30f59c06a6/PN305WHT-4.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+        "thumbnail": "//images.ctfassets.net/bz0fvtkbk5r1/4Ta43XePSpOZA0CeFWBmRk/0067a0ac6ff738da50f24e30f59c06a6/PN305WHT-4.jpg?q=100&w=135&fit=fill&f=top&h=173"
+      }
+    ]
+  },
+  "jsonld": [],
+  "color": "White"
+}

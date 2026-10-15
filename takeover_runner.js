@@ -42,9 +42,29 @@
       .replace(/\/+$/, '');
   }
 
+  function captureColorPolicy(config) {
+    if (config?.captureColorPolicy === undefined) return 'url';
+    if (config.domain === 'www.bravissimo.com' && config.captureColorPolicy === 'color') return 'color';
+    throw new Error('unsupported capture color policy');
+  }
+
+  function captureIdentityMatches(identity, run, url, selectedColor) {
+    const policy = captureColorPolicy(run.config);
+    return identity?.domain === run.domain && identity.color_key === policy &&
+      (policy === 'url' || typeof identity.selected_color === 'string' && identity.selected_color.trim() &&
+        (selectedColor === undefined || identity.selected_color === selectedColor)) &&
+      sameDocumentUrl(canonical(identity.product_url, run.domain), url);
+  }
+
   function classifyTakeoverScope(product, config = null) {
     const name = String(product?.name || '').trim();
     const category = String(product?.category || '').trim();
+    if (config?.domain === 'www.bravissimo.com') {
+      const excluded = /\b(swim(?:wear|suits?)?|bikini|sleepwear|nightwear|nightdress(?:es)?|pyjamas?|pajamas?|mens?|men['’]s|kids?|child(?:ren)?|sportswear|accessories|apparel)\b/i.test(`${category} ${name}`);
+      if (excluded) return {decision: 'exclude', reason: `Bravissimo out-of-scope product: ${category}; ${name}`};
+      const included = ['Plunge Bra', 'Full Cup Bra', 'Balconette Bra', 'Brief', 'Thong', 'High Waisted Brief'].includes(category);
+      return {decision: included ? 'include' : 'review', reason: `Bravissimo productGroup evidence: ${category || 'missing'}`};
+    }
     if (config?.domain === 'www.wakudoki.ne.jp') {
       const excluded = /メンズ|男性|キッズ|子供|ジュニア|水着|ビキニ|パジャマ|ルームウェア|ナイトウェア|ストッキング|靴下|インナーシャツ|\b(swimwear|swimsuit|bikini|sleepwear|nightwear|pajamas?|pyjamas?|mens?|kids?|stockings?|socks?)\b/i.test(`${category} ${name}`);
       if (excluded) return {decision: 'exclude', reason: `Shirohato out-of-scope product: ${category}; ${name}`};
@@ -127,6 +147,7 @@
     async function save(run) { await io.save(run); return run; }
     async function read() { return io.read(); }
     async function preview(config, page, mode = 'capture', seedSource = null) {
+      captureColorPolicy(config);
       if (!['capture', 'discovery'].includes(mode)) throw new Error('unknown catalog mode');
       if (config?.listing?.enabled === false && (mode === 'discovery' || page?.kind !== 'product'))
         throw new Error('Discovery needs saved listing evidence for pagination and totals');
@@ -164,6 +185,7 @@
       return save(run);
     }
     async function importDiscovery(config, sources) {
+      captureColorPolicy(config);
       const existing = await read();
       if (['running', 'paused'].includes(existing?.status))
         throw new Error('stop or finish the current run before importing discovery');
@@ -279,9 +301,7 @@
         const key = `${run.generation}|${row.url}`;
         if (verifiedHere.has(key)) continue;
         try {
-          if (!row.identity || row.identity.domain !== run.domain ||
-              row.identity.color_key !== 'url' ||
-              !sameDocumentUrl(canonical(row.identity.product_url, run.domain), row.url)) {
+          if (!captureIdentityMatches(row.identity, run, row.url)) {
             throw new Error('missing or mismatched saved capture identity');
           }
           const result = await io.verify(row.identity);
@@ -330,7 +350,7 @@
         return run;
       }
       const url = listingUrl || item.url;
-      if (item && run.mode === 'capture-discovery') {
+      if (item && run.mode === 'capture-discovery' && captureColorPolicy(run.config) === 'url') {
         const identity = {domain: run.domain, product_url: url, selected_color: null, color_key: 'url'};
         let verification;
         try { verification = await io.verify(identity); }
@@ -520,12 +540,11 @@
             const binding = {generation: run.generation, tabId: page.tabId,
               documentId: page.documentId, expectedUrl: url};
             if (queryEquivalent && !sameDocumentUrl(canonical(page.url, run.domain), url)) binding.documentUrl = canonical(page.url, run.domain);
+            if (captureColorPolicy(run.config) === 'color') binding.selectedColor = page.product.color || null;
             run.current.binding = binding;
             await save(run); // Bind this document before any image acquisition.
             const result = await io.capture(url, scope, binding);
-            if (!result.identity || result.identity.domain !== run.domain ||
-                result.identity.color_key !== 'url' ||
-                !sameDocumentUrl(canonical(result.identity.product_url, run.domain), url)) {
+            if (!captureIdentityMatches(result.identity, run, url, page.product.color || null)) {
               return interrupt(run, 'paused', `capture identity does not match queued URL at ${url}`);
             }
             if (result.storage === 'receiver' && ['published', 'reused', 'already'].includes(result.status)) {
@@ -564,7 +583,7 @@
     return {preview, importDiscovery, start, pause, stop, resume, tick, read};
   }
   const api = {createTakeoverRunner, classifyTakeoverScope, summarizeTakeover,
-    exportTakeoverReport, endCheckPasses};
+    exportTakeoverReport, endCheckPasses, captureIdentityMatches};
   root.PageImageSaverTakeover = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

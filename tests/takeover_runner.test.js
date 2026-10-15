@@ -959,3 +959,40 @@ for (const [start, total, status] of [[3000,9000,'complete'],[4000,10000,'comple
     assert.equal(r.memory.run.products.length,total);
   });
 }
+
+test('Bravissimo imported queue captures selected colors, survives restart and completes',async()=>{
+  const config=require('../site_config/www.bravissimo.com.json');
+  const urls=['fy563','pn305','lg402'].map(code=>require(`./fixtures/bravissimo-${code}.json`).canonical);
+  const colors=['Blue Floral','White','Black'];
+  const pages=Object.fromEntries(urls.map((url,i)=>[url,{kind:'product',url,product:{name:'Example Bra',category:'Plunge Bra',color:colors[i]},colorLinks:[]}]));
+  const captures=Object.fromEntries(urls.map((url,i)=>[url,{storage:'receiver',status:'published',identity:{domain:config.domain,product_url:url,color_key:'color',selected_color:colors[i]}}]));
+  const r=rig(pages,captures);
+  r.io.verify=async identity=>{r.verificationCalls.push(identity);assert.equal(identity.color_key,'color');return {storage:'receiver',status:'already'};};
+  const source=discoverySource(urls);source.report.site=config.domain;source.report.listings.forEach(x=>{x.url=x.final_url="https://www.bravissimo.com/us/collections/all-bras/";});
+  await r.runner().importDiscovery(config,[source]);await r.runner().start();
+  for(let i=0;i<4;i++){await r.runner().tick();r.advance(12000);}
+  assert.equal(r.memory.run.status,'complete');assert.equal(r.captureCalls.length,3);
+  assert.deepEqual(r.memory.run.products.map(p=>p.identity.selected_color),colors);
+  assert.equal(r.verificationCalls.length,6); // Restart checks saved selected-color identities, no URL-only preflight.
+  Object.values(captures).forEach((reply,i)=>{reply.status=i===1?'already':'reused';});
+  await r.runner().importDiscovery(config,[source]);await r.runner().start();
+  for(let i=0;i<4;i++){await r.runner().tick();r.advance(12000);}
+  assert.equal(r.memory.run.status,'complete');
+  assert.deepEqual(r.memory.run.products.map(p=>p.captureStatus),['reused','already','reused']);
+  assert.equal(r.captureCalls.length,6); // Default color cannot safely be skipped without inspecting current page.
+  assert.deepEqual(r.memory.run.products.map(p=>p.status),['captured','skipped','captured']);
+
+});
+
+test('Bravissimo queue rejects wrong completion color and unsupported capture policy',async()=>{
+  const config=require('../site_config/www.bravissimo.com.json');const f=require('./fixtures/bravissimo-fy563.json');
+  await assert.rejects(()=>rig({}).runner().importDiscovery({...config,captureColorPolicy:'unknown'},[]),/unsupported capture color policy/);
+  await assert.rejects(()=>rig({}).runner().importDiscovery({...config,domain:'shop.example.test'},[]),/unsupported capture color policy/);
+
+  for(const identity of [{color_key:'url',selected_color:null},{color_key:'color',selected_color:'Wrong'},{color_key:'color',selected_color:''}]){
+    const r=rig({[f.canonical]:{kind:'product',url:f.canonical,product:{name:'Entwined Bra',category:'Plunge Bra',color:f.color},colorLinks:[]}}, {[f.canonical]:{storage:'receiver',status:'published',identity:{domain:config.domain,product_url:f.canonical,...identity}}});
+    const source=discoverySource([f.canonical]);source.report.site=config.domain;source.report.listings.forEach(x=>{x.url=x.final_url="https://www.bravissimo.com/us/collections/all-bras/";});
+    await r.runner().importDiscovery(config,[source]);await r.runner().start();await r.runner().tick();
+    assert.equal(r.memory.run.status,'paused');assert.match(r.memory.run.reason,/capture identity/);
+  }
+});
