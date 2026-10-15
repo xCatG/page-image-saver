@@ -985,6 +985,63 @@
     }))];
   }
 
+  function bareNecessitiesProduct(script, pageUrl, canonicalUrl, currency, defaultVariant) {
+    const fail = reason => { throw new Error(`Bare Necessities product: ${reason}`); };
+    const marker = 'window.SwymProductInfo.product = ';
+    const start = String(script).indexOf(marker);
+    if (start < 0) fail('missing Shopify product JSON');
+    const text = script.slice(start + marker.length).trimStart();
+    let depth = 0, quoted = false, escaped = false, end = -1;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (c === '\\') escaped = true;
+        else if (c === '"') quoted = false;
+      } else if (c === '"') quoted = true;
+      else if (c === '{' || c === '[') depth++;
+      else if (c === '}' || c === ']') { if (--depth === 0) { end = i + 1; break; } }
+    }
+    let product;
+    try { product = JSON.parse(text.slice(0, end)); } catch (_) { fail('invalid Shopify product JSON'); }
+    let page, canonical;
+    try { page = new URL(pageUrl); canonical = new URL(canonicalUrl); } catch (_) { fail('invalid canonical'); }
+    const origin = 'https://www.barenecessities.com';
+    if (page.origin !== origin || canonical.origin !== origin || page.pathname !== canonical.pathname ||
+        canonical.search || canonical.hash || canonical.pathname !== `/products/${product.handle}`) fail('canonical mismatch');
+    if (!Number.isSafeInteger(product.id) || !product.title || !product.vendor || currency !== 'USD') fail('identity or USD missing');
+    const variant = product.variants?.find(item => String(item.id) === defaultVariant?.variantId);
+    const price = variant?.price;
+    if (String(product.id) !== defaultVariant?.productId || defaultVariant?.name !== product.title ||
+        !Number.isSafeInteger(price) || price < 0 || Number(defaultVariant?.price) !== price / 100)
+      fail('page variant price not bound to Shopify product');
+    if (!Array.isArray(product.images) || !product.images.length) fail('images missing');
+    const images = product.images.map(raw => {
+      let url;
+      try { url = new URL(raw, origin); } catch (_) { fail('invalid original image'); }
+      if (url.protocol !== 'https:' || url.hostname !== 'www.barenecessities.com' ||
+          !url.pathname.startsWith('/cdn/shop/files/') || url.username || url.password) fail('foreign original image');
+      return url.href;
+    });
+    return {facts: {name: product.title, sku: null, product_id: String(product.id), color: null,
+      offers: {price: (price / 100).toFixed(2), currency}}, images, category: product.type || ''};
+  }
+
+  function bareNecessitiesGallery(originals, rendered) {
+    const urls = rendered.map(raw => {
+      let url;
+      try { url = new URL(raw, 'https://www.barenecessities.com'); } catch (_) { throw new Error('Bare Necessities gallery: invalid image'); }
+      const matches = originals.filter(original => {
+        const candidate = new URL(original);
+        return candidate.origin === url.origin && candidate.pathname === url.pathname;
+      });
+      if (matches.length !== 1) throw new Error('Bare Necessities gallery: rendered image not bound to product original');
+      return matches[0];
+    });
+    if (!urls.length) throw new Error('Bare Necessities gallery: no rendered images');
+    return [...new Set(urls)];
+  }
+
   function listingResultTotal(text) {
     const japanese = String(text).match(/^\s*(\d+|\d{1,3}(?:,\d{3})+)\s*件\s*$/);
     if (japanese) {
@@ -996,7 +1053,7 @@
       const [start, end, total] = range.slice(1).map(Number);
       return Number.isSafeInteger(total) && start >= 1 && start <= end && end <= total ? total : null;
     }
-    const simple = String(text).match(/\b(\d+)\s+(?:results?|items?|products?)\b/i);
+    const simple = String(text).match(/\b(\d+)\s*(?:results?|items?|products?)\b/i);
     return simple && Number.isSafeInteger(Number(simple[1])) ? Number(simple[1]) : null;
   }
 
@@ -1023,7 +1080,7 @@
     liseCharmelGallery,
     liseCharmelListingProducts,
     vandeveldeProduct,
-    listingResultTotal,
+    listingResultTotal, bareNecessitiesProduct, bareNecessitiesGallery,
     comparableUrl, sameDocumentUrl,
     victoriasSecretImage, victoriasSecretSameProductChoice, victoriasSecretUnavailableChoice,
     takeoverStatusText,

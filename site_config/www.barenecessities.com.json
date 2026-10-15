@@ -1,0 +1,26 @@
+{
+  "domain": "www.barenecessities.com",
+  "platform": "shopify",
+  "locale": "en-US",
+  "market": "us",
+  "currency": "USD",
+  "colorVariantStrategy": "separate-url",
+  "listing": {
+    "productLinkSelector": ".br-collection .br-product-tile__media-link",
+    "pagination": {
+      "type": "numbered",
+      "nextSelector": ".br-collection .br-pagination__item--next:not([disabled])"
+    },
+    "endCheck": {
+      "type": "result-total",
+      "selector": ".br-collection__header-results"
+    }
+  },
+  "product": {
+    "pageSelector": ".br-gallery-carousel__main",
+    "allImagesSelector": ".br-gallery-carousel__main img",
+    "renditionResolver": "bare-necessities",
+    "lazyLoad": false
+  },
+  "notes": "US owner-browser only. Canonical URL identity; gallery captures current rendered color only, selected color unknown. Exact original URLs bound from current gallery srcset to saved Shopify product.images; never download all product images. No swatch or size clicks; no full-color completeness claim. Insider grid required; numbered button pagination uses page query proven by owner-saved main.min.js. Exact result totals reconcile at end. No Linux storefront/CDN requests."
+}
