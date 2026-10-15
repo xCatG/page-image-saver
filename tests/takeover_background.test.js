@@ -465,7 +465,7 @@ test('structured PDP validation reaches runner through actual content inspection
  const source=fs.readFileSync(path.join(__dirname,'..','content_script.js'),'utf8');
  const row=require('./fixtures/shirohato-expected.json').find(r=>r.product_id);
  const product=JSON.parse(fs.readFileSync(path.join(__dirname,'fixtures',row.fixture),'utf8').match(/<script type="application\/ld\+json">(.*?)<\/script>/s)[1]);
- delete product.brand;
+ delete product.name;
  let listener;
  const page={URL,Date,setTimeout:()=>{},window:{location:new URL(row.url)},document:{title:'Product',body:{innerText:''},
    querySelector:selector=>selector==='link[rel="canonical"]'?{href:row.url}:null},
@@ -481,7 +481,7 @@ test('structured PDP validation reaches runner through actual content inspection
  const b=bridge(); b.tab.status='complete'; b.tab.url=row.url;
  b.stored.catalogTakeoverRun.domain='www.wakudoki.ne.jp';
  b.chrome.tabs.sendMessage=(_id,message,callback)=>listener(message,{},callback);
- await assert.rejects(b.io.load(row.url,{expect:'product'}),error=>error.code==='PRODUCT_EVIDENCE_INVALID'&&/missing brand/.test(error.message));
+ await assert.rejects(b.io.load(row.url,{expect:'product'}),error=>error.code==='PRODUCT_EVIDENCE_INVALID'&&/missing name/.test(error.message));
  const update=b.chrome.tabs.update;
  for(const status of [500,503]){
   b.chrome.tabs.update=(id,details,callback)=>{
@@ -500,7 +500,7 @@ test('structured PDP validation reaches runner through actual content inspection
  await runner.preview(config,{kind:'listing',url:row.url,products:[row.url]}); await runner.start();
  run.listings.queue=[];run.products=[{url:row.url,status:'pending'}];run.mode='capture-discovery';
  await runner.tick();
- assert.equal(run.products[0].status,'failed');assert.match(run.products[0].reason,/missing brand/);
+ assert.equal(run.products[0].status,'failed');assert.match(run.products[0].reason,/missing name/);
  assert.equal(run.status,'running');assert.equal(run.loadFailures[row.url],undefined);
  // Challenge detection precedes validators, even with the same invalid JSON-LD.
  page.document.title='Captcha';

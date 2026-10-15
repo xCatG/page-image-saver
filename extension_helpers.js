@@ -960,7 +960,6 @@
     if (p.productID !== id) fail('productID mismatch');
     if (p.sku !== id) fail('sku mismatch');
     if (!p.name) fail('missing name');
-    if (!p.brand?.name) fail('missing brand');
     if (!p.category) fail('missing category');
     if (offer?.priceCurrency !== 'JPY') fail('no JPY offer');
     if (!/^\d+(?:\.0+)?$/.test(String(offer.price)) || Number(offer.price) <= 0)
