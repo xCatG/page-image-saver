@@ -459,3 +459,84 @@ test('tab URL comparison accepts real VS apostrophe encodings but not another pr
   assert.equal((await dispatch(message)).success, false);
   assert.equal(b.acquisitions.length, 1);
 });
+
+// Real content inspector/listener → background transport → runner, with local DOM evidence.
+test('structured PDP validation reaches runner through actual content inspection transport', async()=>{
+ const source=fs.readFileSync(path.join(__dirname,'..','content_script.js'),'utf8');
+ const row=require('./fixtures/shirohato-expected.json').find(r=>r.product_id);
+ const product=JSON.parse(fs.readFileSync(path.join(__dirname,'fixtures',row.fixture),'utf8').match(/<script type="application\/ld\+json">(.*?)<\/script>/s)[1]);
+ delete product.brand;
+ let listener;
+ const page={URL,Date,setTimeout:()=>{},window:{location:new URL(row.url)},document:{title:'Product',body:{innerText:''},
+   querySelector:selector=>selector==='link[rel="canonical"]'?{href:row.url}:null},
+   captureJsonLd:()=>[product],loadCaptureSiteConfig:async()=>({}),
+   takeoverUnavailableChoice:()=>null,PageImageSaverHelpers:require('../extension_helpers'),
+   chrome:{runtime:{onMessage:{addListener:fn=>{listener=fn;}}}}};
+ page.globalThis=page;
+ vm.createContext(page);
+ vm.runInContext(source.slice(source.indexOf('function capturePageProductEvidence()'),source.indexOf('function captureProductSeen(')),page);
+ vm.runInContext(source.slice(source.indexOf('async function inspectTakeoverPage('),source.indexOf('async function inspectTakeoverPage(')+source.slice(source.indexOf('async function inspectTakeoverPage(')).indexOf('\nfunction ')),page);
+ const start=source.lastIndexOf('chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {');
+ vm.runInContext(source.slice(start,source.indexOf("  } else if (message.action === 'takeoverDocumentCheck')",start))+'  }\n});',page);
+ const b=bridge(); b.tab.status='complete'; b.tab.url=row.url;
+ b.stored.catalogTakeoverRun.domain='www.wakudoki.ne.jp';
+ b.chrome.tabs.sendMessage=(_id,message,callback)=>listener(message,{},callback);
+ await assert.rejects(b.io.load(row.url,{expect:'product'}),error=>error.code==='PRODUCT_EVIDENCE_INVALID'&&/missing brand/.test(error.message));
+ const update=b.chrome.tabs.update;
+ for(const status of [500,503]){
+  b.chrome.tabs.update=(id,details,callback)=>{
+   b.webCompleted[0]({type:'main_frame',tabId:7,statusCode:status});update(id,details,callback);
+  };
+  const failedLoad=await b.io.load(row.url,{expect:'product'});
+  assert.equal(failedLoad.status,status);assert.equal(failedLoad.errorCode,undefined);
+ }
+ b.chrome.tabs.update=update;
+
+ const {createTakeoverRunner}=require('../takeover_runner');
+ let run;
+ const runner=createTakeoverRunner({...b.io,now:()=>100000,save:async value=>{run=structuredClone(value);b.stored.catalogTakeoverRun=run;},read:async()=>structuredClone(run),alarm:async()=>{},verify:async()=>({status:'missing'})});
+ const config=require('../site_config/www.wakudoki.ne.jp.json');
+ // Prepare a run through the public interface, then simulate its persisted product queue.
+ await runner.preview(config,{kind:'listing',url:row.url,products:[row.url]}); await runner.start();
+ run.listings.queue=[];run.products=[{url:row.url,status:'pending'}];run.mode='capture-discovery';
+ await runner.tick();
+ assert.equal(run.products[0].status,'failed');assert.match(run.products[0].reason,/missing brand/);
+ assert.equal(run.status,'running');assert.equal(run.loadFailures[row.url],undefined);
+ // Challenge detection precedes validators, even with the same invalid JSON-LD.
+ page.document.title='Captcha';
+ const challenge=await b.io.load(row.url,{expect:'product'});
+ assert.equal(challenge.kind,'challenge');
+ // Error documents must still stop on a challenge on the first navigation.
+ for (const status of [500,503]) {
+  let loads=0, captures=0;
+  b.chrome.tabs.update=(id,details,callback)=>{
+   loads++; b.webCompleted[0]({type:'main_frame',tabId:7,statusCode:status}); update(id,details,callback);
+  };
+  const loaded=await b.io.load(row.url,{expect:'product'});
+  assert.equal(loaded.status,status); assert.equal(loaded.kind,'challenge');
+  await runner.stop();
+  await runner.preview(config,{kind:'listing',url:row.url,products:[row.url]}); await runner.start();
+  run.listings.queue=[];run.products=[{url:row.url,status:'pending'}];run.mode='capture-discovery';
+  loads=0;
+  const send=b.chrome.tabs.sendMessage;
+  b.chrome.tabs.sendMessage=(id,message,callback)=>{if(message.action==='takeoverCapture')captures++;send(id,message,callback);};
+  await runner.tick(); await runner.tick();
+  assert.equal(run.status,'paused');assert.equal(run.products[0].status,'pending');
+  assert.equal(loads,1);assert.equal(captures,0);assert.equal(run.loadFailures[row.url],undefined);
+  b.chrome.tabs.sendMessage=send;
+  // Missing product evidence in a plain error document must never become PDP validation.
+  page.document.title='Server error';page.captureJsonLd=()=>[];
+  await runner.stop();
+  await runner.preview(config,{kind:'listing',url:row.url,products:[row.url]}); await runner.start();
+  run.listings.queue=[];run.products=[{url:row.url,status:'pending'}];run.mode='capture-discovery';
+  loads=0;
+  for(let attempt=0;attempt<3;attempt++){run.nextNavigationAt=0;await runner.tick();}
+  assert.equal(loads,3);assert.equal(run.status,'paused');assert.equal(run.products[0].status,'pending');
+  assert.equal(run.loadFailures[row.url],3);
+  page.document.title='Captcha';
+ }
+ b.chrome.tabs.update=update;
+ page.document.title='Product';
+ page.captureJsonLd=()=>{throw new Error('unexpected inspection failure');};
+ await assert.rejects(b.io.load(row.url,{expect:'product'}),error=>error.code===undefined&&error.message==='unexpected inspection failure');
+});

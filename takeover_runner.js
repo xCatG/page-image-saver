@@ -380,7 +380,7 @@
       await io.alarm(io.now() + 30000); // Repeating alarm revives a terminated MV3 worker.
       let page;
       try { page = await io.load(url, {expect: listingUrl ? 'listing' : 'product'}); }
-      catch (error) { page = {status: 0, error: String(error?.message || error)}; }
+      catch (error) { page = {status: 0, error: String(error?.message || error), errorCode: error?.code}; }
       const afterLoad = await read();
       if (afterLoad?.status !== 'running' || afterLoad.generation !== run.generation) return afterLoad;
       if (page?.status === 403 || page?.status === 429 || page?.kind === 'challenge' ||
@@ -392,7 +392,9 @@
       let queryEquivalent = false;
       if (item && page?.status >= 400) {
         gone = [404, 410].includes(page.status);
-        deadProductReason = gone ? `gone: HTTP ${page.status}` : `HTTP ${page.status} at ${url}`;
+        if (gone) deadProductReason = `gone: HTTP ${page.status}`;
+      } else if (item && page?.errorCode === 'PRODUCT_EVIDENCE_INVALID') {
+        deadProductReason = page.error;
       } else if (item && page?.url) {
         try {
           const actual = canonical(page.url, run.domain);
@@ -436,9 +438,9 @@
         run.lastLoadError = {url, reason, attempts: run.loadFailures[url]};
         run.current = null;
         if (run.loadFailures[url] >= 3) {
-          // Only known local readiness/timeouts can advance a product queue.
+          // Only known gallery readiness failures can advance a product queue.
           // Unknown navigation/inspection failures retain the conservative pause.
-          const plainFailure = /^(page load timeout|automatic product gallery readiness timeout|Lazy gallery shortfall:)/.test(reason);
+          const plainFailure = /^(automatic product gallery readiness timeout|Lazy gallery shortfall:)/.test(reason);
           if (!item || !plainFailure)
             return interrupt(run, 'paused', `repeated page load failure at ${url}: ${reason}`);
           item.status = 'failed'; item.reason = `3 page load attempts failed: ${reason}`;

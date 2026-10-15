@@ -56,7 +56,12 @@ async function takeoverTabComplete(tabId) {
 
 function takeoverMessage(tabId, message) {
   return chromeCallback(callback => chrome.tabs.sendMessage(tabId, message, callback)).then(reply => {
-    if (!reply?.success) throw new Error(reply?.error || 'page inspection failed');
+    if (!reply?.success) {
+      const error = new Error(reply?.error || 'page inspection failed');
+      if (message.action === 'takeoverInspect' && reply?.errorCode === 'PRODUCT_EVIDENCE_INVALID')
+        error.code = reply.errorCode;
+      throw error;
+    }
     return reply;
   });
 }
@@ -133,7 +138,7 @@ const takeoverIo = {
       return {status: 0, error: 'redirected outside configured site'};
     if ([404, 410].includes(status)) return {status};
     const reply = await takeoverMessage(tab.id, {action: 'takeoverInspect', mode: run.mode || 'capture',
-      expect: options.expect || null});
+      expect: options.expect || null, challengeOnly: status >= 400});
     return {...reply.page, tabId: tab.id, status};
   },
   capture: async (url, scope, binding) => {

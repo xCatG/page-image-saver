@@ -34,6 +34,28 @@ class BravissimoBrowser(unittest.TestCase):
                 self.assertEqual(result['product']['category'],row['type'])
             finally:page.close()
 
+    def test_shared_gallery_filename_still_requires_current_product_membership(self):
+        row=next(r for r in ROWS if r.get('code') == 'fy563')
+        page=self.open(row)
+        shared='https://images.ctfassets.net/bz0fvtkbk5r1/shared/lifestyle.jpg'
+        try:
+            page.evaluate("""shared => {
+              const script=Array.from(document.scripts).find(node=>node.textContent.includes('setDataLayer('));
+              const match=script.textContent.match(/setDataLayer\((\{.*?\})\);/s);
+              const value=JSON.parse(match[1]); value.product.images=[{zoom:shared}];
+              script.textContent=script.textContent.replace(match[1],JSON.stringify(value));
+              const sources=Array.from(document.querySelectorAll('#product-gallery .c-product-gallery__carousel--feature picture source'));
+              sources.forEach(node=>node.setAttribute('srcset',shared));
+            }""",shared)
+            self.assertEqual(page.evaluate("c => captureGallery(c,'site')",CONFIG),[shared])
+            page.evaluate("""() => {
+              document.querySelectorAll('#product-gallery .c-product-gallery__carousel--feature picture source')
+                .forEach(node=>node.setAttribute('srcset','https://images.ctfassets.net/bz0fvtkbk5r1/other/not-current.jpg'));
+            }""")
+            with self.assertRaisesRegex(Exception,'current gallery not bound'):
+                page.evaluate("c => captureGallery(c,'site')",CONFIG)
+        finally: page.close()
+
     def test_saved_listings(self):
         for row in ROWS:
             if 'products' not in row: continue

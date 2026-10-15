@@ -33,3 +33,9 @@ test('VDV scope guard does not approve swim, nightwear or accessories via linger
     assert.equal(classifyTakeoverScope({name:'Body',category:'lingerie / body'},{domain}).decision,'include');
   }
 });
+test('VDV validation reports the specific missing product field', () => {
+  for (const field of ['name','commercialColor','styleCode']) {
+    const row=expected[0], value=data(row); value.props.pageProps.product[field]='';
+    assert.throws(()=>vandeveldeProduct(value,row.url), error=>error.code==='PRODUCT_EVIDENCE_INVALID' && error.message.includes(field));
+  }
+});

@@ -62,3 +62,14 @@ test('BN womens lingerie titles remain included', () => {
   for (const name of ['Womens Support Bra', "Women's Support Bra", 'Women’s Support Bra'])
     assert.equal(classifyTakeoverScope({name,category:'Bras'},config).decision,'include',name);
 });
+test('BN validation names the missing identity field', () => {
+  const row=rows[0], html=fs.readFileSync(`${__dirname}/fixtures/${row.fixture}`,'utf8');
+  const script=html.match(/<script id="swym-snippet">([\s\S]*?)<\/script>/)[1];
+  const evidence=JSON.parse(html.match(/<script[^>]*id="elevar-product-view"[^>]*>([\s\S]*?)<\/script>/)[1]);
+  const match=script.match(/window.SwymProductInfo.product = (\{.*?\});/s);
+  for(const field of ['id','title','vendor']) {
+    const product=JSON.parse(match[1]);product[field]=null;
+    assert.throws(()=>helpers.bareNecessitiesProduct(script.replace(match[1],JSON.stringify(product)),row.url,row.url,'USD',evidence.defaultVariant),
+      error=>error.code==='PRODUCT_EVIDENCE_INVALID' && error.message.includes(field));
+  }
+});
