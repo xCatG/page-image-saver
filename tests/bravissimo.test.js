@@ -34,3 +34,25 @@ test('Bravissimo failures identify the invalid field without raw URL values', ()
     assert.throws(() => h.bravissimoProduct({...f.product,...patch}, f.jsonld, f.canonical, f.canonical, f.color, 'USD'),
       error => error.code === 'PRODUCT_EVIDENCE_INVALID' && reason.test(error.message));
 });
+
+for (const row of require('./fixtures/bravissimo-name-expected.json')) {
+  test(`Bravissimo ${row.code} trims archived trailing name whitespace for receiver facts`, () => {
+    const f = require(`./fixtures/bravissimo-${row.code}.json`);
+    assert.equal(f.product.styleName, row.name + ' ');
+    const result = h.bravissimoProduct(f.product, f.jsonld, f.canonical, f.canonical, f.color, 'USD');
+    assert.equal(result.facts.name, row.name);
+    assert.equal(result.microdata.name, row.name);
+    assert.equal(result.facts.product_id, row.product_id);
+    assert.equal(result.microdata.brand, f.product.brand);
+    assert.deepEqual(result.images, row.images);
+  });
+}
+
+test('Bravissimo malformed styleName remains a terminal product evidence error', () => {
+  const f = require('./fixtures/bravissimo-fy563.json');
+  for (const styleName of [undefined, null, 42, {}, [], '', ' \t\n ']) {
+    assert.throws(() => h.bravissimoProduct({...f.product, styleName}, f.jsonld,
+      f.canonical, f.canonical, f.color, 'USD'),
+      error => error.code === 'PRODUCT_EVIDENCE_INVALID' && /styleName/.test(error.message));
+  }
+});

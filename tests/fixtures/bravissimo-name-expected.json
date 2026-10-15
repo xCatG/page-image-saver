@@ -1,0 +1,50 @@
+[
+  {
+    "code": "yb116",
+    "fixture": "bravissimo-yb116.html",
+    "url": "https://www.bravissimo.com/us/products/silicone-nipple-covers-yb116/",
+    "product_id": "YB116",
+    "name": "Silicone Nipple Covers",
+    "sku": "YB116BGE",
+    "color": "Beige",
+    "price": "7.00",
+    "images": [
+      "https://images.ctfassets.net/bz0fvtkbk5r1/1taNaG8oSZ7cNDZivO70nS/eb691c15f53465f4c1320f4e61e72e8e/YB116BGE-main.png?q=80&w=1750&fit=fill&f=top&h=2240",
+      "https://images.ctfassets.net/bz0fvtkbk5r1/4gugjrjWGfOOv7MRdaMvlM/2993ef0eb1d1cb85f8a6276c1329a414/YB116BGE-1.png?q=80&w=1750&fit=fill&f=top&h=2240",
+      "https://images.ctfassets.net/bz0fvtkbk5r1/5uEMoS6sqtQ9zbjYo6Bqf8/8a8b3fb7dad33008103a9f54c30b3f73/YB116BGE-2.png?q=80&w=1750&fit=fill&f=top&h=2240"
+    ],
+    "type": "Other"
+  },
+  {
+    "code": "ck202",
+    "fixture": "bravissimo-ck202.html",
+    "url": "https://www.bravissimo.com/us/products/boost-me-up-lace-bra-ck202/",
+    "product_id": "CK202",
+    "name": "Boost Me Up Lace Bra",
+    "sku": "CK202LEP",
+    "color": "Leopard Print",
+    "price": "74.00",
+    "images": [
+      "https://images.ctfassets.net/bz0fvtkbk5r1/1KziHgQY2bwJqYKu06XpLC/ac57e10f543de0d292dc5afd50e31f9a/CK202LEP-main.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+      "https://images.ctfassets.net/bz0fvtkbk5r1/4fTCx1TGxVDUoPQBj3dIlc/0553a5d3e260a33e6da98f6852c15ead/CK202LEP-1.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+      "https://images.ctfassets.net/bz0fvtkbk5r1/70MUEHnFbiSWYWToHEO8HM/4c33c61f6e321905efd4a1a940ed3a29/CK202LEP-3.jpg?q=80&w=1750&fit=fill&f=top&h=2240"
+    ],
+    "type": "Balconette Bra"
+  },
+  {
+    "code": "fa358",
+    "fixture": "bravissimo-fa358.html",
+    "url": "https://www.bravissimo.com/us/products/magdalena-t-shirt-bra-fa358/",
+    "product_id": "FA358",
+    "name": "Magdalena T Shirt Bra",
+    "sku": "FA358IVG",
+    "color": "Ivory/Gold",
+    "price": "86.00",
+    "images": [
+      "https://images.ctfassets.net/bz0fvtkbk5r1/2HxermxVIoTMf4WLf8p1BL/a7b96d3d8b3e153751480c4285380d6f/FA358IVG-main.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+      "https://images.ctfassets.net/bz0fvtkbk5r1/2RP2vjBQyShx6FhUeEp8QY/8fd57f12d1a691dc5c7e729791e596e8/FA358IVG-1.jpg?q=80&w=1750&fit=fill&f=top&h=2240",
+      "https://images.ctfassets.net/bz0fvtkbk5r1/4DnbYdahkamRmRJLJrvMHT/9fe1008d701e728d5dca7fd93e804dae/FA358IVG-2.jpg?q=80&w=1750&fit=fill&f=top&h=2240"
+    ],
+    "type": "Full Cup Bra"
+  }
+]

@@ -1058,6 +1058,7 @@
     if (!product?.brand) fail('missing brand');
     if (!product.styleCode) fail('missing styleCode');
     if (!product.styleColourCode) fail('missing styleColourCode');
+    if (typeof product.styleName !== 'string' || !product.styleName.trim()) fail('invalid styleName');
     if (!canonical.pathname.endsWith('-' + product.styleCode.toLowerCase() + '/')) fail('canonical styleCode mismatch');
     if (product.colour?.colour !== selectedColor) fail('rendered colour mismatch');
     const nodes = jsonld.flat();
@@ -1086,7 +1087,8 @@
       return url.href;
     });
     const sizeLabels = node => node?.label ? [node.label] : (node?.variants || []).flatMap(item => sizeLabels(item.sizes || item));
-    const facts = {name: product.styleName, sku: product.styleColourCode, product_id: product.styleCode,
+    // Microdata evidence is trimmed by the receiver; emit the same normalized name.
+    const facts = {name: product.styleName.trim(), sku: product.styleColourCode, product_id: product.styleCode,
       color: selectedColor, offers: {price: product.prices.price.toFixed(2), currency: 'USD'}};
     return {facts, images: [...new Set(images)], category: product.productGroup,
       microdata: {name: facts.name, sku: facts.sku, productID: facts.product_id, url: canonical.href,
