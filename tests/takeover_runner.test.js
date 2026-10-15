@@ -1042,3 +1042,35 @@ test('non-Shirohato structured validation is classified explicitly and challenge
   assert.equal(r.memory.run.status,challenge?'paused':'running');
  }
 });
+
+test('reimported Shirohato discovery cheaply skips 23 receiver captures before failing bad PDP and continuing',async()=>{
+ const config=require('../site_config/www.wakudoki.ne.jp.json');
+ const urls=Array.from({length:5366},(_,i)=>`https://${config.domain}/productdetail/fixture${i}/1/`);
+ urls[23]=`https://${config.domain}/productdetail/202792b/1/`;
+ const next=urls[24];
+ const source=discoverySource(urls,'c'.repeat(64),`https://${config.domain}/c/000010001/?dpt=pro&udns=1`);
+ source.report.site=config.domain;
+ const r=rig({[urls[23]]:{status:0,error:'Shirohato product: missing brand',errorCode:'PRODUCT_EVIDENCE_INVALID'},
+   [next]:{...braPage,url:next,colorLinks:[]}}, {},{verifyResult:{storage:'receiver',status:'missing'}});
+ const already=new Set(urls.slice(0,23));
+ r.io.verify=async identity=>{
+  r.verificationCalls.push(identity);
+  return {storage:'receiver',status:already.has(identity.product_url)?'already':'missing'};
+ };
+ const runner=r.runner();
+ await runner.importDiscovery(config,[source]);await runner.start();
+ assert.equal(r.memory.run.products.length,5366);
+ for(let i=0;i<23;i++){await runner.tick();r.advance(10000);}
+ assert.deepEqual(r.memory.run.products.slice(0,23).map(p=>[p.status,p.captureStatus]),Array.from({length:23},()=>['skipped','already']));
+ assert.deepEqual(r.verificationCalls.map(identity=>identity.product_url),urls.slice(0,23));
+ // No page navigation or capture boundary means no product/image acquisition for receiver hits.
+ assert.deepEqual(r.visits,[]);assert.deepEqual(r.captureCalls,[]);
+ await runner.tick();r.advance(10000);await runner.tick();
+ assert.equal(r.memory.run.products[23].status,'failed');
+ assert.equal(r.memory.run.products[23].reason,'Shirohato product: missing brand');
+ assert.equal(r.memory.run.products[24].status,'captured');
+ assert.equal(r.memory.run.products[25].status,'pending');
+ assert.deepEqual(r.visits,[urls[23],next]);
+ assert.deepEqual(r.captureCalls.map(call=>call.url),[next]);
+ assert.equal(r.memory.run.status,'running');assert.equal(r.memory.run.consecutiveFailures,0);
+});
