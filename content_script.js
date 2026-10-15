@@ -2540,14 +2540,19 @@ function capturePageProductEvidence() {
     const jsonld = captureJsonLd();
     const canonical = document.querySelector('link[rel="canonical"]')?.href;
     const facts = globalThis.PageImageSaverHelpers.shirohatoProduct(jsonld, window.location.href, canonical);
+    const brandName = jsonld.find(item => item?.['@type'] === 'Product')?.brand?.name;
+    const brand = typeof brandName === 'string' && brandName.trim() ? brandName : null;
     const colors = [...new Set(Array.from(document.querySelectorAll('#js-main-slider [data-variation-name1]'),
       node => node.getAttribute('data-variation-name1')).filter(Boolean))];
     const sizeRow = Array.from(document.querySelectorAll('.spec tr')).find(row =>
       row.querySelector('th')?.textContent.trim() === 'サイズ');
     const size = sizeRow?.querySelector('td')?.innerText?.trim().replace(/\s+/g, ' ') || null;
     return {...globalThis.PageImageSaverHelpers.captureProductEvidence(jsonld), facts,
-      microdata: {sku: facts.sku, productID: facts.product_id, url: canonical, colors, size,
-        field_sources: {sku: 'validated Product JSON-LD sku', productID: 'validated Product JSON-LD productID',
+      microdata: {sku: facts.sku, productID: facts.product_id, url: canonical, colors, size, brand,
+        field_sources: {brand: brand === null
+          ? 'carried brand missing: Product JSON-LD brand.name absent or unusable'
+          : 'Product JSON-LD brand.name',
+          sku: 'validated Product JSON-LD sku', productID: 'validated Product JSON-LD productID',
           url: 'validated link[rel=canonical]', colors: '#js-main-slider [data-variation-name1]',
         size: '.spec tr: サイズ td (offered range, not stock)'}}};
   }

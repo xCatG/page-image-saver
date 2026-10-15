@@ -61,7 +61,7 @@ class ShirohatoBrowser(unittest.TestCase):
             page.evaluate("""() => {
                 const node = document.querySelector('script[type="application/ld+json"]');
                 const value = JSON.parse(node.textContent);
-                delete value.brand;
+                delete value.name;
                 node.textContent = JSON.stringify(value);
             }""")
             content = source('content_script.js')
@@ -71,7 +71,7 @@ class ShirohatoBrowser(unittest.TestCase):
                 try { await inspectTakeoverPage(config, 'capture', 'product'); }
                 catch (error) { return {code:error.code, reason:error.message}; }
             }""", config)
-            self.assertEqual(result, dict(code='PRODUCT_EVIDENCE_INVALID', reason='Shirohato product: missing brand'))
+            self.assertEqual(result, dict(code='PRODUCT_EVIDENCE_INVALID', reason='Shirohato product: missing name'))
             page.evaluate("document.title = 'Captcha challenge'")
             self.assertEqual(page.evaluate("config => inspectTakeoverPage(config, 'capture', 'product')", config)['kind'], 'challenge')
         finally:
@@ -90,6 +90,8 @@ class ShirohatoBrowser(unittest.TestCase):
                     self.assertEqual(evidence['fact_source'], 'jsonld')
                     self.assertEqual(evidence['facts'], dict(name=row['name'],sku=row['product_id'],product_id=row['product_id'],color=None,offers=dict(price=row['price'],currency='JPY')))
                     self.assertEqual(evidence['jsonld'][0]['brand']['name'], row['brand'])
+                    self.assertEqual(evidence['microdata']['brand'], row['brand'])
+                    self.assertEqual(evidence['microdata']['field_sources']['brand'], 'Product JSON-LD brand.name')
                     self.assertEqual({k:evidence['microdata'].get(k) for k in ('sku','productID','url')},
                         dict(sku=row['product_id'],productID=row['product_id'],url=row['url']))
                     self.assertEqual(evidence['microdata']['colors'], row['colors'])
@@ -105,6 +107,28 @@ class ShirohatoBrowser(unittest.TestCase):
                     page.evaluate("document.querySelector('#js-main-slider .swiper-slide:not(.swiper-slide-duplicate) img').src='./saved_files/unproven_LL.jpg'")
                     with self.assertRaisesRegex(Exception, 'Shirohato gallery'):
                         page.evaluate("c => captureGallery(c,'site')", config)
+                finally:
+                    page.close()
+
+    def test_missing_and_unusable_carried_brand_is_explicit_null(self):
+        config = json.loads(source('site_config/www.wakudoki.ne.jp.json'))
+        row = next(r for r in json.loads((FIXTURES / 'shirohato-expected.json').read_text()) if 'product_id' in r)
+        for brand in [None, {}, {'name': ''}, {'name': '  '}, {'name': 17}, 'Wacoal', []]:
+            with self.subTest(brand=brand):
+                page = self.open_fixture(config['domain'], row['fixture'])
+                try:
+                    page.evaluate("url => history.replaceState({}, '', url)", row['url'])
+                    page.evaluate("""brand => {
+                        const node = document.querySelector('script[type="application/ld+json"]');
+                        const value = JSON.parse(node.textContent); value.brand = brand;
+                        node.textContent = JSON.stringify(value);
+                    }""", brand)
+                    evidence = page.evaluate('capturePageProductEvidence()')
+                    self.assertIsNone(evidence['microdata']['brand'])
+                    self.assertEqual(evidence['microdata']['field_sources']['brand'],
+                                     'carried brand missing: Product JSON-LD brand.name absent or unusable')
+                    self.assertEqual(evidence['jsonld'][0]['brand'], brand)
+                    self.assertEqual(self.inspect(page, config)['kind'], 'product')
                 finally:
                     page.close()
 
@@ -161,6 +185,11 @@ class ShirohatoBrowser(unittest.TestCase):
         try:
             url = 'https://www.wakudoki.ne.jp/productdetail/c6510226179ef/1/'
             page.evaluate("url => history.replaceState({}, '', url)", url)
+            page.evaluate("""() => {
+                const node = document.querySelector('script[type=\"application/ld+json\"]');
+                const value = JSON.parse(node.textContent); delete value.brand;
+                node.textContent = JSON.stringify(value);
+            }""")
             content = source('content_script.js')
             # Execute the real capture path and real export writer; only storage/image IO is local.
             page.add_script_tag(content=content[content.index('function captureSwatchColor()'):content.index('function captureCanonicalUrl(')] +
@@ -186,6 +215,9 @@ class ShirohatoBrowser(unittest.TestCase):
             microdata = json.loads(bytes(product_file))['microdata']
             self.assertEqual({k:microdata.get(k) for k in ('sku','productID','url')},
                 dict(sku='c6510226179ef',productID='c6510226179ef',url=url))
+            self.assertIn('brand', microdata)
+            self.assertIsNone(microdata['brand'])
+            self.assertNotIn('brand', json.loads(bytes(product_file))['jsonld'][0])
             self.assertTrue(microdata['colors'])
             self.assertTrue(microdata['size'])
             self.assertEqual(set(result['completion']['product']), {'name','sku','product_id','color','offers'})
