@@ -820,15 +820,16 @@ test('three plain readiness failures fail one product and continue with the next
   assert.equal(r.memory.run.products[1].status,'captured');
 });
 
-test('plain load failures on five different products pause; challenge errors pause immediately',async()=>{
+test('real page load failures pause after three attempts; challenge errors pause immediately',async()=>{
   const urls=Array.from({length:6},(_,i)=>`https://shop.example.test/bra-${i}`);
   const r=rig(Object.fromEntries(urls.map(url=>[url,{status:0,error:'page load timeout'}])),{},
     {verifyResult:{storage:'receiver',status:'missing'}});
   await r.runner().importDiscovery(site,[discoverySource(urls)]);await r.runner().start();
   for(let i=0;i<15;i++){await r.runner().tick();r.advance(10000);}
-  assert.equal(r.memory.run.products.filter(p=>p.status==='failed').length,5);
+  assert.equal(r.memory.run.products.filter(p=>p.status==='failed').length,0);
+  assert.equal(r.visits.length,3);
   assert.equal(r.memory.run.status,'paused');
-  assert.match(r.memory.run.reason,/5 consecutive product failures.*page load timeout/);
+  assert.match(r.memory.run.reason,/repeated page load failure.*page load timeout/);
   for(const error of ['HTTP 403','HTTP 429','captcha challenge']) {
     const b=rig({[bra]:{status:0,error}},{},{verifyResult:{storage:'receiver',status:'missing'}});
     await b.runner().importDiscovery(site,[discoverySource([bra])]);await b.runner().start();await b.runner().tick();
@@ -995,4 +996,49 @@ test('Bravissimo queue rejects wrong completion color and unsupported capture po
     await r.runner().importDiscovery(config,[source]);await r.runner().start();await r.runner().tick();
     assert.equal(r.memory.run.status,'paused');assert.match(r.memory.run.reason,/capture identity/);
   }
+});
+
+test('structured validation advances once, survives resume and breaks at five failures', async()=>{
+ const urls=Array.from({length:7},(_,i)=>bra+'/'+i);
+ const pages=Object.fromEntries(urls.map(url=>[url,{status:0,error:'missing brand',errorCode:'PRODUCT_EVIDENCE_INVALID'}]));
+ const r=rig(pages,{}, {verifyResult:{storage:'receiver',status:'missing'}});
+ await r.runner().importDiscovery(site,[discoverySource(urls)]); await r.runner().start();
+ r.memory.run.loadFailures[urls[0]]=3;
+ await r.runner().pause(); await r.runner().resume();
+ for(let i=0;i<5;i++){await r.runner().tick();r.advance(10000);}
+ assert.equal(r.memory.run.status,'paused');
+ assert.match(r.memory.run.reason,/5 consecutive.*missing brand/);
+ assert.equal(r.memory.run.products.filter(p=>p.status==='failed').length,5);
+ assert.equal(r.visits.length,5);
+ assert.equal(r.memory.run.products[5].status,'pending');
+});
+
+test('reloaded paused 5366-product queue preserves 23 captured rows and resets validation streak on success',async()=>{
+ const urls=Array.from({length:5366},(_,i)=>bra+'/'+i);
+ const r=rig({[urls[23]]:{status:0,error:'missing brand',errorCode:'PRODUCT_EVIDENCE_INVALID'},[urls[24]]:{...braPage,url:urls[24],colorLinks:[]}}, {},{verifyResult:{storage:'receiver',status:'missing'}});
+ await r.runner().importDiscovery(site,[discoverySource(urls)]);await r.runner().start();await r.runner().pause();
+ for(let i=0;i<23;i++)Object.assign(r.memory.run.products[i],{status:'captured',identity:{domain:site.domain,product_url:urls[i],selected_color:null,color_key:'url'}});
+ const before=structuredClone(r.memory.run.products.slice(0,23));
+ r.memory.run.loadFailures[urls[23]]=3;
+ // Receiver confirmation preserves completed rows after an MV3 restart.
+ r.io.verify=async identity=>({storage:'receiver',status:urls.indexOf(identity.product_url)<23?'already':'missing'});
+ await r.runner().resume();await r.runner().tick();r.advance(10000);await r.runner().tick();
+ assert.deepEqual(r.memory.run.products.slice(0,23),before);
+ assert.equal(r.memory.run.products.length,5366);
+ assert.equal(r.memory.run.products[23].status,'failed');
+ assert.equal(r.memory.run.products[24].status,'captured');
+ assert.equal(r.memory.run.consecutiveFailures,0);
+ assert.deepEqual(r.visits,[urls[23],urls[24]]);
+});
+
+test('non-Shirohato structured validation is classified explicitly and challenge text wins',async()=>{
+ const helpers=require('../extension_helpers');
+ let error;try{helpers.vandeveldeProduct({},'https://www.mariejo.com/en-us/p/example');}catch(e){error=e;}
+ assert.equal(error.code,'PRODUCT_EVIDENCE_INVALID');
+ for(const challenge of [false,true]){
+  const r=rig({[bra]:{status:0,error:challenge?'captcha challenge':error.message,errorCode:error.code}},{},{verifyResult:{storage:'receiver',status:'missing'}});
+  await r.runner().importDiscovery(site,[discoverySource([bra])]);await r.runner().start();await r.runner().tick();
+  assert.equal(r.memory.run.products[0].status,challenge?'pending':'failed');
+  assert.equal(r.memory.run.status,challenge?'paused':'running');
+ }
 });

@@ -56,7 +56,12 @@ async function takeoverTabComplete(tabId) {
 
 function takeoverMessage(tabId, message) {
   return chromeCallback(callback => chrome.tabs.sendMessage(tabId, message, callback)).then(reply => {
-    if (!reply?.success) throw new Error(reply?.error || 'page inspection failed');
+    if (!reply?.success) {
+      const error = new Error(reply?.error || 'page inspection failed');
+      if (message.action === 'takeoverInspect' && reply?.errorCode === 'PRODUCT_EVIDENCE_INVALID')
+        error.code = reply.errorCode;
+      throw error;
+    }
     return reply;
   });
 }

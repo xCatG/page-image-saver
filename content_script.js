@@ -2495,7 +2495,7 @@ function captureBravissimoProduct() {
     try { const value = JSON.parse(match[1]); return value.product ? [value.product] : []; }
     catch (_) { return []; }
   });
-  if (candidates.length !== 1) throw new Error('Bravissimo: missing or ambiguous current product');
+  if (candidates.length !== 1) throw globalThis.PageImageSaverHelpers.productEvidenceError('Bravissimo: missing or ambiguous current product');
   const result = globalThis.PageImageSaverHelpers.bravissimoProduct(candidates[0], captureJsonLd(),
     window.location.href, document.querySelector('link[rel="canonical"]')?.href,
     document.querySelector('.c-product-details__selected-colour-name')?.textContent.trim(),
@@ -2504,16 +2504,16 @@ function captureBravissimoProduct() {
     node => node.getAttribute('srcset')?.split(',')[0].trim().split(/\s+/)[0]).filter(Boolean);
   const paths = new Set(rendered.map(raw => new URL(raw, window.location.href).pathname));
   if (paths.size !== result.images.length || result.images.some(raw => !paths.has(new URL(raw).pathname)))
-    throw new Error('Bravissimo: current gallery not bound to product data');
+    throw globalThis.PageImageSaverHelpers.productEvidenceError('Bravissimo: current gallery not bound to product data');
   return result;
 }
 
 function captureBareNecessitiesProduct() {
   const scripts = document.querySelectorAll('script#swym-snippet');
-  if (scripts.length !== 1) throw new Error('Bare Necessities product: missing or ambiguous Shopify JSON');
+  if (scripts.length !== 1) throw globalThis.PageImageSaverHelpers.productEvidenceError('Bare Necessities product: missing or ambiguous Shopify JSON');
   let pageEvidence;
   try { pageEvidence = JSON.parse(document.querySelector('#elevar-product-view')?.textContent); }
-  catch (_) { throw new Error('Bare Necessities product: USD evidence missing'); }
+  catch (_) { throw globalThis.PageImageSaverHelpers.productEvidenceError('Bare Necessities product: USD evidence missing'); }
   return globalThis.PageImageSaverHelpers.bareNecessitiesProduct(scripts[0].textContent,
     window.location.href, document.querySelector('link[rel="canonical"]')?.href, pageEvidence.currencyCode, pageEvidence.defaultVariant);
 }
@@ -2554,7 +2554,7 @@ function capturePageProductEvidence() {
   if (['www.primadonna.com', 'www.mariejo.com'].includes(window.location.hostname) &&
       window.location.pathname.includes('/p/')) {
     const scripts = document.querySelectorAll('script#__NEXT_DATA__');
-    if (scripts.length !== 1) throw new Error('VDV product: missing or ambiguous Next data');
+    if (scripts.length !== 1) throw globalThis.PageImageSaverHelpers.productEvidenceError('VDV product: missing or ambiguous Next data');
     const result = globalThis.PageImageSaverHelpers.vandeveldeProduct(
       JSON.parse(scripts[0].textContent), window.location.href);
     return {...globalThis.PageImageSaverHelpers.captureProductEvidence(captureJsonLd()),
@@ -2638,7 +2638,7 @@ function captureGallery(config, mode) {
   }
   if (mode === 'site' && config?.product?.renditionResolver === 'vandevelde-nextdata') {
     const scripts = document.querySelectorAll('script#__NEXT_DATA__');
-    if (scripts.length !== 1) throw new Error('VDV product: missing or ambiguous Next data');
+    if (scripts.length !== 1) throw globalThis.PageImageSaverHelpers.productEvidenceError('VDV product: missing or ambiguous Next data');
     return globalThis.PageImageSaverHelpers.vandeveldeProduct(
       JSON.parse(scripts[0].textContent), window.location.href).images;
   }
@@ -3101,7 +3101,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!config) throw new Error('site config unavailable');
       return inspectTakeoverPage(config, message.mode, message.expect || null);
     }).then(page => sendResponse({success: true, page}))
-      .catch(error => sendResponse({success: false, error: String(error?.message || error)}));
+      .catch(error => sendResponse({success: false, error: String(error?.message || error),
+        errorCode: error?.code === 'PRODUCT_EVIDENCE_INVALID' ? error.code : undefined}));
     return true;
   } else if (message.action === 'takeoverDocumentCheck') {
     sendResponse({success: true, documentId: takeoverDocumentId, url: window.location.href});

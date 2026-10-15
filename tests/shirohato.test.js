@@ -82,3 +82,13 @@ test('subimage acceptance requires this product, exact directory and numbered or
     ]) assert.throws(() => shirohatoGallery([good, bad], id), /Shirohato gallery/);
   }
 });
+
+test('Shirohato diagnostic reasons identify each failed structured check',()=>{
+ const row=rows[0];
+ for(const [change,reason] of [[d=>delete d.brand,'missing brand'],[d=>delete d.name,'missing name'],[d=>delete d.category,'missing category'],[d=>delete d.offers,'no JPY offer'],[d=>d.offers.price='1.5','price is not a positive integer'],[d=>d.sku='wrong','sku mismatch'],[d=>d.productID='wrong','productID mismatch']]){
+  const p=data(row);change(p);
+  assert.throws(()=>shirohatoProduct([p],row.url,row.url),error=>error.code==='PRODUCT_EVIDENCE_INVALID'&&error.message===`Shirohato product: ${reason}`);
+ }
+ assert.throws(()=>shirohatoProduct([],row.url,row.url),/0 Product nodes/);
+ assert.throws(()=>shirohatoProduct([data(row),data(row)],row.url,row.url),/2 Product nodes/);
+});

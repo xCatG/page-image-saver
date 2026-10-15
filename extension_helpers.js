@@ -885,11 +885,17 @@
     return [...urls];
   }
 
+  function productEvidenceError(reason) {
+    const error = new Error(reason);
+    error.code = 'PRODUCT_EVIDENCE_INVALID';
+    return error;
+  }
+
   function vandeveldeProduct(data, pageUrl) {
     const url = new URL(pageUrl);
     const page = data?.props?.pageProps;
     const product = page?.product;
-    const fail = reason => { throw new Error(`VDV product: ${reason}`); };
+    const fail = reason => { throw productEvidenceError(`VDV product: ${reason}`); };
     if (!['www.primadonna.com', 'www.mariejo.com'].includes(url.hostname) ||
         url.protocol !== 'https:' || url.port || url.username || url.password ||
         page?.locale !== 'en-us' || !product || typeof product !== 'object')
@@ -935,21 +941,28 @@
 
   // Bind structured facts to the actual JP PDP, never a recommendation or another market.
   function shirohatoProduct(jsonld, pageUrl, canonicalUrl) {
-    const fail = () => { throw new Error('Shirohato product: invalid or ambiguous JP evidence'); };
-    const identity = raw => {
-      let url; try { url = new URL(raw); } catch (_) { return fail(); }
+    const fail = reason => { throw productEvidenceError(`Shirohato product: ${reason}`); };
+    const identity = (raw, label) => {
+      let url; try { url = new URL(raw); } catch (_) { return fail(`${label}: invalid URL`); }
       const match = url.pathname.match(/^\/productdetail\/([a-z0-9]+)\/1\/$/);
-      if (url.origin !== 'https://www.wakudoki.ne.jp' || url.username || url.password || !match) fail();
+      if (url.origin !== 'https://www.wakudoki.ne.jp' || url.username || url.password || !match)
+        fail(`${label}: invalid JP product URL`);
       return match[1];
     };
-    const id = identity(pageUrl);
-    if (identity(canonicalUrl) !== id) fail();
+    const id = identity(pageUrl, 'page');
+    if (identity(canonicalUrl, 'canonical') !== id) fail('canonical product ID mismatch');
     const products = jsonld.filter(item => item?.['@type'] === 'Product');
-    if (products.length !== 1) fail();
+    if (products.length !== 1) fail(`${products.length} Product nodes`);
     const p = products[0], offer = p.offers;
-    if (identity(p.url) !== id || p.productID !== id || p.sku !== id || !p.name ||
-        !p.brand?.name || !p.category || offer?.priceCurrency !== 'JPY' ||
-        !/^\d+(?:\.0+)?$/.test(String(offer.price)) || Number(offer.price) <= 0) fail();
+    if (identity(p.url, 'Product.url') !== id) fail('Product.url product ID mismatch');
+    if (p.productID !== id) fail('productID mismatch');
+    if (p.sku !== id) fail('sku mismatch');
+    if (!p.name) fail('missing name');
+    if (!p.brand?.name) fail('missing brand');
+    if (!p.category) fail('missing category');
+    if (offer?.priceCurrency !== 'JPY') fail('no JPY offer');
+    if (!/^\d+(?:\.0+)?$/.test(String(offer.price)) || Number(offer.price) <= 0)
+      fail('price is not a positive integer');
     return {name: p.name, sku: p.sku, product_id: id, color: null,
       offers: {price: String(offer.price), currency: 'JPY'}};
   }
@@ -986,7 +999,7 @@
   }
 
   function bareNecessitiesProduct(script, pageUrl, canonicalUrl, currency, defaultVariant) {
-    const fail = reason => { throw new Error(`Bare Necessities product: ${reason}`); };
+    const fail = reason => { throw productEvidenceError(`Bare Necessities product: ${reason}`); };
     const marker = 'window.SwymProductInfo.product = ';
     const start = String(script).indexOf(marker);
     if (start < 0) fail('missing Shopify product JSON');
@@ -1028,7 +1041,7 @@
   }
 
   function bravissimoProduct(product, jsonld, pageUrl, canonicalUrl, selectedColor, currency) {
-    const fail = message => { throw new Error('Bravissimo product: ' + message); };
+    const fail = message => { throw productEvidenceError('Bravissimo product: ' + message); };
     const page = new URL(pageUrl), canonical = new URL(canonicalUrl);
     if (page.origin !== 'https://www.bravissimo.com' || canonical.origin !== page.origin ||
         !/^\/us\/products\/[^/]+\/$/.test(page.pathname) || page.pathname !== canonical.pathname ||
@@ -1117,7 +1130,7 @@
   }
 
   const helpers = {
-    shirohatoProduct, shirohatoGallery, shirohatoListingUrl,
+    productEvidenceError, shirohatoProduct, shirohatoGallery, shirohatoListingUrl,
     liseCharmelGallery,
     liseCharmelListingProducts,
     vandeveldeProduct,

@@ -52,6 +52,31 @@ class ShirohatoBrowser(unittest.TestCase):
         finally:
             page.close()
 
+    def test_invalid_structured_product_has_specific_classification(self):
+        config = json.loads(source('site_config/www.wakudoki.ne.jp.json'))
+        row = next(r for r in json.loads((FIXTURES / 'shirohato-expected.json').read_text()) if 'product_id' in r)
+        page = self.open_fixture(config['domain'], row['fixture'])
+        try:
+            page.evaluate("url => history.replaceState({}, '', url)", row['url'])
+            page.evaluate("""() => {
+                const node = document.querySelector('script[type="application/ld+json"]');
+                const value = JSON.parse(node.textContent);
+                delete value.brand;
+                node.textContent = JSON.stringify(value);
+            }""")
+            content = source('content_script.js')
+            inspector = content[content.index('function takeoverCategory()'):content.index('// A site must be explicitly enabled')]
+            page.add_script_tag(content='const takeoverDocumentId="fixture"; function rescanCaptureImages() {}' + inspector)
+            result = page.evaluate("""async config => {
+                try { await inspectTakeoverPage(config, 'capture', 'product'); }
+                catch (error) { return {code:error.code, reason:error.message}; }
+            }""", config)
+            self.assertEqual(result, dict(code='PRODUCT_EVIDENCE_INVALID', reason='Shirohato product: missing brand'))
+            page.evaluate("document.title = 'Captcha challenge'")
+            self.assertEqual(page.evaluate("config => inspectTakeoverPage(config, 'capture', 'product')", config)['kind'], 'challenge')
+        finally:
+            page.close()
+
     def test_all_saved_products(self):
         config = json.loads(source('site_config/www.wakudoki.ne.jp.json'))
         for row in json.loads((FIXTURES / 'shirohato-expected.json').read_text()):
