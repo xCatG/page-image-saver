@@ -51,11 +51,13 @@
       const included = ['ワイヤーブラ', 'スタンダード', 'Tバック・Gスト', 'ガーターベルト'].includes(category);
       return {decision: included ? 'include' : 'review', reason: `Shirohato category evidence: ${category || 'missing'}`};
     }
-    if (config?.domain === 'www.barenecessities.com' &&
-        (['Bras', 'Panties'].includes(category) ||
-          (category === 'Sexy Lingerie, Accessories' && /\bgarter belt\b/i.test(name))) &&
-        !/\b(swim|swimwear|swimsuit|sleepwear|nightwear|pajamas?|mens?|kids?)\b/i.test(name))
-      return {decision: 'include', reason: `Bare Necessities Shopify category: ${category}; ${name}`};
+    if (config?.domain === 'www.barenecessities.com') {
+      const excluded = /\b(swimwear|swimsuits?|swim|maillot de bain|sleepwear|nightwear|nightdress(?:es)?|pyjamas?|pajamas?|menswear|mens?|men's|men’s|kids?|ready.to.wear|apparel)\b/i.test(`${category} ${name}`);
+      if (excluded) return {decision: 'exclude', reason: `Bare Necessities out-of-scope product: ${category}; ${name}`};
+      if (['Bras', 'Panties'].includes(category) ||
+          (category === 'Sexy Lingerie, Accessories' && /\bgarter belt\b/i.test(name)))
+        return {decision: 'include', reason: `Bare Necessities Shopify category: ${category}; ${name}`};
+    }
     const evidence = category.toLowerCase();
     const title = name.toLowerCase();
     const accessory = ['www.lisecharmel.com', 'www.primadonna.com', 'www.mariejo.com'].includes(config?.domain) &&

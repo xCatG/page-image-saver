@@ -2915,7 +2915,8 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
   let listingCards = [];
   for (let attempt = 0; attempt < 20; attempt++) {
     listingCards = Array.from(document.querySelectorAll(selector), node => {
-      const card = node.closest('.product-item, .product-card, .product__item, [data-testid="ProductCard"], article') || node;
+      const card = (config.domain === 'www.barenecessities.com' ? node.closest('.br-product-tile') : null) ||
+        node.closest('.product-item, .product-card, .product__item, [data-testid="ProductCard"], article') || node;
       return {url: node.href, card_text: card.textContent.replace(/\s+/g, ' ').trim(),
         product_id: card.querySelector('[data-product-id]')?.getAttribute('data-product-id') || null};
     }).filter(card => card.url);

@@ -46,6 +46,16 @@ class BareNecessitiesBrowser(unittest.TestCase):
             try:
                 result=page.evaluate("c => inspectTakeoverPage(c,'discovery')",CONFIG)
                 self.assertEqual(result['products'],[u.split('?')[0] for u in row['products']])
+                expected_text=page.evaluate(r'''() => Array.from(document.querySelectorAll('.br-collection .br-product-tile'), card => ({
+                  name:card.querySelector('.br-product-tile__name').textContent.trim(),
+                  vendor:card.querySelector('.br-product-tile__attribute').textContent.trim(),
+                  text:card.textContent.replace(/\s+/g,' ').trim()}))''')
+                self.assertEqual(len(expected_text),36)
+                for card,expected in zip(result['cards'],expected_text):
+                    self.assertIn(expected['name'],card['card_text'])
+                    self.assertIn(expected['vendor'],card['card_text'])
+                    self.assertEqual(card['card_text'],expected['text'])
+                    self.assertRegex(card['card_text'],r'\$\d')
                 self.assertEqual(result['next'],row['next'])
                 self.assertEqual(result['end'],dict(type='result-total',total=row['total']))
                 # Synthetic final state: observed numbered controls plus disabled Next must reconcile.

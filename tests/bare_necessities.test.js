@@ -40,3 +40,12 @@ test('BN smoke scope includes validated retailer categories and garter; bikini p
     assert.equal(classifyTakeoverScope({name,category},config).decision,'include');
   assert.equal(classifyTakeoverScope({name:'Bikini Top',category:'Swimwear'},config).decision,'exclude');
 });
+test('BN explicit excluded evidence wins over intimate categories', () => {
+  const config={domain:'www.barenecessities.com'};
+  for (const name of ['Swim Bra','Swimwear Brief','Swimsuit Brief','Sleepwear Bra','Nightwear Bra',
+    'Nightdress Bra','Nightdresses Brief','Pyjama Brief','Pajama Brief','Menswear Bra',"Men’s Brief",'Men Brief','Kids Bra'])
+    assert.equal(classifyTakeoverScope({name,category:'Panties'},config).decision,'exclude',name);
+  for (const category of ['Kids','Nightwear','Menswear','Swimwear','Nightdresses'])
+    assert.equal(classifyTakeoverScope({name:'Full Brief',category},config).decision,'exclude',category);
+  assert.equal(classifyTakeoverScope({name:'Rive Gauche Bikini',category:'Panties'},config).decision,'include');
+});
