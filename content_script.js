@@ -2504,7 +2504,7 @@ function captureBravissimoProduct() {
     node => node.getAttribute('srcset')?.split(',')[0].trim().split(/\s+/)[0]).filter(Boolean);
   const paths = new Set(rendered.map(raw => new URL(raw, window.location.href).pathname));
   if (paths.size !== result.images.length || result.images.some(raw => !paths.has(new URL(raw).pathname)))
-    throw globalThis.PageImageSaverHelpers.productEvidenceError('Bravissimo: current gallery not bound to product data');
+    throw new Error('Bravissimo: current gallery not bound to product data');
   return result;
 }
 

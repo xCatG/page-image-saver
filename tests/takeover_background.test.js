@@ -482,6 +482,16 @@ test('structured PDP validation reaches runner through actual content inspection
  b.stored.catalogTakeoverRun.domain='www.wakudoki.ne.jp';
  b.chrome.tabs.sendMessage=(_id,message,callback)=>listener(message,{},callback);
  await assert.rejects(b.io.load(row.url,{expect:'product'}),error=>error.code==='PRODUCT_EVIDENCE_INVALID'&&/missing brand/.test(error.message));
+ const update=b.chrome.tabs.update;
+ for(const status of [500,503]){
+  b.chrome.tabs.update=(id,details,callback)=>{
+   b.webCompleted[0]({type:'main_frame',tabId:7,statusCode:status});update(id,details,callback);
+  };
+  const failedLoad=await b.io.load(row.url,{expect:'product'});
+  assert.equal(failedLoad.status,status);assert.equal(failedLoad.errorCode,undefined);
+ }
+ b.chrome.tabs.update=update;
+
  const {createTakeoverRunner}=require('../takeover_runner');
  let run;
  const runner=createTakeoverRunner({...b.io,now:()=>100000,save:async value=>{run=structuredClone(value);b.stored.catalogTakeoverRun=run;},read:async()=>structuredClone(run),alarm:async()=>{},verify:async()=>({status:'missing'})});

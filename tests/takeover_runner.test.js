@@ -691,8 +691,9 @@ test('fixed queue captures review scope and preserves named URL errors in its ex
 
 test('gone HTTP products preserve failure streak across restarts and export separately from verified skips', async () => {
   const urls=Array.from({length:10},(_,i)=>bra+'/'+i);
-  const statuses=[500,404,410,500,404,404,500,500,500,200];
-  const pages=Object.fromEntries(urls.map((url,i)=>[url,{...braPage,url,status:statuses[i]}]));
+  const outcomes=['mismatch',404,410,'mismatch',404,404,'mismatch','mismatch','mismatch',200];
+  const pages=Object.fromEntries(urls.map((url,i)=>[url,{...braPage,url,
+    status:outcomes[i]==='mismatch'?200:outcomes[i],kind:outcomes[i]==='mismatch'?'listing':'product'}]));
   const r=rig(pages,{}, {verifyResult:{storage:'receiver',status:'missing'}});
   await r.runner().importDiscovery(site,[discoverySource(urls)]);
   await r.runner().start();
@@ -1073,4 +1074,33 @@ test('reimported Shirohato discovery cheaply skips 23 receiver captures before f
  assert.deepEqual(r.visits,[urls[23],next]);
  assert.deepEqual(r.captureCalls.map(call=>call.url),[next]);
  assert.equal(r.memory.run.status,'running');assert.equal(r.memory.run.consecutiveFailures,0);
+});
+
+for(const status of [500,503])test(`HTTP ${status} retries then pauses without permanently failing product`,async()=>{
+ const r=rig({[bra]:{status,error:'missing brand',errorCode:'PRODUCT_EVIDENCE_INVALID'}},{},{verifyResult:{storage:'receiver',status:'missing'}});
+ await r.runner().importDiscovery(site,[discoverySource([bra])]);await r.runner().start();
+ for(let i=0;i<3;i++){await r.runner().tick();r.advance(10000);}
+ assert.equal(r.visits.length,3);assert.equal(r.memory.run.status,'paused');
+ assert.equal(r.memory.run.products[0].status,'pending');assert.equal(r.captureCalls.length,0);
+});
+
+test('Bravissimo incomplete rendered gallery stays retryable on its first visit',async()=>{
+ const fs=require('node:fs'),vm=require('node:vm');
+ const fixture=require('./fixtures/bravissimo-fy563.json');
+ const source=fs.readFileSync(require.resolve('../content_script.js'),'utf8');
+ const sandbox={URL,window:{location:new URL(fixture.canonical)},
+  captureJsonLd:()=>fixture.jsonld,PageImageSaverHelpers:require('../extension_helpers'),
+  document:{scripts:[{textContent:`setDataLayer(${JSON.stringify({product:fixture.product})});`}],
+   querySelector:selector=>selector==='link[rel="canonical"]'?{href:fixture.canonical}:
+     selector==='.c-product-details__selected-colour-name'?{textContent:fixture.color}:
+     selector==='script#__STATE__'?{textContent:'{"app":{"config":{"currency":"USD"}}}'}:null,
+   querySelectorAll:()=>[]}};
+ sandbox.globalThis=sandbox;
+ vm.runInNewContext(source.slice(source.indexOf('function captureBravissimoProduct()'),source.indexOf('function captureBareNecessitiesProduct()')),sandbox);
+ const r=rig({}, {},{verifyResult:{storage:'receiver',status:'missing'}});
+ r.io.load=async url=>{r.visits.push(url);return sandbox.captureBravissimoProduct();};
+ await r.runner().importDiscovery(site,[discoverySource([bra])]);await r.runner().start();await r.runner().tick();
+ assert.match(r.memory.run.lastLoadError.reason,/current gallery not bound/);
+ assert.equal(r.memory.run.products[0].status,'pending');assert.equal(r.memory.run.status,'running');
+ assert.equal(r.memory.run.loadFailures[bra],1);assert.equal(r.captureCalls.length,0);
 });

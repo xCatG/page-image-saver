@@ -390,11 +390,11 @@
       let deadProductReason = null;
       let gone = false;
       let queryEquivalent = false;
-      if (item && page?.errorCode === 'PRODUCT_EVIDENCE_INVALID') {
-        deadProductReason = page.error;
-      } else if (item && page?.status >= 400) {
+      if (item && page?.status >= 400) {
         gone = [404, 410].includes(page.status);
-        deadProductReason = gone ? `gone: HTTP ${page.status}` : `HTTP ${page.status} at ${url}`;
+        if (gone) deadProductReason = `gone: HTTP ${page.status}`;
+      } else if (item && page?.errorCode === 'PRODUCT_EVIDENCE_INVALID') {
+        deadProductReason = page.error;
       } else if (item && page?.url) {
         try {
           const actual = canonical(page.url, run.domain);
