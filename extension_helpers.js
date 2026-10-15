@@ -1086,7 +1086,8 @@
       return url.href;
     });
     const sizeLabels = node => node?.label ? [node.label] : (node?.variants || []).flatMap(item => sizeLabels(item.sizes || item));
-    const facts = {name: product.styleName, sku: product.styleColourCode, product_id: product.styleCode,
+    // Microdata evidence is trimmed by the receiver; emit the same normalized name.
+    const facts = {name: product.styleName.trim(), sku: product.styleColourCode, product_id: product.styleCode,
       color: selectedColor, offers: {price: product.prices.price.toFixed(2), currency: 'USD'}};
     return {facts, images: [...new Set(images)], category: product.productGroup,
       microdata: {name: facts.name, sku: facts.sku, productID: facts.product_id, url: canonical.href,

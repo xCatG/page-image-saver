@@ -7,7 +7,8 @@ from pathlib import Path
 import saved_page_fixtures as harness
 from saved_page_fixtures import source, FIXTURES
 
-ROWS = json.loads((FIXTURES / 'bravissimo-expected.json').read_text())
+ROWS = (json.loads((FIXTURES / 'bravissimo-expected.json').read_text()) +
+        json.loads((FIXTURES / 'bravissimo-name-expected.json').read_text()))
 CONFIG = json.loads(source('site_config/www.bravissimo.com.json'))
 
 class BravissimoBrowser(unittest.TestCase):
@@ -88,8 +89,8 @@ class BravissimoBrowser(unittest.TestCase):
             self.assertEqual(len(result['listings']['visited'][0]['products']),129)
         finally: page.close()
 
-    def test_real_export_three_smoke_candidates(self):
-        handles=['fy563','pn305','lg402']
+    def test_real_export_smoke_and_name_regressions(self):
+        handles=['fy563','pn305','lg402','ck202','fa358','yb116']
         for handle in handles:
             row=next(r for r in ROWS if r.get('code') == handle); page=self.open(row)
             try:
@@ -124,7 +125,7 @@ class BravissimoBrowser(unittest.TestCase):
                     throw new Error('No background capture handler');};
                   const inspected=await inspectTakeoverPage(config);
                   const scope=PageImageSaverTakeover.classifyTakeoverScope(inspected.product,config);
-                  if(scope.decision!=='include') throw new Error('Smoke product scope must include');
+                  if(scope.decision==='exclude') throw new Error('Fixture product scope must permit capture');
                   let saved=null, result, testClock=100000;
                   globalThis.takeoverIo={read:async()=>structuredClone(saved)};
                   const runner=PageImageSaverTakeover.createTakeoverRunner({
@@ -152,10 +153,19 @@ class BravissimoBrowser(unittest.TestCase):
                 self.assertEqual(result['completion']['product']['product_id'],row['product_id'])
                 product=next(data for name,data in result['files'].items() if name.endswith('/product.json'))
                 self.assertLess(len(product),512*1024)
+                # The receiver uses this exact invariant: microdata is trimmed, claimed facts must agree.
+                from lingerie_trends.gold_set import _check_product_envelope
+                envelope=json.loads(bytes(product))
+                _check_product_envelope(envelope,result['completion']['product'])
+                self.assertEqual(result['completion']['product']['name'],row['name'])
                 with tempfile.TemporaryDirectory() as tmp:
                     root=Path(os.environ.get('PIS_BRAVISSIMO_EXPORT',tmp))
                     for name,data in result['files'].items():
                         target=root/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(bytes(data))
+                    from lingerie_trends.gold_set import _validate_capture_record
+                    capture_root=root/'PageImageSaver'
+                    completion=next(root/name for name in result['files'] if name.endswith('/complete.json'))
+                    _validate_capture_record(completion,capture_root,result['completion'])
             finally:page.close()
 
 if __name__=='__main__': unittest.main()
