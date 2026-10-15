@@ -37,3 +37,7 @@ Chromium and Node localhost server tests require the ordinary local socket permi
 ## Importer fixture follow-up
 
 The initial minimal DOM omitted rendered prices. The original failed saved pages each contain an ordinary public `c-product-details__price` paragraph ($74.00, $86.00, $7.00). Preserve those exact subtrees in the scrubbed fixtures; no price parsing changes are needed. A browser assertion now protects this evidence. Regenerated exports at `/tmp/bravissimo-name-fix-priced-exports/PageImageSaver/` pass both full receiver validation and the coordinated catalog branch's `derive_capture`: CK202 include, FA358 include, YB116 exclude; existing FY563, PN305, LG402 exports also pass. These checks use exported scrubbed HTML, not an original-HTML substitution.
+
+## PR 25 malformed-name review
+
+Verified review P2: calling `.trim()` on a missing or non-string styleName threw an untagged TypeError, which could route malformed product evidence into navigation retry handling. The new regression failed with that TypeError before the fix. Require a nonempty string using the existing `fail('invalid styleName')` path before trimming; missing, null, number, object, array, empty and whitespace-only names now throw `PRODUCT_EVIDENCE_INVALID`. No receiver or identity contract changes. Final verification: 18 focused Node tests, 315 full Node tests, and 5 offline Bravissimo browser tests pass.

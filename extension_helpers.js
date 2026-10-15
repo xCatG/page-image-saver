@@ -1058,6 +1058,7 @@
     if (!product?.brand) fail('missing brand');
     if (!product.styleCode) fail('missing styleCode');
     if (!product.styleColourCode) fail('missing styleColourCode');
+    if (typeof product.styleName !== 'string' || !product.styleName.trim()) fail('invalid styleName');
     if (!canonical.pathname.endsWith('-' + product.styleCode.toLowerCase() + '/')) fail('canonical styleCode mismatch');
     if (product.colour?.colour !== selectedColor) fail('rendered colour mismatch');
     const nodes = jsonld.flat();

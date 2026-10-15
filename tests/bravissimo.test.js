@@ -47,3 +47,12 @@ for (const row of require('./fixtures/bravissimo-name-expected.json')) {
     assert.deepEqual(result.images, row.images);
   });
 }
+
+test('Bravissimo malformed styleName remains a terminal product evidence error', () => {
+  const f = require('./fixtures/bravissimo-fy563.json');
+  for (const styleName of [undefined, null, 42, {}, [], '', ' \t\n ']) {
+    assert.throws(() => h.bravissimoProduct({...f.product, styleName}, f.jsonld,
+      f.canonical, f.canonical, f.color, 'USD'),
+      error => error.code === 'PRODUCT_EVIDENCE_INVALID' && /styleName/.test(error.message));
+  }
+});
