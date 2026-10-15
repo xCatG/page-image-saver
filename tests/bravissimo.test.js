@@ -14,3 +14,23 @@ test('Bravissimo permits absent JSON-LD with current datalayer and DOM evidence'
   const f = require('./fixtures/bravissimo-fy563.json');
   assert.equal(h.bravissimoProduct(f.product, [], f.canonical, f.canonical, f.color, 'USD').facts.sku, 'FY563BFL');
 });
+
+test('Bravissimo binds shared or renamed gallery originals to current product images, not style filename', () => {
+  const f = require('./fixtures/bravissimo-fy563.json');
+  const shared = 'https://images.ctfassets.net/bz0fvtkbk5r1/shared/lifestyle.jpg';
+  const product = {...f.product, images: [{zoom: shared}]};
+  assert.deepEqual(h.bravissimoProduct(product, f.jsonld, f.canonical, f.canonical, f.color, 'USD').images, [shared]);
+  for (const zoom of [shared.replace('images.ctfassets.net','evil.test'), shared.replace('/bz0fvtkbk5r1/','/other/'),
+    shared.replace('https:','http:'), shared.replace('https://','https://user:secret@')])
+    assert.throws(() => h.bravissimoProduct({...product, images:[{zoom}]}, f.jsonld, f.canonical, f.canonical, f.color, 'USD'),
+      error => error.code === 'PRODUCT_EVIDENCE_INVALID' && /gallery/.test(error.message));
+});
+
+test('Bravissimo failures identify the invalid field without raw URL values', () => {
+  const f = require('./fixtures/bravissimo-fy563.json');
+  for (const [patch, reason] of [[{brand:''}, /missing brand/], [{styleCode:''}, /missing styleCode/],
+    [{styleColourCode:''}, /missing styleColourCode/], [{colour:{}}, /rendered colour mismatch/],
+    [{prices:null}, /prices.price/], [{images:null}, /images/], [{images:[{zoom:'http://['}]}, /images\[0\].zoom/]])
+    assert.throws(() => h.bravissimoProduct({...f.product,...patch}, f.jsonld, f.canonical, f.canonical, f.color, 'USD'),
+      error => error.code === 'PRODUCT_EVIDENCE_INVALID' && reason.test(error.message));
+});

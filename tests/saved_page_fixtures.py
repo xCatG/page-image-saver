@@ -287,7 +287,7 @@ class SavedPageFixtures(unittest.TestCase):
                     page.evaluate("history.replaceState({}, '', '/en-us/p/other-colour-OTHER')")
                     error = page.evaluate("""c => { try {captureGallery(c, 'site'); return 'accepted';}
                         catch(e) {return e.message;} }""", config)
-                    self.assertIn('identity differ',error)
+                    self.assertIn('URL differs from product slugs.en',error)
                     page.evaluate("history.replaceState({}, '', '/en-us/lingerie')")
                     self.assertFalse(page.evaluate("c => captureProductSeen(c, {product_id:'cross-sell'})", config))
                 finally:

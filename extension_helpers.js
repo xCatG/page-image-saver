@@ -897,18 +897,20 @@
     const product = page?.product;
     const fail = reason => { throw productEvidenceError(`VDV product: ${reason}`); };
     if (!['www.primadonna.com', 'www.mariejo.com'].includes(url.hostname) ||
-        url.protocol !== 'https:' || url.port || url.username || url.password ||
-        page?.locale !== 'en-us' || !product || typeof product !== 'object')
-      fail('missing US product data');
-    if (!product.id || !product.slugs?.en || page.slug !== product.slugs.en ||
-        url.pathname !== `/en-us/p/${product.slugs.en}` || !product.slugs.en.endsWith(`-${product.id}`))
-      fail('URL and Next data identity differ; reload this product page');
+        url.protocol !== 'https:' || url.port || url.username || url.password) fail('invalid US page URL');
+    if (page?.locale !== 'en-us') fail('locale is not en-us');
+    if (!product || typeof product !== 'object') fail('missing product');
+    if (!product.id) fail('missing id');
+    if (!product.slugs?.en) fail('missing slugs.en');
+    if (page.slug !== product.slugs.en) fail('page slug differs from product slugs.en');
+    if (url.pathname !== `/en-us/p/${product.slugs.en}`) fail('URL differs from product slugs.en');
+    if (!product.slugs.en.endsWith(`-${product.id}`)) fail('slugs.en product id mismatch');
     const price = product.retailPrice;
     const amount = price?.discountedPrice ?? price?.price;
-    if (price?.currency !== 'USD' || typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0)
-      fail('missing USD price');
-    if (![product.name, product.commercialColor, product.styleCode].every(v => typeof v === 'string' && v.trim()))
-      fail('missing name, colour or SKU');
+    if (price?.currency !== 'USD') fail('retailPrice.currency is not USD');
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) fail('invalid retailPrice amount');
+    for (const field of ['name', 'commercialColor', 'styleCode'])
+      if (typeof product[field] !== 'string' || !product[field].trim()) fail(`missing ${field}`);
     if (!Array.isArray(product.media) || !product.media.length) fail('missing primary gallery');
     const images = product.media.map(item => {
       let image;
@@ -1022,12 +1024,17 @@
     const origin = 'https://www.barenecessities.com';
     if (page.origin !== origin || canonical.origin !== origin || page.pathname !== canonical.pathname ||
         canonical.search || canonical.hash || canonical.pathname !== `/products/${product.handle}`) fail('canonical mismatch');
-    if (!Number.isSafeInteger(product.id) || !product.title || !product.vendor || currency !== 'USD') fail('identity or USD missing');
+    if (!Number.isSafeInteger(product.id)) fail('invalid product id');
+    if (!product.title) fail('missing title');
+    if (!product.vendor) fail('missing vendor');
+    if (currency !== 'USD') fail('currency is not USD');
     const variant = product.variants?.find(item => String(item.id) === defaultVariant?.variantId);
     const price = variant?.price;
-    if (String(product.id) !== defaultVariant?.productId || defaultVariant?.name !== product.title ||
-        !Number.isSafeInteger(price) || price < 0 || Number(defaultVariant?.price) !== price / 100)
-      fail('page variant price not bound to Shopify product');
+    if (String(product.id) !== defaultVariant?.productId) fail('page variant price not bound: productId mismatch');
+    if (defaultVariant?.name !== product.title) fail('page variant price not bound: name mismatch');
+    if (!variant) fail('page variant price not bound: variantId missing from variants');
+    if (!Number.isSafeInteger(price) || price < 0) fail('page variant price not bound: invalid Shopify price');
+    if (Number(defaultVariant?.price) !== price / 100) fail('page variant price not bound: defaultVariant.price mismatch');
     if (!Array.isArray(product.images) || !product.images.length) fail('images missing');
     const images = product.images.map(raw => {
       let url;
@@ -1042,30 +1049,42 @@
 
   function bravissimoProduct(product, jsonld, pageUrl, canonicalUrl, selectedColor, currency) {
     const fail = message => { throw productEvidenceError('Bravissimo product: ' + message); };
-    const page = new URL(pageUrl), canonical = new URL(canonicalUrl);
+    let page, canonical;
+    try { page = new URL(pageUrl); } catch (_) { fail('invalid page URL'); }
+    try { canonical = new URL(canonicalUrl); } catch (_) { fail('invalid canonical URL'); }
     if (page.origin !== 'https://www.bravissimo.com' || canonical.origin !== page.origin ||
         !/^\/us\/products\/[^/]+\/$/.test(page.pathname) || page.pathname !== canonical.pathname ||
         canonical.search || canonical.hash) fail('US canonical mismatch');
-    if (!product?.brand || !product.styleCode || !product.styleColourCode ||
-        !canonical.pathname.endsWith('-' + product.styleCode.toLowerCase() + '/') ||
-        product.colour?.colour !== selectedColor) fail('identity or rendered colour mismatch');
+    if (!product?.brand) fail('missing brand');
+    if (!product.styleCode) fail('missing styleCode');
+    if (!product.styleColourCode) fail('missing styleColourCode');
+    if (!canonical.pathname.endsWith('-' + product.styleCode.toLowerCase() + '/')) fail('canonical styleCode mismatch');
+    if (product.colour?.colour !== selectedColor) fail('rendered colour mismatch');
     const nodes = jsonld.flat();
     const variant = nodes.find(x => x['@type'] === 'Product' && x.sku === product.styleColourCode);
     const group = nodes.find(x => x['@type'] === 'ProductGroup' && x['@id'] === product.styleCode);
-    if (nodes.some(x => x['@type'] === 'Product') && !variant ||
-        nodes.some(x => x['@type'] === 'ProductGroup') && !group) fail('current JSON-LD identity missing');
-    if (currency !== 'USD' || (variant && (variant.color !== selectedColor ||
-        variant.offers?.priceCurrency !== 'USD' || Number(variant.offers.price) !== product.prices?.price)) ||
-        (group && group.brand?.name !== product.brand) ||
-        !Number.isFinite(product.prices.price) || product.prices.price < 0) fail('USD variant or explicit brand missing');
-    const images = product.images.map(image => {
-      const url = new URL(image.zoom, page.origin);
-      if (url.protocol !== 'https:' || url.hostname !== 'images.ctfassets.net' ||
-          !url.pathname.startsWith('/bz0fvtkbk5r1/') || url.username || url.password ||
-          !url.pathname.split('/').pop().startsWith(product.styleCode)) fail('foreign gallery image');
+    if (nodes.some(x => x['@type'] === 'Product') && !variant) fail('JSON-LD Product sku mismatch');
+    if (nodes.some(x => x['@type'] === 'ProductGroup') && !group) fail('JSON-LD ProductGroup @id mismatch');
+    if (currency !== 'USD') fail('currency is not USD');
+    if (!Number.isFinite(product.prices?.price) || product.prices.price < 0) fail('invalid prices.price');
+    if (variant) {
+      if (variant.color !== selectedColor) fail('JSON-LD Product color mismatch');
+      if (variant.offers?.priceCurrency !== 'USD') fail('JSON-LD offers.priceCurrency is not USD');
+      if (Number(variant.offers.price) !== product.prices.price) fail('JSON-LD offers.price mismatch');
+    }
+    if (group && group.brand?.name !== product.brand) fail('JSON-LD ProductGroup brand mismatch');
+    if (!Array.isArray(product.images) || !product.images.length) fail('missing images gallery');
+    // Membership in this product's own images is the binding; filenames can be shared or renamed.
+    const images = product.images.map((image, index) => {
+      const field = `images[${index}].zoom`;
+      let url;
+      try { url = new URL(image?.zoom, page.origin); } catch (_) { fail(`${field}: invalid gallery URL`); }
+      if (url.protocol !== 'https:') fail(`${field}: gallery scheme is not HTTPS`);
+      if (url.hostname !== 'images.ctfassets.net') fail(`${field}: foreign gallery host`);
+      if (!url.pathname.startsWith('/bz0fvtkbk5r1/')) fail(`${field}: foreign gallery space`);
+      if (url.username || url.password) fail(`${field}: gallery credentials are not allowed`);
       return url.href;
     });
-    if (!images.length) fail('gallery missing');
     const sizeLabels = node => node?.label ? [node.label] : (node?.variants || []).flatMap(item => sizeLabels(item.sizes || item));
     const facts = {name: product.styleName, sku: product.styleColourCode, product_id: product.styleCode,
       color: selectedColor, offers: {price: product.prices.price.toFixed(2), currency: 'USD'}};

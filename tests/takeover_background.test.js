@@ -506,6 +506,36 @@ test('structured PDP validation reaches runner through actual content inspection
  page.document.title='Captcha';
  const challenge=await b.io.load(row.url,{expect:'product'});
  assert.equal(challenge.kind,'challenge');
+ // Error documents must still stop on a challenge on the first navigation.
+ for (const status of [500,503]) {
+  let loads=0, captures=0;
+  b.chrome.tabs.update=(id,details,callback)=>{
+   loads++; b.webCompleted[0]({type:'main_frame',tabId:7,statusCode:status}); update(id,details,callback);
+  };
+  const loaded=await b.io.load(row.url,{expect:'product'});
+  assert.equal(loaded.status,status); assert.equal(loaded.kind,'challenge');
+  await runner.stop();
+  await runner.preview(config,{kind:'listing',url:row.url,products:[row.url]}); await runner.start();
+  run.listings.queue=[];run.products=[{url:row.url,status:'pending'}];run.mode='capture-discovery';
+  loads=0;
+  const send=b.chrome.tabs.sendMessage;
+  b.chrome.tabs.sendMessage=(id,message,callback)=>{if(message.action==='takeoverCapture')captures++;send(id,message,callback);};
+  await runner.tick(); await runner.tick();
+  assert.equal(run.status,'paused');assert.equal(run.products[0].status,'pending');
+  assert.equal(loads,1);assert.equal(captures,0);assert.equal(run.loadFailures[row.url],undefined);
+  b.chrome.tabs.sendMessage=send;
+  // Missing product evidence in a plain error document must never become PDP validation.
+  page.document.title='Server error';page.captureJsonLd=()=>[];
+  await runner.stop();
+  await runner.preview(config,{kind:'listing',url:row.url,products:[row.url]}); await runner.start();
+  run.listings.queue=[];run.products=[{url:row.url,status:'pending'}];run.mode='capture-discovery';
+  loads=0;
+  for(let attempt=0;attempt<3;attempt++){run.nextNavigationAt=0;await runner.tick();}
+  assert.equal(loads,3);assert.equal(run.status,'paused');assert.equal(run.products[0].status,'pending');
+  assert.equal(run.loadFailures[row.url],3);
+  page.document.title='Captcha';
+ }
+ b.chrome.tabs.update=update;
  page.document.title='Product';
  page.captureJsonLd=()=>{throw new Error('unexpected inspection failure');};
  await assert.rejects(b.io.load(row.url,{expect:'product'}),error=>error.code===undefined&&error.message==='unexpected inspection failure');

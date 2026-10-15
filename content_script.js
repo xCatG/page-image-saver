@@ -2900,12 +2900,14 @@ function takeoverCategory() {
   return document.querySelector('[itemprop="category"], nav.breadcrumbs, .breadcrumbs')?.textContent?.trim() || '';
 }
 
-async function inspectTakeoverPage(config, mode = 'capture', expect = null) {
+async function inspectTakeoverPage(config, mode = 'capture', expect = null, challengeOnly = false) {
   const challengeText = `${document.title} ${document.body?.innerText?.slice(0, 2000) || ''}`;
   if (/verify you are human|unusual traffic|access denied|captcha|bot challenge/i.test(challengeText) ||
       document.querySelector('iframe[src*="captcha"], .g-recaptcha, [data-sitekey]')) {
     return {kind: 'challenge', url: window.location.href};
   }
+  // HTTP error documents carry no trustworthy product evidence; inspect only for a challenge.
+  if (challengeOnly) return {url: window.location.href};
   const goneReason = expect === 'product' ? takeoverUnavailableChoice(window.location.href) : null;
   if (goneReason) return {kind: 'product', url: window.location.href, documentId: takeoverDocumentId, goneReason};
   let product = capturePageProduct();
@@ -3099,7 +3101,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'takeoverInspect') {
     loadCaptureSiteConfig().then(config => {
       if (!config) throw new Error('site config unavailable');
-      return inspectTakeoverPage(config, message.mode, message.expect || null);
+      return inspectTakeoverPage(config, message.mode, message.expect || null, message.challengeOnly === true);
     }).then(page => sendResponse({success: true, page}))
       .catch(error => sendResponse({success: false, error: String(error?.message || error),
         errorCode: error?.code === 'PRODUCT_EVIDENCE_INVALID' ? error.code : undefined}));
