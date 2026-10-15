@@ -204,3 +204,26 @@ The five saved pages establish pagination, not an exhaustive live catalog.
 Non-lingerie Japanese product evidence is excluded, and categories not evidenced
 by the saved pages remain review. See [fixture provenance](tests/fixtures/shirohato-README.md)
 for the offline audit and limitations. No Linux retailer or CDN fetch is needed.
+
+### Listing seed files (1.0.16)
+
+To discover several categories in one run, use **Catalog capture → Discovery
+exports or listing seeds** to import one file like:
+
+```json
+{"format":"page-image-saver-listing-seeds/v1","schema_version":1,"site":"www.wakudoki.ne.jp","seeds":["https://www.wakudoki.ne.jp/c/000010001/?dpt=pro&udns=1","https://www.wakudoki.ne.jp/c/000010003/?dpt=pro&udns=1"]}
+```
+
+Import prepares a preview without navigating. Click **Take over** to discover
+all seeds in order; each seed's pagination and totals are checked separately.
+Products are deduplicated across categories. A missing end check stops the run
+before the next category; challenge/403/429 pauses it. Export that run for
+inspection rather than retrying a denied host. The seed list, input hash and
+per-page seed are retained in discovery exports. Existing single-listing and
+product discovery imports still work.
+
+When discovery reports **complete**, click **Export run JSON**, then **Reuse
+current discovery → Take over** to capture its fixed product queue with existing
+receiver verification and scope rules. Do not interpret an incomplete discovery
+as a full catalog. No final product count is promised by a seed file; it is
+established by the checked live listings. Unknown product categories remain review.
