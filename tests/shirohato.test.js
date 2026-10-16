@@ -101,3 +101,32 @@ test('Shirohato accepts absent and unusable carried brands without changing wire
    {name:row.name,sku:row.product_id,product_id:row.product_id,color:null,offers:{price:row.price,currency:'JPY'}});
  }
 });
+
+const hyphenProduct = require('./fixtures/shirohato-hyphen-product.json');
+const hyphenIds = ['497-6030','497-6032','c33p-50','c33p-7','c33p-11-s12w','c33p-11-ml2ll1w','c33p-11-ll2w','c33p-11-ml1w','c0010547-2ef','c0010547-2'];
+for (const id of hyphenIds) test(`hyphenated Shirohato ${id} keeps product, listing and gallery identity`, () => {
+ const url = `https://www.wakudoki.ne.jp/productdetail/${id}/1/`;
+ const product = {...hyphenProduct, url, productID:id, sku:id};
+ assert.equal(shirohatoProduct([product],url+'?bid=3',url).product_id,id);
+ assert.equal(require('../extension_helpers').shirohatoListingUrl(url+'?bid=3'),url);
+ const images = [`https://img.wakudoki.ne.jp/Contents/ProductImages/0/${id}_LL.jpg`,
+  `https://img.wakudoki.ne.jp/Contents/ProductSubImages/0/${id}_sub01_LL.jpg`];
+ assert.deepEqual(shirohatoGallery(images,id),images);
+});
+test('hyphenated identities still reject stale evidence and malformed IDs', () => {
+ const p = hyphenProduct, url = p.url;
+ for (const change of [{productID:'c33p-11-s12x'},{sku:'c33p-11-s12x'},{url:url.replace('s12w','s12x')}])
+  assert.throws(()=>shirohatoProduct([{...p,...change}],url,url),/mismatch/);
+ for (const canonical of [url.replace('s12w','s12x'),url.replace('/1/','/2/'),url.replace('www.wakudoki.ne.jp','evil.test')])
+  assert.throws(()=>shirohatoProduct([p],url,canonical),/Shirohato product/);
+ for (const id of ['-c33p','c33p-','c33p--11','c33p_11','c33p.11','C33P-11','c33p%2D11']) {
+  const bad = `https://www.wakudoki.ne.jp/productdetail/${id}/1/`;
+  assert.throws(()=>shirohatoProduct([{...p,url:bad,sku:id,productID:id}],bad,bad),/invalid JP product URL/);
+  assert.equal(require('../extension_helpers').shirohatoListingUrl(bad+'?bid=3'),bad+'?bid=3');
+  assert.throws(()=>shirohatoGallery(['https://img.wakudoki.ne.jp/Contents/ProductImages/0/'+id+'_LL.jpg'],id),/invalid product ID/);
+ }
+ for (const image of ['https://img.wakudoki.ne.jp/Contents/ProductSubImages/0/c33p-11-s12x_sub01_LL.jpg',
+  'https://evil.test/Contents/ProductImages/0/c33p-11-s12w_LL.jpg',
+  'https://img.wakudoki.ne.jp/Contents/ProductImages/0/c33p-11-s12w_LL.jpg?x=1'])
+  assert.throws(()=>shirohatoGallery([image],p.sku),/Shirohato gallery/);
+});
