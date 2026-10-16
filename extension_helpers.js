@@ -992,8 +992,10 @@
           url.port || url.username || url.password) fail(`${image} has an unapproved origin`);
       if (url.search || url.hash) fail(`${image} has a query or fragment`);
       const file = url.pathname.slice('/Contents/ProductImages/0/'.length);
+      // Saved originals use only -cfNN/-czNN and _subNN renditions after the complete ID.
+      // Arbitrary suffixes would also admit another hyphenated product's image.
       const primary = url.pathname.startsWith('/Contents/ProductImages/0/') &&
-        new RegExp('^' + productId + '(?:[-_][a-zA-Z0-9]+)*_LL\\.jpg$').test(file);
+        new RegExp('^' + productId + '(?:-(?:cf|cz)[0-9]{2}|_sub[0-9]{2})?_LL\\.jpg$').test(file);
       const subimage = new RegExp('^/Contents/ProductSubImages/0/' + productId +
         '_sub[0-9]+_LL\\.jpg$').test(url.pathname);
       if (!primary && !subimage) fail(`${image} is not a current-product original`);

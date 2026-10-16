@@ -130,3 +130,12 @@ test('hyphenated identities still reject stale evidence and malformed IDs', () =
   'https://img.wakudoki.ne.jp/Contents/ProductImages/0/c33p-11-s12w_LL.jpg?x=1'])
   assert.throws(()=>shirohatoGallery([image],p.sku),/Shirohato gallery/);
 });
+
+test('gallery distinguishes longer hyphenated IDs from evidenced rendition suffixes', () => {
+ const id = 'c33p-11';
+ const base = 'https://img.wakudoki.ne.jp/Contents/ProductImages/0/';
+ const originals = [base+id+'_LL.jpg', base+id+'-cf01_LL.jpg', base+id+'-cz03_LL.jpg', base+id+'_sub01_LL.jpg'];
+ assert.deepEqual(shirohatoGallery(originals,id),originals);
+ for (const suffix of ['-s12w', '-ml2ll1w', '-other', '_other', '-cf01-extra', '-cf1', '-cz003'])
+  assert.throws(()=>shirohatoGallery([base+id+suffix+'_LL.jpg'],id),/not a current-product original/);
+});
