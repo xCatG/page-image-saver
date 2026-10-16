@@ -800,7 +800,9 @@
     const labels = {preview: 'Ready', running: 'Running', paused: 'Paused',
       complete: 'Finished', finished_with_gaps: 'Finished with gaps', stopped: 'Stopped'};
     let state = labels[run.status] || run.status;
-    if (run.status === 'running' && !run.current && Number.isFinite(run.nextNavigationAt) && run.nextNavigationAt > now) {
+    if (run.status === 'running' && run.verification) {
+      state = `Verifying saved captures ${run.verification.completed}/${run.verification.total}`;
+    } else if (run.status === 'running' && !run.current && Number.isFinite(run.nextNavigationAt) && run.nextNavigationAt > now) {
       state = `Waiting — next navigation in ${Math.ceil((run.nextNavigationAt - now) / 1000)} s`;
     } else if (run.reason) state += ` — ${run.reason}`;
     return `${state} · Current URL: ${run.current?.url || 'none (between pages)'} · ` +

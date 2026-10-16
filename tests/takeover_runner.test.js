@@ -527,7 +527,7 @@ test('scope uses product evidence and leaves uncertain mixed use as review', () 
   }
 });
 
-test('restarted worker revalidates a saved captured identity before catalog completion', async () => {
+test('restarted worker trusts persisted receiver completion without repeated verification', async () => {
   const config = structuredClone(site); config.listing.endCheck = {type: 'explicit', selector: '.end'};
   const r = rig({[first]: {...listing1, products: [bra], next: null,
     end: {type: 'explicit', present: true}}, [bra]: {...braPage, colorLinks: []}}, {},
@@ -536,9 +536,9 @@ test('restarted worker revalidates a saved captured identity before catalog comp
   await r.runner().tick(); r.advance(10000); await r.runner().tick();
   assert.equal(r.memory.run.products[0].status, 'captured');
   r.advance(10000); await r.runner().tick();
-  assert.equal(r.verificationCalls.length, 1);
-  assert.equal(r.memory.run.products[0].status, 'failed');
-  assert.equal(r.memory.run.status, 'finished_with_gaps');
+  assert.equal(r.verificationCalls.length, 0);
+  assert.equal(r.memory.run.products[0].status, 'captured');
+  assert.equal(r.memory.run.status, 'complete');
 });
 
 test('pause during saved completion verification cannot be overwritten by late receiver reply', async () => {
@@ -975,7 +975,7 @@ test('Bravissimo imported queue captures selected colors, survives restart and c
   for(let i=0;i<4;i++){await r.runner().tick();r.advance(12000);}
   assert.equal(r.memory.run.status,'complete');assert.equal(r.captureCalls.length,3);
   assert.deepEqual(r.memory.run.products.map(p=>p.identity.selected_color),colors);
-  assert.equal(r.verificationCalls.length,6); // Restart checks saved selected-color identities, no URL-only preflight.
+  assert.equal(r.verificationCalls.length,0); // Persisted acknowledgments survive restarts; no URL-only preflight.
   Object.values(captures).forEach((reply,i)=>{reply.status=i===1?'already':'reused';});
   await r.runner().importDiscovery(config,[source]);await r.runner().start();
   for(let i=0;i<4;i++){await r.runner().tick();r.advance(12000);}
@@ -1023,8 +1023,9 @@ test('reloaded paused 5366-product queue preserves 23 captured rows and resets v
  r.memory.run.loadFailures[urls[23]]=3;
  // Receiver confirmation preserves completed rows after an MV3 restart.
  r.io.verify=async identity=>({storage:'receiver',status:urls.indexOf(identity.product_url)<23?'already':'missing'});
- await r.runner().resume();await r.runner().tick();r.advance(10000);await r.runner().tick();
- assert.deepEqual(r.memory.run.products.slice(0,23),before);
+ await r.runner().resume();
+ for(let i=0;i<4;i++){await r.runner().tick();r.advance(10000);}
+ assert.deepEqual(r.memory.run.products.slice(0,23).map(({verifiedIdentity,...row})=>row),before);
  assert.equal(r.memory.run.products.length,5366);
  assert.equal(r.memory.run.products[23].status,'failed');
  assert.equal(r.memory.run.products[24].status,'captured');
@@ -1103,4 +1104,74 @@ test('Bravissimo incomplete rendered gallery stays retryable on its first visit'
  assert.match(r.memory.run.lastLoadError.reason,/current gallery not bound/);
  assert.equal(r.memory.run.products[0].status,'pending');assert.equal(r.memory.run.status,'running');
  assert.equal(r.memory.run.loadFailures[bra],1);assert.equal(r.captureCalls.length,0);
+});
+
+function savedReloadRun(count = 1) {
+  return {version:1,generation:8,status:'running',domain:site.domain,config:site,
+    listings:{queue:[],visited:[],discoveryComplete:true},
+    products:Array.from({length:count},(_,i)=>({url:`https://${site.domain}/saved-${i}`,status:'captured',
+      identity:{domain:site.domain,product_url:`https://${site.domain}/saved-${i}`,color_key:'url',selected_color:null}})),
+    current:null,lastNavigationStarted:null,nextNavigationAt:200000,loadFailures:{}};
+}
+test('boot recovery invalidates stale document once and preserves pace and paused runs', async()=>{
+  const r=rig({});r.memory.run=savedReloadRun();
+  r.memory.run.current={phase:'product',url:r.memory.run.products[0].url,binding:{documentId:'dead'}};
+  r.memory.run.products[0].status='pending';
+  const runner=r.runner();await runner.recover();await runner.recover();
+  assert.equal(r.memory.run.generation,9);assert.equal(r.memory.run.current,null);
+  assert.equal(r.memory.run.nextNavigationAt,200000);assert.equal(r.memory.run.products[0].status,'pending');
+  await runner.pause();const paused=structuredClone(r.memory.run);await r.runner().recover();
+  assert.deepEqual(r.memory.run,paused);
+});
+test('verified completion persists across worker restart and is bound to exact identity',async()=>{
+  const r=rig({});r.memory.run=savedReloadRun();await r.runner().tick();
+  await r.runner().tick();assert.equal(r.verificationCalls.length,1);
+  r.memory.run.products[0].identity.selected_color='changed';await r.runner().tick();
+  assert.equal(r.verificationCalls.length,2);
+});
+test('legacy verification is bounded and exposes saved progress while receiver is busy',async()=>{
+  const r=rig({});r.memory.run=savedReloadRun(25);await r.runner().tick();
+  assert.equal(r.verificationCalls.length,10);assert.deepEqual(r.memory.run.verification,{completed:10,total:25});
+  let release;r.io.verify=async()=>new Promise(resolve=>{release=()=>resolve({storage:'receiver',status:'already'});});
+  const pending=r.runner().tick();while(!release)await Promise.resolve();
+  assert.deepEqual(r.memory.run.verification,{completed:10,total:25});
+  await r.runner().pause();release();await pending;assert.equal(r.memory.run.status,'paused');
+  assert.equal(r.memory.run.products.filter(p=>p.verifiedIdentity).length,10);
+});
+test('transient verification failure pauses without demoting saved captures',async()=>{
+  const r=rig({}, {}, {verifyError:Error('receiver offline')});r.memory.run=savedReloadRun();
+  await r.runner().tick();assert.equal(r.memory.run.status,'paused');
+  assert.equal(r.memory.run.products[0].status,'captured');
+});
+test('pause and resume invalidate a delayed verification reply',async()=>{
+  const r=rig({});r.memory.run=savedReloadRun();let release;
+  r.io.verify=async()=>new Promise(resolve=>{release=()=>resolve({storage:'receiver',status:'already'});});
+  const runner=r.runner();const step=runner.tick();while(!release)await Promise.resolve();
+  await runner.pause();await runner.resume();release();await step;
+  assert.equal(r.memory.run.products[0].verifiedIdentity,undefined);
+});
+test('new run cannot be overwritten by old verification reply',async()=>{
+  const r=rig({});r.memory.run=savedReloadRun();let release;
+  r.io.verify=async()=>new Promise(resolve=>{release=()=>resolve({storage:'receiver',status:'already'});});
+  const runner=r.runner();const step=runner.tick();while(!release)await Promise.resolve();
+  await runner.stop();await runner.preview(site,listing1);const newer=structuredClone(r.memory.run);
+  release();await step;assert.deepEqual(r.memory.run,newer);
+});
+test('missing legacy completion is requeued without failing and identity mismatch pauses',async()=>{
+  const r=rig({}, {},{verifyResult:{storage:'receiver',status:'missing'}});r.memory.run=savedReloadRun();
+  await r.runner().tick();assert.equal(r.memory.run.products[0].status,'pending');
+  r.memory.run=savedReloadRun();r.memory.run.products[0].identity.product_url=red;
+  await r.runner().tick();assert.equal(r.memory.run.status,'paused');assert.equal(r.memory.run.products[0].status,'captured');
+});
+
+for(const mode of ['capture','capture-discovery'])for(const status of ['captured','skipped'])
+test(`receiver failure preserves ${mode} ${status} completion`,async()=>{
+ const r=rig({}, {},{verifyError:Error('receiver offline')});r.memory.run=savedReloadRun();
+ r.memory.run.mode=mode;r.memory.run.products[0].status=status;
+ await r.runner().tick();assert.equal(r.memory.run.status,'paused');assert.equal(r.memory.run.products[0].status,status);
+});
+test('failed recovery can retry without wedging subsequent starts',async()=>{
+ const r=rig({});r.memory.run=savedReloadRun();const runner=r.runner();const read=r.io.read;
+ r.io.read=async()=>{throw Error('storage temporarily unavailable');};await assert.rejects(runner.recover(),/temporarily/);
+ r.io.read=read;await runner.recover();assert.equal(r.alarms.length,1);
 });

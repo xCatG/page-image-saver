@@ -160,8 +160,14 @@ const takeoverIo = {
   }
 };
 const takeoverRunner = globalThis.PageImageSaverTakeover.createTakeoverRunner(takeoverIo);
+let takeoverRecovery;
+function recoverTakeover() {
+  if (!takeoverRecovery) takeoverRecovery = requireSettingsReady().then(() => takeoverRunner.recover?.())
+    .catch(error => { takeoverRecovery = null; throw error; });
+  return takeoverRecovery;
+}
 async function tickAfterSettingsReady() {
-  await requireSettingsReady();
+  await recoverTakeover();
   return takeoverRunner.tick();
 }
 
@@ -169,9 +175,7 @@ chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === TAKEOVER_ALARM) void tickAfterSettingsReady().catch(console.error);
 });
 chrome.runtime.onStartup.addListener(() => {
-  void requireSettingsReady().then(() => takeoverRunner.read()).then(run => {
-    if (run?.status === 'running') return tickAfterSettingsReady();
-  }).catch(console.error);
+  void tickAfterSettingsReady().catch(console.error);
 });
 let takeoverControlTail = Promise.resolve();
 function queueTakeoverControl(action) {
@@ -245,6 +249,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!['takeoverPreview', 'takeoverStart', 'takeoverPause', 'takeoverStop',
     'takeoverResume', 'takeoverStatus', 'takeoverExport', 'takeoverImportDiscovery'].includes(message.action)) return false;
   const handle = async () => {
+    if (message.action !== 'takeoverStatus') await recoverTakeover();
     if (['takeoverStart', 'takeoverResume'].includes(message.action) && await readActiveFeed())
       throw new Error('Shopify feed active; wait for it to finish before take-over');
     if (['takeoverPreview', 'takeoverImportDiscovery'].includes(message.action)) {
@@ -562,11 +567,15 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
 // Open settings page when extension is installed or updated
 chrome.runtime.onInstalled.addListener((details) => {
+  void tickAfterSettingsReady().catch(console.error);
   if (details.reason === 'install') {
     // Only open settings page on fresh install
     chrome.tabs.create({ url: 'settings.html' });
   }
 });
+
+// A worker can start without onStartup (including unpacked reload and updates).
+void tickAfterSettingsReady().catch(console.error);
 
 // Clear existing context menus to avoid duplicates
 chrome.contextMenus.removeAll(() => {

@@ -78,7 +78,7 @@ function bridge() {
     set(value, callback) { Object.assign(session, value); callback?.(); },
     remove(key, callback) { delete session[key]; callback?.(); }
   };
-  const sandbox = {chrome, URL, Date, Promise, console,
+  const sandbox = {chrome, URL, Date, Promise, console, requireSettingsReady: async () => {},
     setTimeout() { return 1; }, clearTimeout() {},
     PageImageSaverTakeover: {...require('../takeover_runner.js'), createTakeoverRunner(value) {
       io = value;
