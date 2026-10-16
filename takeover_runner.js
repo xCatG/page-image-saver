@@ -123,7 +123,9 @@
       totals: {listing_pages: run.listings.visited.length, product_urls: run.products.length},
       status: run.status, stop_reason: run.reason || null
     };
-    return {...run, pacing: pacingFor(run.config), schema_version: 1, format: 'page-image-saver-takeover-run/v1',
+    const {verification, ...report} = run;
+    report.products = run.products.map(({verifiedIdentity, ...row}) => row);
+    return {...report, pacing: pacingFor(run.config), schema_version: 1, format: 'page-image-saver-takeover-run/v1',
       accounting: summarizeTakeover(run)};
   }
 
@@ -143,7 +145,25 @@
   }
 
   function createTakeoverRunner(io) {
-    const verifiedHere = new Set();
+    let recovery;
+    const identityStamp = identity => JSON.stringify([identity?.domain, identity?.product_url,
+      identity?.color_key, identity?.selected_color ?? null]);
+    function recover() {
+      if (!recovery) recovery = (async () => {
+        const run = await read();
+        if (run?.status !== 'running') return run;
+        if (run.current) {
+          const row = run.products.find(row => row.url === run.current.url);
+          if (row && !['captured', 'skipped', 'excluded'].includes(row.status)) row.status = 'pending';
+          run.current = null;
+          run.generation = (run.generation || 0) + 1;
+          await save(run);
+        }
+        await io.alarm(io.now());
+        return run;
+      })().catch(error => { recovery = null; throw error; });
+      return recovery;
+    }
     async function save(run) { await io.save(run); return run; }
     async function read() { return io.read(); }
     async function preview(config, page, mode = 'capture', seedSource = null) {
@@ -263,6 +283,7 @@
     async function pause(reason = 'paused by user') {
       const run = await read();
       if (run?.status === 'running') {
+        run.generation = (run.generation || 0) + 1;
         run.status = 'paused'; run.reason = reason; await save(run); await io.clearAlarm?.();
       }
       return run;
@@ -295,11 +316,14 @@
     async function tickUnlocked() {
       const run = await read();
       if (!run || run.status !== 'running') return run;
-      for (const row of run.products) {
-        if (!['captured', 'skipped'].includes(row.status) ||
-            row.status === 'skipped' && row.captureStatus === 'gone') continue;
-        const key = `${run.generation}|${row.url}`;
-        if (verifiedHere.has(key)) continue;
+      const completed = run.products.filter(row => ['captured', 'skipped'].includes(row.status) &&
+        row.captureStatus !== 'gone');
+      const unverified = completed.filter(row => row.verifiedIdentity !== identityStamp(row.identity));
+      if (unverified.length) {
+        run.verification = {completed: completed.length - unverified.length, total: completed.length};
+        await save(run);
+      }
+      for (const row of unverified.slice(0, 10)) {
         try {
           if (!captureIdentityMatches(row.identity, run, row.url)) {
             throw new Error('missing or mismatched saved capture identity');
@@ -308,21 +332,22 @@
           const afterVerification = await read();
           if (afterVerification?.status !== 'running' ||
               afterVerification.generation !== run.generation) return afterVerification;
-          if (result?.storage !== 'receiver' || result.status !== 'already') {
+          if (result?.storage === 'receiver' && result.status === 'missing') {
+            row.status = 'pending'; delete row.verifiedIdentity;
+          } else if (result?.storage !== 'receiver' || result.status !== 'already') {
             throw new Error('receiver no longer verifies published completion');
-          }
-          verifiedHere.add(key);
+          } else row.verifiedIdentity = identityStamp(row.identity);
+          run.verification.completed++;
+          await save(run);
         } catch (error) {
           const afterFailure = await read();
           if (afterFailure?.status !== 'running' ||
               afterFailure.generation !== run.generation) return afterFailure;
-          if (run.mode === 'capture-discovery' && /\b(403|429|captcha|challenge)\b/i.test(String(error?.message || error)))
-            return interrupt(run, 'paused', String(error?.message || error));
-          row.status = run.mode === 'capture-discovery' ? 'pending' : 'failed';
-          row.reason = `saved completion verification failed: ${String(error?.message || error)}`;
-          await save(run);
+          return interrupt(run, 'paused', `saved completion verification failed: ${String(error?.message || error)}`);
         }
       }
+      if (unverified.length > 10) { await io.alarm(io.now()); return run; }
+      if (run.verification) { delete run.verification; await save(run); }
       const pacing = pacingFor(run.config);
       if (pacing.minMs < 0 || pacing.maxMs > 300000)
         return interrupt(run, 'paused', 'invalid site pacing interval');
@@ -364,7 +389,7 @@
         if (verification?.storage === 'receiver' && verification.status === 'already') {
           item.status = 'skipped'; item.identity = identity; item.captureStatus = 'already'; delete item.reason;
           run.consecutiveFailures = 0;
-          verifiedHere.add(`${run.generation}|${url}`);
+          item.verifiedIdentity = identityStamp(identity);
           run.current = null;
           await save(run); await io.alarm(io.now());
           return run;
@@ -553,7 +578,7 @@
               item.status = run.mode === 'capture-discovery' && result.status === 'already' ? 'skipped' : 'captured';
               item.captureStatus = result.status; delete item.reason;
               item.identity = result.identity;
-              verifiedHere.add(`${run.generation}|${item.url}`);
+              item.verifiedIdentity = identityStamp(result.identity);
             } else if (result.storage === 'downloads') {
               item.status = 'failed'; item.reason = 'exported_unverified';
             } else { throw new Error('invalid capture result'); }
@@ -582,7 +607,7 @@
       inFlight = tickUnlocked().finally(() => { inFlight = null; });
       return inFlight;
     }
-    return {preview, importDiscovery, start, pause, stop, resume, tick, read};
+    return {preview, importDiscovery, start, pause, stop, resume, tick, read, recover};
   }
   const api = {createTakeoverRunner, classifyTakeoverScope, summarizeTakeover,
     exportTakeoverReport, endCheckPasses, captureIdentityMatches};

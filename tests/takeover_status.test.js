@@ -13,3 +13,6 @@ for (const [name, run, expected] of [
   ['stopped', {status:'stopped', reason:'stopped by user'}, 'Stopped — stopped by user · Current URL: none (between pages)'],
   ['preview', {status:'preview'}, 'Ready · Current URL: none (between pages)'],
 ]) test(name, () => assert.equal(takeoverStatusText(run, summary, 10000), `${expected} · ${counters}`));
+test('verification progress takes priority over pacing countdown',()=>{
+ assert.match(takeoverStatusText({status:'running',verification:{completed:10,total:2343},nextNavigationAt:99999},summary,10000),/^Verifying saved captures 10\/2343/);
+});
