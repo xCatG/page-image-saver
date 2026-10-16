@@ -123,7 +123,9 @@
       totals: {listing_pages: run.listings.visited.length, product_urls: run.products.length},
       status: run.status, stop_reason: run.reason || null
     };
-    return {...run, pacing: pacingFor(run.config), schema_version: 1, format: 'page-image-saver-takeover-run/v1',
+    const {verification, ...report} = run;
+    report.products = run.products.map(({verifiedIdentity, ...row}) => row);
+    return {...report, pacing: pacingFor(run.config), schema_version: 1, format: 'page-image-saver-takeover-run/v1',
       accounting: summarizeTakeover(run)};
   }
 

@@ -1175,3 +1175,22 @@ test('failed recovery can retry without wedging subsequent starts',async()=>{
  r.io.read=async()=>{throw Error('storage temporarily unavailable');};await assert.rejects(runner.recover(),/temporarily/);
  r.io.read=read;await runner.recover();assert.equal(r.alarms.length,1);
 });
+test('v1 capture export omits internal recovery metadata without mutating saved run',()=>{
+  const run=savedReloadRun(2);
+  run.verification={completed:1,total:2};
+  run.products[0].verifiedIdentity='internal receiver acknowledgment';
+  run.products[0].captureStatus='published';
+  run.products[0].origins=[{file_sha256:'a'.repeat(64),listing_url:first}];
+  const saved=structuredClone(run);
+  const report=exportTakeoverReport(run);
+  assert.equal(Object.hasOwn(report,'verification'),false);
+  assert.equal(report.products.some(row=>Object.hasOwn(row,'verifiedIdentity')),false);
+  const {verification,...publicRun}=saved;
+  publicRun.products=publicRun.products.map(({verifiedIdentity,...row})=>row);
+  assert.deepEqual(report,{...publicRun,pacing:{minMs:9000,maxMs:12000},schema_version:1,
+    format:'page-image-saver-takeover-run/v1',accounting:{
+      pacing:{minMs:9000,maxMs:12000},listingPagesVisited:0,
+      productsFound:2,productsCaptured:2,colorsCaptured:2,sizeOptionsTraversed:0,excluded:0,
+      gone:0,failed:0,pending:0,exportedUnverified:0}});
+  assert.deepEqual(run,saved);
+});
