@@ -14,7 +14,7 @@
         hasQuery: !!u.search, hasFragment: !!u.hash, hasCredentials: !!(u.username || u.password)};
     } catch { return {form, invalid: true}; }
   };
-  const safeId = value => typeof value === 'string' && /^[a-z0-9]+$/.test(value) ? value : '[missing/invalid]';
+  const safeId = value => typeof value === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) ? value : '[missing/invalid]';
   const scripts = [...document.querySelectorAll('script[type="application/ld+json"]')];
   let invalidJson = 0;
   const parsed = scripts.map(n => { try { return JSON.parse(n.textContent); } catch { invalidJson++; return null; } });

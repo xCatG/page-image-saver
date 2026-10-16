@@ -948,7 +948,7 @@
     const fail = reason => { throw productEvidenceError(`Shirohato product: ${reason}`); };
     const identity = (raw, label) => {
       let url; try { url = new URL(raw); } catch (_) { return fail(`${label}: invalid URL`); }
-      const match = url.pathname.match(/^\/productdetail\/([a-z0-9]+)\/1\/$/);
+      const match = url.pathname.match(/^\/productdetail\/([a-z0-9]+(?:-[a-z0-9]+)*)\/1\/$/);
       if (url.origin !== 'https://www.wakudoki.ne.jp' || url.username || url.password || !match)
         fail(`${label}: invalid JP product URL`);
       return match[1];
@@ -975,7 +975,7 @@
   function shirohatoListingUrl(raw) {
     let url; try { url = new URL(raw); } catch (_) { return raw; }
     if (url.origin !== 'https://www.wakudoki.ne.jp' || url.username || url.password ||
-        !/^\/productdetail\/[a-z0-9]+\/1\/$/.test(url.pathname) || url.hash ||
+        !/^\/productdetail\/[a-z0-9]+(?:-[a-z0-9]+)*\/1\/$/.test(url.pathname) || url.hash ||
         !/^\?bid=\d+$/.test(url.search)) return raw;
     url.search = '';
     return url.href;
@@ -984,7 +984,7 @@
   function shirohatoGallery(urls, productId) {
     const fail = reason => { throw new Error(`Shirohato gallery: ${reason}`); };
     if (!urls.length) fail('no matching gallery images');
-    if (!/^[a-z0-9]+$/.test(productId || '')) fail('missing or invalid product ID');
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(productId || '')) fail('missing or invalid product ID');
     return [...new Set(urls.map((raw, index) => {
       const image = `image ${index + 1}`;
       let url; try { url = new URL(raw); } catch (_) { return fail(`${image} is not an absolute URL`); }
@@ -992,8 +992,10 @@
           url.port || url.username || url.password) fail(`${image} has an unapproved origin`);
       if (url.search || url.hash) fail(`${image} has a query or fragment`);
       const file = url.pathname.slice('/Contents/ProductImages/0/'.length);
+      // Saved originals use only -cfNN/-czNN and _subNN renditions after the complete ID.
+      // Arbitrary suffixes would also admit another hyphenated product's image.
       const primary = url.pathname.startsWith('/Contents/ProductImages/0/') &&
-        new RegExp('^' + productId + '(?:[-_][a-zA-Z0-9]+)*_LL\\.jpg$').test(file);
+        new RegExp('^' + productId + '(?:-(?:cf|cz)[0-9]{2}|_sub[0-9]{2})?_LL\\.jpg$').test(file);
       const subimage = new RegExp('^/Contents/ProductSubImages/0/' + productId +
         '_sub[0-9]+_LL\\.jpg$').test(url.pathname);
       if (!primary && !subimage) fail(`${image} is not a current-product original`);
