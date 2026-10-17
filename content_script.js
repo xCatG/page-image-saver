@@ -2951,6 +2951,19 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null, chal
   const selector = config.listing?.productLinkSelector;
   const nextSelector = config.listing?.pagination?.nextSelector;
   if (!selector || !nextSelector) throw new Error('listing selectors are missing');
+  // Bloomreach can render cards before pagination (or leave the previous page's
+  // cards in place). Wait for the URL page before taking the card snapshot.
+  if (config.domain === 'www.barenecessities.com') {
+    const page = Number(new URL(window.location.href).searchParams.get('page') || 1);
+    const deadline = Date.now() + 10000;
+    while (true) {
+      const current = Number(document.querySelector('.br-collection .br-pagination__item--current')?.textContent.trim());
+      if (Number.isSafeInteger(current) && current >= 1 && current === page) break;
+      if (Date.now() >= deadline)
+        throw new Error('Bare Necessities listing: pagination does not match URL');
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
   let listingCards = [];
   for (let attempt = 0; attempt < 20; attempt++) {
     listingCards = Array.from(document.querySelectorAll(selector), node => {
