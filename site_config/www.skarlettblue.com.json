@@ -1,0 +1,21 @@
+{
+  "domain": "www.skarlettblue.com",
+  "platform": "shopify",
+  "locale": "en-US",
+  "market": "us",
+  "currency": "USD",
+  "botProtection": [],
+  "colorVariantStrategy": "separate-url",
+  "listing": {
+    "productLinkSelector": ".collection-listing .product-grid product-block a.product-link:has(.product-block__title)",
+    "pagination": {"type": "numbered", "nextSelector": "div.pagination a.pagination__next"}
+  },
+  "product": {
+    "pageSelector": ".section-main-product media-gallery .main-image",
+    "allImagesSelector": ".section-main-product media-gallery .main-image .slider__item:not([hidden]) a.show-gallery:has(.product-media--image)",
+    "imageUrlPattern": "^https://(?:cdn\\.shopify\\.com/s/files/|www\\.skarlettblue\\.com/cdn/shop/files/)",
+    "highResTransform": {"type": "query-param", "name": "width", "value": "1500"},
+    "lazyLoad": false
+  },
+  "notes": "Derived offline from two owner-saved /collections/bras pages and seven PDPs, 2026-10-22. Collection-scoped card URLs normalize to direct /products/ URLs before queueing, matching saved PDP canonicals; strict binding is unchanged. Grid title links yield 50 + 50 distinct products out of the displayed 163; next links go to pages 2 and 3. No terminal-page proof: discovery finishes with gaps, not verified completeness. Gallery image anchors provide evidenced URLs even before lazy img src loads; excludes video, thumbnails, hidden slides and recommendations. Saved Entice pages expose multiple colours in the gallery (36 brief / 46 bra images); do not claim colour-pure galleries or click swatches/sizes. Other saved PDPs expose 4–6 images. Identity follows separate colour product URLs. Width 1500 matches saved source dimensions. Use scoped lingerie collections, never /collections/all for capture. Feed export is whole-store evidence, not a lingerie scope decision. No live storefront/CDN validation performed."
+}

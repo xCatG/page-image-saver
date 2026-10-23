@@ -2980,6 +2980,19 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null, chal
   if (config.domain === 'www.wakudoki.ne.jp')
     listingCards = listingCards.map(card => ({...card,
       url: globalThis.PageImageSaverHelpers.shirohatoListingUrl(card.url)}));
+  if (config.domain === 'www.skarlettblue.com') {
+    // Saved grid links carry a collection prefix; saved PDP canonicals do not.
+    // Queue the evidenced Shopify alias without relaxing product-page binding.
+    listingCards = listingCards.map(card => {
+      const url = new URL(card.url);
+      const product = url.pathname.match(/^\/(?:collections\/[^/]+\/)?products\/([a-z0-9][a-z0-9_-]*)\/?$/);
+      if (url.origin !== window.location.origin || !product)
+        throw new Error('Skarlett Blue listing: foreign or invalid product link');
+      url.pathname = `/products/${product[1]}`;
+      url.search = ''; url.hash = '';
+      return {...card, url: url.href};
+    });
+  }
   if (config.domain === 'www.barenecessities.com') {
     if (!listingCards.length) throw new Error('Bare Necessities product grid not rendered — Insider search blocked?');
     listingCards = listingCards.map(card => {
