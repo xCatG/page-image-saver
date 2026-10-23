@@ -11,7 +11,10 @@ product-card image remains as a negative control. Main-product ancestry is retai
 Pages 7 and 8 are `/collections/bras` pages 1 and 2. Each has exactly 50 title/card
 links; their sets are disjoint, so 100 observed cards fit the displayed total of 163
 and four numbered pages (pages 3/4 were not supplied). Off-grid product links and
-multiple links within cards remain, to catch broad discovery selectors.
+multiple links within cards remain, to catch broad discovery selectors. Production
+discovery normalizes collection-scoped card URLs to direct `/products/` URLs,
+matching the saved PDP canonicals; the browser test covers the discovery output
+and strict PDP binding, including rejection of unrelated/foreign links.
 
 PDPs 0–6 yield respectively 6, 4, 4, 4, 36, 46 and 5 unique image-anchor URLs.
 The two Entice saves expose several colours in the same gallery; other saves mark

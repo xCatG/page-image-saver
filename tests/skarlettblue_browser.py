@@ -1,6 +1,7 @@
 """Offline production-extractor checks over owner-saved Skarlett Blue DOM."""
 import json
 import unittest
+from urllib.parse import urlsplit
 from saved_page_fixtures import SavedPageFixtures, FIXTURES, source
 
 
@@ -18,11 +19,31 @@ class SkarlettBlueFixtures(SavedPageFixtures):
                         links = page.locator(config['listing']['productLinkSelector']).evaluate_all('(ns) => ns.map(n => n.href)')
                         self.assertEqual(links, case['products'])
                         self.assertEqual(len(links), 50)
-                        self.assertEqual(page.locator(config['listing']['pagination']['nextSelector']).get_attribute('href'), case['next'])
                         listings.append(set(links))
+                        self.assertEqual(page.locator(config['listing']['pagination']['nextSelector']).get_attribute('href'), case['next'])
+                        content = source('content_script.js')
+                        page.add_script_tag(content='const takeoverDocumentId="fixture";' + content[
+                            content.index('function takeoverCategory()'):content.index('// A site must be explicitly enabled')])
+                        discovered = page.evaluate("c => inspectTakeoverPage(c, 'discovery', 'listing')", config)
+                        expected = ['https://www.skarlettblue.com/products/' + urlsplit(u).path.split('/products/')[1] for u in case['products']]
+                        self.assertEqual(discovered['products'], expected)
+                        self.assertEqual([c['url'] for c in discovered['cards']], expected)
+                        self.assertEqual(discovered['next'], case['next'])
+                        for invalid in ['https://unrelated.example/products/bra', 'https://www.skarlettblue.com/pages/about']:
+                            page.locator(config['listing']['productLinkSelector']).first.evaluate('(n, u) => n.href = u', invalid)
+                            with self.assertRaisesRegex(Exception, 'foreign or invalid product link'):
+                                page.evaluate("c => inspectTakeoverPage(c, 'discovery', 'listing')", config)
                     else:
                         self.assertTrue(page.evaluate('c => captureProductSeen(c)', config))
                         self.assertTrue(page.evaluate('capturePageProduct().name'))
+                        content = source('content_script.js')
+                        page.add_script_tag(content='const takeoverDocumentId="fixture";' + content[
+                            content.index('function captureCanonicalUrl('):content.index('function rescanCaptureImages(')])
+                        canonical = page.locator('link[rel=canonical]').get_attribute('href')
+                        page.evaluate("u => history.replaceState({}, '', u)", canonical)
+                        page.evaluate("u => assertTakeoverBinding({documentId:'fixture', expectedUrl:u})", canonical)
+                        with self.assertRaisesRegex(Exception, 'URL'):
+                            page.evaluate("assertTakeoverBinding({documentId:'fixture', expectedUrl:'https://www.skarlettblue.com/products/unrelated'})")
                         gallery = page.evaluate("c => captureGallery(c, 'site')", config)
                         self.assertEqual(gallery, case['images'])
                         self.assertEqual(len(gallery), len(set(gallery)))
