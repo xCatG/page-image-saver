@@ -947,6 +947,7 @@
     const canonical = document.querySelector('link[rel="canonical"]')?.href;
     const name = document.querySelector('meta[property="og:title"]')?.content;
     const brand = document.querySelector('p.rn-products-name__brand')?.textContent.trim();
+    // Sale badges precede the price: bind the yen amount, never the %OFF number.
     const price = document.querySelector('#slct-price')?.textContent.match(/¥\s*([\d,]+)/)?.[1].replace(/,/g, '');
     const facts = wacoalJpProduct({name, brand, price}, pageUrl, canonical);
     const groups = [...new Set(Array.from(document.querySelectorAll('img[alt]'), n => n.getAttribute('alt'))
@@ -962,7 +963,7 @@
   function wacoalJpUrl(raw) {
     const u = new URL(raw);
     if (u.origin !== 'https://store.wacoal.jp' || u.username || u.password ||
-        !/^\/disp\/01_[A-Z0-9]{6}\.html$/.test(u.pathname))
+        !/^\/disp\/0[12]_[A-Z0-9]{6}\.html$/.test(u.pathname))
       throw productEvidenceError('Wacoal JP: invalid canonical style URL');
     u.search = ''; u.hash = '';
     return u.href;
@@ -971,7 +972,7 @@
   function wacoalJpProduct(data, pageUrl, canonicalUrl) {
     const url = wacoalJpUrl(canonicalUrl);
     if (wacoalJpUrl(pageUrl) !== url) throw productEvidenceError('Wacoal JP: canonical style mismatch');
-    const id = new URL(url).pathname.match(/01_([A-Z0-9]{6})/)[1];
+    const id = new URL(url).pathname.match(/0[12]_([A-Z0-9]{6})/)[1];
     if (!data.name || !data.name.includes(id) || !data.brand?.trim() ||
         !/^\d+$/.test(data.price || '') || Number(data.price) <= 0)
       throw productEvidenceError('Wacoal JP: missing title, carried brand or yen price');

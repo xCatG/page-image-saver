@@ -6,7 +6,7 @@
   "currency": "JPY",
   "colorVariantStrategy": "separate-url",
   "listing": {
-    "productLinkSelector": "a.group[href*=\"/disp/01_\"]",
+    "productLinkSelector": "a.group[href*=\"/disp/01_\"], a.group[href*=\"/disp/02_\"]",
     "pagination": {
       "type": "numbered",
       "nextSelector": "a[title=\"次のページへ\"]"
@@ -24,7 +24,7 @@
     "allImagesSelector": "a[data-pswp-width][href]",
     "renditionResolver": "wacoal-jp",
     "lazyLoad": false,
-    "pathPattern": "^/disp/01_[A-Z0-9]{6}\\.html$",
+    "pathPattern": "^/disp/0[12]_[A-Z0-9]{6}\\.html$",
     "selectedColor": false
   },
   "notes": "Owner-browser only. One canonical style URL; mixed-color gallery; no selected color. Actual zoom links only; no URL reconstruction. CHIP/JYO excluded. start= pagination reads literal onclick without executing it. No live brand/CDN requests during development."
