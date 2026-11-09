@@ -1,0 +1,26 @@
+{
+  "domain": "store.wacoal.jp",
+  "platform": "salesforce-commerce-cloud",
+  "locale": "ja-JP",
+  "market": "jp",
+  "currency": "JPY",
+  "colorVariantStrategy": "separate-url",
+  "listing": {
+    "productLinkSelector": "a.group[href*=\"/disp/01_\"]",
+    "pagination": {
+      "type": "numbered",
+      "nextSelector": "a[title=\"次のページへ\"]"
+    },
+    "endCheck": {
+      "type": "result-total",
+      "selector": ".search-view p.count"
+    }
+  },
+  "product": {
+    "pageSelector": ".rn-products-name",
+    "allImagesSelector": "a[data-pswp-width][href]",
+    "renditionResolver": "wacoal-jp",
+    "lazyLoad": false
+  },
+  "notes": "Owner-browser only. One canonical style URL; mixed-color gallery; no selected color. Actual zoom links only; no URL reconstruction. CHIP/JYO excluded. start= pagination reads literal onclick without executing it. No live brand/CDN requests during development."
+}

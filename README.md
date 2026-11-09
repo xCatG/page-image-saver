@@ -227,3 +227,15 @@ current discovery → Take over** to capture its fixed product queue with existi
 receiver verification and scope rules. Do not interpret an incomplete discovery
 as a full catalog. No final product count is promised by a seed file; it is
 established by the checked live listings. Unknown product categories remain review.
+
+### Wacoal Japan owner-browser capture
+
+`store.wacoal.jp` uses canonical `/disp/01_STYLE.html` URL identity and a mixed-colour
+gallery. Keep the carried Japanese brand verbatim; JPY and ja-JP stay distinct
+from Wacoal US. Capture actual own-style zoom links, with CHIP swatches and JYO
+promotional infographics excluded. Product evidence retains the observed Salute
+group (otherwise null); image filenames retain colour and shot codes. Listings
+read the saved `start=` pagination target without executing inline JavaScript.
+No colour/filter expansion. Pause on challenges, 403 or 429. Owner smoke is still
+required; Chrome Complete fixtures retain rewritten local paths and do not prove
+remote URLs for every image. Runtime never reconstructs those URLs.
