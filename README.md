@@ -230,7 +230,7 @@ established by the checked live listings. Unknown product categories remain revi
 
 ### Wacoal Japan owner-browser capture
 
-`store.wacoal.jp` uses canonical `/disp/01_STYLE.html` URL identity and a mixed-colour
+`store.wacoal.jp` uses canonical `/disp/01_STYLE.html` or sale `/disp/02_STYLE.html` URL identity and a mixed-colour
 gallery. Keep the carried Japanese brand verbatim; JPY and ja-JP stay distinct
 from Wacoal US. Capture actual own-style zoom links, with CHIP swatches and JYO
 promotional infographics excluded. Product evidence retains the observed Salute

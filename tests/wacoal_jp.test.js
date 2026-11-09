@@ -106,3 +106,37 @@ test('content listing inspector applies config URL, next-page and count hooks',a
  assert.equal(result.next,'https://store.wacoal.jp/disp/001300300110/?start=40');
  assert.equal(result.end.total,768);
 });
+
+
+for (const [file, count] of [['sale',40], ['mixed',4]]) test(`Wacoal JP ${file} listing discovers canonical sale identities`,()=>{
+ const html=fs.readFileSync(`${__dirname}/fixtures/wacoal-jp-listing-${file}.html`,'utf8');
+ const paths=[...config.listing.productLinkSelector.matchAll(/href\*=\"([^\"]+)\"/g)].map(m=>m[1]);
+ const hrefs=[...html.matchAll(/class="group" href="([^"]+)"/g)].map(m=>decode(m[1]));
+ const links=hrefs.filter(url=>paths.some(path=>url.includes(path))).map(h.wacoalJpUrl);
+ assert.equal(links.length,count);assert.equal(new Set(links).size,count);
+ assert(links.every(url=>!/[?#]/.test(new URL(url).pathname+new URL(url).search+new URL(url).hash)));
+ assert(links.every(url=>new RegExp(config.product.pathPattern).test(new URL(url).pathname)));
+ assert(links.some(url=>url.includes('/02_')));
+ if(file==='mixed')assert(links.some(url=>url.includes('/01_')));
+ for(let i=0;i<links.length;i++)assert.equal(links[i],hrefs[i].split('?')[0]);
+});
+
+test('sale PDP binds own canonical, Amphi, yen amount after discount and own-style gallery',()=>{
+ const html=fs.readFileSync(`${__dirname}/fixtures/wacoal-jp-02_BYJ305.html`,'utf8');
+ const url=decode(html.match(/rel="canonical" href="([^"]+)"/)[1]);
+ const name=decode(html.match(/property="og:title" content="([^"]+)"/)[1]);
+ const brand=decode(html.match(/<p class="rn-products-name__brand">([^<]+)</)[1]);
+ const price=html.match(/<p[^>]*id="slct-price"[^>]*>([\s\S]*?)<\/p>/)[1].replace(/<[^>]*>/g,'').replace(/&yen;/g,'¥');
+ assert.match(price,/30/);assert.match(price,/3,492/);
+ const nodes={'link[rel="canonical"]':{href:url},'meta[property="og:title"]':{content:name},
+   'p.rn-products-name__brand':{textContent:brand},'#slct-price':{textContent:price}};
+ const evidence=h.siteHooks['wacoal-jp'].productEvidence({querySelector:s=>nodes[s],querySelectorAll:()=>[]},url);
+ assert.equal(evidence.microdata.brand,'アンフィ');assert.equal(evidence.microdata.url,'https://store.wacoal.jp/disp/02_BYJ305.html');
+ assert.equal(evidence.facts.product_id,'BYJ305');assert.equal(evidence.facts.color,null);
+ assert.deepEqual(evidence.facts.offers,{price:'3492',currency:'JPY'});
+ const urls=[...html.matchAll(/(?:href|src)="([^"]+)"/g)].map(m=>new URL(decode(m[1]),url).href);
+ assert(urls.some(u=>u.includes('_CHIP')));assert(urls.some(u=>u.includes('_JYO')));
+ const gallery=h.wacoalJpGallery(urls,'BYJ305');
+ assert.equal(gallery.length,9);assert(gallery.every(i=>i.url.includes('/BYJ305/BYJ305')&&!/CHIP|JYO/.test(i.url)));
+ assert.throws(()=>h.wacoalJpProduct({name,brand,price:'3492'},url,url.replace('/02_','/01_')),/mismatch/);
+});
