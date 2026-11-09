@@ -474,7 +474,7 @@ test('structured PDP validation reaches runner through actual content inspection
    chrome:{runtime:{onMessage:{addListener:fn=>{listener=fn;}}}}};
  page.globalThis=page;
  vm.createContext(page);
- vm.runInContext(source.slice(source.indexOf('function capturePageProductEvidence()'),source.indexOf('function captureProductSeen(')),page);
+ vm.runInContext(source.slice(source.indexOf('function capturePageProductEvidence('),source.indexOf('function captureProductSeen(')),page);
  vm.runInContext(source.slice(source.indexOf('async function inspectTakeoverPage('),source.indexOf('async function inspectTakeoverPage(')+source.slice(source.indexOf('async function inspectTakeoverPage(')).indexOf('\nfunction ')),page);
  const start=source.lastIndexOf('chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {');
  vm.runInContext(source.slice(start,source.indexOf("  } else if (message.action === 'takeoverDocumentCheck')",start))+'  }\n});',page);

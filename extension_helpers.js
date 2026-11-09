@@ -943,6 +943,92 @@
     return [...products.values()].map(({card}) => card);
   }
 
+  function wacoalJpEvidence(document, pageUrl) {
+    const canonical = document.querySelector('link[rel="canonical"]')?.href;
+    const name = document.querySelector('meta[property="og:title"]')?.content;
+    const brand = document.querySelector('p.rn-products-name__brand')?.textContent.trim();
+    const price = document.querySelector('#slct-price')?.textContent.match(/¥\s*([\d,]+)/)?.[1].replace(/,/g, '');
+    const facts = wacoalJpProduct({name, brand, price}, pageUrl, canonical);
+    const groups = [...new Set(Array.from(document.querySelectorAll('img[alt]'), n => n.getAttribute('alt'))
+      .filter(alt => /^\d{2}G$/.test(alt)))];
+    const group = brand === 'サルート' && groups.length === 1 ? groups[0] : null;
+    const microdata = {name, sku:facts.sku, productID:facts.product_id, url:canonical, brand,
+      salute_group:group, offers:{price, priceCurrency:'JPY'},
+      field_sources:{brand:'p.rn-products-name__brand', name:'og:title', price:'#slct-price yen amount',
+        priceCurrency:'store.wacoal.jp yen price', salute_group:'PDP img[alt] exact NN G code'}};
+    return {...captureProductEvidence([], microdata), facts, microdata, fact_source:'microdata'};
+  }
+
+  function wacoalJpUrl(raw) {
+    const u = new URL(raw);
+    if (u.origin !== 'https://store.wacoal.jp' || u.username || u.password ||
+        !/^\/disp\/01_[A-Z0-9]{6}\.html$/.test(u.pathname))
+      throw productEvidenceError('Wacoal JP: invalid canonical style URL');
+    u.search = ''; u.hash = '';
+    return u.href;
+  }
+
+  function wacoalJpProduct(data, pageUrl, canonicalUrl) {
+    const url = wacoalJpUrl(canonicalUrl);
+    if (wacoalJpUrl(pageUrl) !== url) throw productEvidenceError('Wacoal JP: canonical style mismatch');
+    const id = new URL(url).pathname.match(/01_([A-Z0-9]{6})/)[1];
+    if (!data.name || !data.name.includes(id) || !data.brand?.trim() ||
+        !/^\d+$/.test(data.price || '') || Number(data.price) <= 0)
+      throw productEvidenceError('Wacoal JP: missing title, carried brand or yen price');
+    return {name: data.name, sku: id, product_id: id, color: null,
+      offers: {price: data.price, currency: 'JPY'}};
+  }
+
+  // Preserve actual zoom links; never manufacture a rendition or a hash directory.
+  function wacoalJpGallery(urls, id) {
+    if (!/^[A-Z0-9]{6}$/.test(id || '')) throw new Error('Wacoal JP: invalid gallery style');
+    const found = new Map();
+    for (const raw of urls) {
+      let u; try { u = new URL(raw); } catch (_) { continue; }
+      if (u.origin !== 'https://store.wacoal.jp' || u.username || u.password || u.hash) continue;
+      const match = u.pathname.match(/^\/dw\/image\/v2\/BDCT_PRD\/on\/demandware.static\/-\/Sites-wacoal-ms-sips\/ja_JP\/dw[a-f0-9]+\/images\/products\/([A-Z0-9]{6})\/([A-Z0-9]{6})([A-Z]{2})_(MOD|ITM|BAK|DET|REF)_B1(?:_\d+)?\.jpg$/);
+      if (!match || match[1] !== id || match[2] !== id) continue;
+      const width = Number(u.searchParams.get('sw') || 0);
+      if ([...u.searchParams.keys()].some(k => !['sw', 'sh', 'sm'].includes(k))) continue;
+      const old = found.get(u.pathname);
+      if (!old || width > old.width) found.set(u.pathname, {url:u.href, width,
+        color_code:match[3], shot_code:match[4]});
+    }
+    if (!found.size) throw new Error('Wacoal JP: no own-style remote gallery links');
+    return [...found.values()];
+  }
+
+  function wacoalJpScope(product) {
+    const text = `${String(product?.category || '').trim()} ${String(product?.name || '').trim()}`;
+    if (/メンズ|男性|キッズ|子供|ジュニア|水着|スイム|ビキニ|パジャマ|ルームウェア|ナイトウェア|ストッキング|タイツ|靴下|ソックス|\b(mens?|swim\w*|pajamas?|socks?)\b/i.test(text))
+      return {decision:'exclude', reason:'Wacoal JP non-lingerie evidence'};
+    return {decision:/ブラ|ショーツ|ハーフトップ|ランジェリー|ガーターベルト/.test(text) ? 'include' : 'review', reason:'Wacoal JP product title evidence'};
+  }
+
+  const siteHooks = {'wacoal-jp': {
+    productEvidence: wacoalJpEvidence, gallery: wacoalJpGallery,
+    listingUrl: wacoalJpUrl, next: wacoalJpNext, scope: wacoalJpScope,
+    captureEvidence(evidence, gallery, policy) {
+      if (policy !== 'url') throw new Error('Wacoal JP requires URL identity for its mixed-colour gallery');
+      evidence.microdata.gallery = wacoalJpGallery(gallery, evidence.facts.product_id);
+    }
+  }};
+
+  function wacoalJpNext(onclick, pageUrl) {
+    if (!onclick) return null;
+    const match = onclick.match(/^location\.href=['"]([^'"]+)['"];?$/);
+    if (!match) throw new Error('Wacoal JP: unrecognized pagination');
+    const page = new URL(pageUrl), next = new URL(match[1]);
+    const valid = u => u.origin === 'https://store.wacoal.jp' && !u.username && !u.password &&
+      !u.hash && /^\/disp\/\d+\/$/.test(u.pathname) &&
+      [...u.searchParams.keys()].every(k => k === 'start') &&
+      u.searchParams.getAll('start').length <= 1 && /^\d+$/.test(u.searchParams.get('start') || '0');
+    if (!valid(page) || !valid(next) || next.pathname !== page.pathname ||
+        Number(next.searchParams.get('start')) !== Number(page.searchParams.get('start') || 0) + 40)
+      throw new Error('Wacoal JP: invalid start pagination');
+    return next.href;
+  }
+
   // Bind structured facts to the actual JP PDP, never a recommendation or another market.
   function shirohatoProduct(jsonld, pageUrl, canonicalUrl) {
     const fail = reason => { throw productEvidenceError(`Shirohato product: ${reason}`); };
@@ -1120,7 +1206,8 @@
     return [...new Set(urls)];
   }
 
-  function listingResultTotal(text) {
+  function listingResultTotal(text, pattern = null) {
+    if (pattern) text = String(text).match(new RegExp(pattern))?.[1] || '';
     const japanese = String(text).match(/^\s*(\d+|\d{1,3}(?:,\d{3})+)\s*件\s*$/);
     if (japanese) {
       const total = Number(japanese[1].replace(/,/g, ''));
@@ -1154,6 +1241,7 @@
   }
 
   const helpers = {
+    siteHooks, wacoalJpUrl, wacoalJpProduct, wacoalJpGallery, wacoalJpNext,
     productEvidenceError, shirohatoProduct, shirohatoGallery, shirohatoListingUrl,
     liseCharmelGallery,
     liseCharmelListingProducts,
