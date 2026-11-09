@@ -13,14 +13,19 @@
     },
     "endCheck": {
       "type": "result-total",
-      "selector": ".search-view p.count"
-    }
+      "selector": ".search-view p.count",
+      "countPattern": "対象商品数\\s*([\\d,]+\\s*件)"
+    },
+    "urlNormalizer": "wacoal-jp",
+    "nextResolver": "wacoal-jp"
   },
   "product": {
     "pageSelector": ".rn-products-name",
     "allImagesSelector": "a[data-pswp-width][href]",
     "renditionResolver": "wacoal-jp",
-    "lazyLoad": false
+    "lazyLoad": false,
+    "pathPattern": "^/disp/01_[A-Z0-9]{6}\\.html$",
+    "selectedColor": false
   },
   "notes": "Owner-browser only. One canonical style URL; mixed-color gallery; no selected color. Actual zoom links only; no URL reconstruction. CHIP/JYO excluded. start= pagination reads literal onclick without executing it. No live brand/CDN requests during development."
 }

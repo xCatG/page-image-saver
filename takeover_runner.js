@@ -2,7 +2,7 @@
  * same state machine can be exercised without a vendor or receiver connection. */
 (function(root) {
   'use strict';
-  const {comparableUrl, sameDocumentUrl} = root.PageImageSaverHelpers || require('./extension_helpers.js');
+  const {comparableUrl, sameDocumentUrl, siteHooks} = root.PageImageSaverHelpers || require('./extension_helpers.js');
   const KEY_VERSION = 1;
   const MAX_LISTINGS = 1000;
   const MAX_PRODUCTS = 10000;
@@ -65,12 +65,8 @@
       const included = ['Plunge Bra', 'Full Cup Bra', 'Balconette Bra', 'Brief', 'Thong', 'High Waisted Brief'].includes(category);
       return {decision: included ? 'include' : 'review', reason: `Bravissimo productGroup evidence: ${category || 'missing'}`};
     }
-    if (config?.domain === 'store.wacoal.jp') {
-      const text = `${category} ${name}`;
-      if (/メンズ|男性|キッズ|子供|ジュニア|水着|スイム|ビキニ|パジャマ|ルームウェア|ナイトウェア|ストッキング|タイツ|靴下|ソックス|\b(mens?|swim\w*|pajamas?|socks?)\b/i.test(text))
-        return {decision:'exclude', reason:'Wacoal JP non-lingerie evidence'};
-      return {decision:/ブラ|ショーツ|ハーフトップ|ランジェリー|ガーターベルト/.test(text) ? 'include' : 'review', reason:'Wacoal JP product title evidence'};
-    }
+    const scopeHook = siteHooks?.[config?.product?.renditionResolver]?.scope;
+    if (scopeHook) return scopeHook(product);
     if (config?.domain === 'www.wakudoki.ne.jp') {
       const excluded = /メンズ|男性|キッズ|子供|ジュニア|水着|ビキニ|パジャマ|ルームウェア|ナイトウェア|ストッキング|靴下|インナーシャツ|\b(swimwear|swimsuit|bikini|sleepwear|nightwear|pajamas?|pyjamas?|mens?|kids?|stockings?|socks?)\b/i.test(`${category} ${name}`);
       if (excluded) return {decision: 'exclude', reason: `Shirohato out-of-scope product: ${category}; ${name}`};

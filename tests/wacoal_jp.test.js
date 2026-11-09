@@ -54,7 +54,7 @@ test('identity and scope guards fail closed',()=>{
  const source=fs.readFileSync(require.resolve('../content_script.js'),'utf8');
  const sandbox={window:{location:{hostname:'store.wacoal.jp'}},document:{querySelector:()=>({getAttribute:()=> 'BE'}),getElementById:()=>({value:'Blue'})}};
  vm.runInNewContext(source.slice(source.indexOf('function captureSwatchColor('),source.indexOf('function captureCanonicalUrl(')),sandbox);
- assert.equal(sandbox.captureSelectedColor({color:null}),null);
+ assert.equal(sandbox.captureSelectedColor({color:null},config),null);
 });
 
 test('content adapter extracts bound microdata from the trimmed PDP fields',()=>{
@@ -64,9 +64,45 @@ test('content adapter extracts bound microdata from the trimmed PDP fields',()=>
  const sandbox={window:{location:{href:row.url}},document:{querySelector:s=>nodes[s],querySelectorAll:()=>[{getAttribute:()=> '48G'}]},PageImageSaverHelpers:h};
  sandbox.globalThis=sandbox;
  const source=fs.readFileSync(require.resolve('../content_script.js'),'utf8');
- vm.runInNewContext(source.slice(source.indexOf('function captureWacoalJpProduct('),source.indexOf('function capturePageProductEvidence(')),sandbox);
- const evidence=sandbox.captureWacoalJpProduct();
+ sandbox.window.location.pathname=new URL(row.url).pathname;
+ vm.runInNewContext(source.slice(source.indexOf('function capturePageProductEvidence('),source.indexOf('function captureProductSeen(')),sandbox);
+ const evidence=sandbox.capturePageProductEvidence(config);
  assert.equal(evidence.fact_source,'microdata');assert.equal(evidence.microdata.brand,'サルート');
  assert.equal(evidence.microdata.salute_group,'48G');assert.equal(evidence.facts.product_id,'BTJ748');
  assert.equal(evidence.facts.offers.price,'13750');assert.equal(evidence.facts.offers.currency,'JPY');
+});
+
+test('Wacoal adapters are selected by config and preserve gallery evidence guards',()=>{
+ const hooks=h.siteHooks[config.product.renditionResolver];
+ assert.equal(hooks.listingUrl,h.wacoalJpUrl);
+ assert.equal(hooks.next,h.wacoalJpNext);
+ assert.equal(hooks.gallery,h.wacoalJpGallery);
+ assert.equal(h.listingResultTotal('対象商品数 768 件 (1〜40件表示)',config.listing.endCheck.countPattern),768);
+ assert.equal(h.listingResultTotal('表示なし',config.listing.endCheck.countPattern),null);
+ assert.equal(h.listingResultTotal('対象商品数 1,2 件',config.listing.endCheck.countPattern),null);
+ const row=rows[0], evidence={facts:{product_id:row.product_id},microdata:{}};
+ assert.throws(()=>hooks.captureEvidence(evidence,[row.og_image],'color'),/URL identity/);
+ hooks.captureEvidence(evidence,[row.og_image],'url');
+ assert.deepEqual(evidence.microdata.gallery,h.wacoalJpGallery([row.og_image],row.product_id));
+ const source=fs.readFileSync(require.resolve('../content_script.js'),'utf8');
+ assert(!source.includes('store.wacoal.jp'));
+ assert.equal(classifyTakeoverScope({name:'ブラ'}, {...config,domain:'fixture.example'}).decision,'include');
+});
+
+test('content listing inspector applies config URL, next-page and count hooks',async()=>{
+ const row=rows[0], card={href:row.url+'?color=BU',textContent:'Saved bra',closest:()=>null,querySelector:()=>null};
+ const nodes={
+   [config.listing.pagination.nextSelector]:{getAttribute:()=>"location.href='https://store.wacoal.jp/disp/001300300110/?start=40';"},
+   [config.listing.endCheck.selector]:{textContent:'対象商品数 768 件 (1〜40件表示)'}
+ };
+ const sandbox={URL,Date,window:{location:new URL('https://store.wacoal.jp/disp/001300300110/')},
+   document:{title:'Bras',body:{innerText:'Bras'},documentElement:{lang:'ja-JP'},querySelector:s=>nodes[s],querySelectorAll:()=>[card]},
+   capturePageProduct:()=>null,captureProductSeen:()=>false,takeoverDocumentId:'fixture',PageImageSaverHelpers:h};
+ sandbox.globalThis=sandbox;
+ const source=fs.readFileSync(require.resolve('../content_script.js'),'utf8');
+ vm.runInNewContext(source.slice(source.indexOf('async function inspectTakeoverPage('),source.indexOf('// A site must be explicitly enabled')),sandbox);
+ const result=await sandbox.inspectTakeoverPage({...config,domain:'fixture.example'},'discovery');
+ assert.deepEqual(Array.from(result.products),[row.url]);
+ assert.equal(result.next,'https://store.wacoal.jp/disp/001300300110/?start=40');
+ assert.equal(result.end.total,768);
 });

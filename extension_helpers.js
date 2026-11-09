@@ -943,6 +943,22 @@
     return [...products.values()].map(({card}) => card);
   }
 
+  function wacoalJpEvidence(document, pageUrl) {
+    const canonical = document.querySelector('link[rel="canonical"]')?.href;
+    const name = document.querySelector('meta[property="og:title"]')?.content;
+    const brand = document.querySelector('p.rn-products-name__brand')?.textContent.trim();
+    const price = document.querySelector('#slct-price')?.textContent.match(/¥\s*([\d,]+)/)?.[1].replace(/,/g, '');
+    const facts = wacoalJpProduct({name, brand, price}, pageUrl, canonical);
+    const groups = [...new Set(Array.from(document.querySelectorAll('img[alt]'), n => n.getAttribute('alt'))
+      .filter(alt => /^\d{2}G$/.test(alt)))];
+    const group = brand === 'サルート' && groups.length === 1 ? groups[0] : null;
+    const microdata = {name, sku:facts.sku, productID:facts.product_id, url:canonical, brand,
+      salute_group:group, offers:{price, priceCurrency:'JPY'},
+      field_sources:{brand:'p.rn-products-name__brand', name:'og:title', price:'#slct-price yen amount',
+        priceCurrency:'store.wacoal.jp yen price', salute_group:'PDP img[alt] exact NN G code'}};
+    return {...captureProductEvidence([], microdata), facts, microdata, fact_source:'microdata'};
+  }
+
   function wacoalJpUrl(raw) {
     const u = new URL(raw);
     if (u.origin !== 'https://store.wacoal.jp' || u.username || u.password ||
@@ -981,6 +997,22 @@
     if (!found.size) throw new Error('Wacoal JP: no own-style remote gallery links');
     return [...found.values()];
   }
+
+  function wacoalJpScope(product) {
+    const text = `${String(product?.category || '').trim()} ${String(product?.name || '').trim()}`;
+    if (/メンズ|男性|キッズ|子供|ジュニア|水着|スイム|ビキニ|パジャマ|ルームウェア|ナイトウェア|ストッキング|タイツ|靴下|ソックス|\b(mens?|swim\w*|pajamas?|socks?)\b/i.test(text))
+      return {decision:'exclude', reason:'Wacoal JP non-lingerie evidence'};
+    return {decision:/ブラ|ショーツ|ハーフトップ|ランジェリー|ガーターベルト/.test(text) ? 'include' : 'review', reason:'Wacoal JP product title evidence'};
+  }
+
+  const siteHooks = {'wacoal-jp': {
+    productEvidence: wacoalJpEvidence, gallery: wacoalJpGallery,
+    listingUrl: wacoalJpUrl, next: wacoalJpNext, scope: wacoalJpScope,
+    captureEvidence(evidence, gallery, policy) {
+      if (policy !== 'url') throw new Error('Wacoal JP requires URL identity for its mixed-colour gallery');
+      evidence.microdata.gallery = wacoalJpGallery(gallery, evidence.facts.product_id);
+    }
+  }};
 
   function wacoalJpNext(onclick, pageUrl) {
     if (!onclick) return null;
@@ -1174,7 +1206,8 @@
     return [...new Set(urls)];
   }
 
-  function listingResultTotal(text) {
+  function listingResultTotal(text, pattern = null) {
+    if (pattern) text = String(text).match(new RegExp(pattern))?.[1] || '';
     const japanese = String(text).match(/^\s*(\d+|\d{1,3}(?:,\d{3})+)\s*件\s*$/);
     if (japanese) {
       const total = Number(japanese[1].replace(/,/g, ''));
@@ -1208,7 +1241,7 @@
   }
 
   const helpers = {
-    wacoalJpUrl, wacoalJpProduct, wacoalJpGallery, wacoalJpNext,
+    siteHooks, wacoalJpUrl, wacoalJpProduct, wacoalJpGallery, wacoalJpNext,
     productEvidenceError, shirohatoProduct, shirohatoGallery, shirohatoListingUrl,
     liseCharmelGallery,
     liseCharmelListingProducts,

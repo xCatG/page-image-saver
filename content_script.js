@@ -1065,7 +1065,7 @@ document.body.appendChild(container);
       document.getElementById('capture-color-policy').value =
         config.captureColorPolicy || (config.colorVariantStrategy === 'separate-url' ? 'url' : 'color');
     }
-    document.getElementById('capture-color').value = capturePageProduct().color || '';
+    document.getElementById('capture-color').value = capturePageProduct(config).color || '';
   });
   chrome.storage.local.get({captureAutoDomains: {}}, result => {
     document.getElementById('capture-auto-site').checked = !!result.captureAutoDomains[currentDomain];
@@ -2518,26 +2518,10 @@ function captureBareNecessitiesProduct() {
     window.location.href, document.querySelector('link[rel="canonical"]')?.href, pageEvidence.currencyCode, pageEvidence.defaultVariant);
 }
 
-function captureWacoalJpProduct() {
-  const helpers = globalThis.PageImageSaverHelpers;
-  const canonical = document.querySelector('link[rel="canonical"]')?.href;
-  const name = document.querySelector('meta[property="og:title"]')?.content;
-  const brand = document.querySelector('p.rn-products-name__brand')?.textContent.trim();
-  const price = document.querySelector('#slct-price')?.textContent.match(/¥\s*([\d,]+)/)?.[1].replace(/,/g, '');
-  const facts = helpers.wacoalJpProduct({name, brand, price}, window.location.href, canonical);
-  const groups = [...new Set(Array.from(document.querySelectorAll('img[alt]'), n => n.getAttribute('alt'))
-    .filter(alt => /^\d{2}G$/.test(alt)))];
-  const group = brand === 'サルート' && groups.length === 1 ? groups[0] : null;
-  const microdata = {name, sku:facts.sku, productID:facts.product_id, url:canonical, brand,
-    salute_group:group, offers:{price, priceCurrency:'JPY'},
-    field_sources:{brand:'p.rn-products-name__brand', name:'og:title', price:'#slct-price yen amount',
-      priceCurrency:'store.wacoal.jp yen price', salute_group:'PDP img[alt] exact NN G code'}};
-  return {...helpers.captureProductEvidence([], microdata), facts, microdata, fact_source:'microdata'};
-}
-
-function capturePageProductEvidence() {
-  if (window.location.hostname === 'store.wacoal.jp' && /^\/disp\/01_[A-Z0-9]{6}\.html$/.test(window.location.pathname))
-    return captureWacoalJpProduct();
+function capturePageProductEvidence(config = null) {
+  const hook = globalThis.PageImageSaverHelpers.siteHooks?.[config?.product?.renditionResolver];
+  if (hook && new RegExp(config.product.pathPattern).test(window.location.pathname))
+    return hook.productEvidence(document, window.location.href);
 
   if (window.location.hostname === 'www.bravissimo.com' && window.location.pathname.startsWith('/us/products/')) {
     const result = captureBravissimoProduct();
@@ -2634,11 +2618,11 @@ function capturePageProductEvidence() {
     Object.keys(meta).length ? meta : null);
 }
 
-function capturePageProduct() {
-  return capturePageProductEvidence().facts;
+function capturePageProduct(config = null) {
+  return capturePageProductEvidence(config).facts;
 }
 
-function captureProductSeen(config, product = capturePageProduct()) {
+function captureProductSeen(config, product = capturePageProduct(config)) {
   if (config?.product?.renditionResolver === 'vandevelde-nextdata')
     return window.location.pathname.startsWith('/en-us/p/') && !!product.product_id;
   if (config?.product?.pageSelector) return !!document.querySelector(config.product.pageSelector);
@@ -2656,16 +2640,17 @@ function captureGallery(config, mode) {
     return globalThis.PageImageSaverHelpers.bareNecessitiesGallery(captureBareNecessitiesProduct().images, rendered);
   }
 
-  if (mode === 'site' && config?.product?.renditionResolver === 'wacoal-jp')
-    return globalThis.PageImageSaverHelpers.wacoalJpGallery(
+  const hook = globalThis.PageImageSaverHelpers.siteHooks?.[config?.product?.renditionResolver];
+  if (mode === 'site' && hook)
+    return hook.gallery(
       [...Array.from(document.querySelectorAll(config.product.allImagesSelector), node => node.getAttribute('href')),
         document.querySelector('meta[property="og:image"]')?.content],
-      capturePageProduct().product_id).map(image => image.url);
+      capturePageProduct(config).product_id).map(image => image.url);
 
   if (mode === 'site' && config?.product?.renditionResolver === 'shirohato') {
     return globalThis.PageImageSaverHelpers.shirohatoGallery(
       Array.from(document.querySelectorAll(config.product.allImagesSelector), node => node.getAttribute('src')),
-      capturePageProduct().product_id);
+      capturePageProduct(config).product_id);
   }
   if (mode === 'site' && config?.product?.renditionResolver === 'vandevelde-nextdata') {
     const scripts = document.querySelectorAll('script#__NEXT_DATA__');
@@ -2719,8 +2704,8 @@ function captureSwatchColor() {
   return swatch?.getAttribute('data-color') || null;
 }
 
-function captureSelectedColor(product) {
-  if (window.location.hostname === 'store.wacoal.jp') return null;
+function captureSelectedColor(product, config = null) {
+  if (config?.product?.selectedColor === false) return null;
   return product.color || captureSwatchColor() || document.getElementById('capture-color')?.value.trim() || null;
 }
 
@@ -2795,23 +2780,21 @@ async function captureCurrentProduct({manual, scopeOverride = null, binding = nu
   const policy = manual ? document.getElementById('capture-color-policy').value :
     config?.captureColorPolicy || (config?.colorVariantStrategy === 'separate-url' ? 'url' : 'color');
   const readState = () => {
-    const product = capturePageProduct();
+    const product = capturePageProduct(config);
     const gallery = selectedGallery || captureGallery(config, mode);
     const swatchColor = captureSwatchColor();
-    return {color: policy === 'url' ? captureCanonicalUrl() : captureSelectedColor(product), gallery,
+    return {color: policy === 'url' ? captureCanonicalUrl() : captureSelectedColor(product, config), gallery,
       colorConflict: !!(product.color && swatchColor && product.color !== swatchColor)};
   };
   const url = binding?.expectedUrl || captureCanonicalUrl();
   const previous = previousCaptureStates.get(url);
   const state = await globalThis.PageImageSaverHelpers.waitForCaptureState(readState, previous,
     {timeoutMs: 8000, pollMs: 200, allowSameColorGalleryChange: manual && allowSameColorGalleryChange});
-  const evidence = capturePageProductEvidence();
+  const evidence = capturePageProductEvidence(config);
   const product = evidence.facts;
-  if (config?.domain === 'store.wacoal.jp') {
-    if (policy !== 'url') throw new Error('Wacoal JP requires URL identity for its mixed-colour gallery');
-    evidence.microdata.gallery = globalThis.PageImageSaverHelpers.wacoalJpGallery(state.gallery, product.product_id);
-  }
-  const color = policy === 'url' ? captureSelectedColor(product) : state.color;
+  globalThis.PageImageSaverHelpers.siteHooks?.[config?.product?.renditionResolver]?.captureEvidence(
+    evidence, state.gallery, policy);
+  const color = policy === 'url' ? captureSelectedColor(product, config) : state.color;
   const identity = globalThis.PageImageSaverHelpers.captureIdentity(url, policy, color);
   const decision = scopeOverride?.decision || (manual ? document.getElementById('capture-scope').value : 'review');
   const customReason = manual ? document.getElementById('capture-scope-reason').value.trim() : '';
@@ -2946,13 +2929,13 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null, chal
   if (challengeOnly) return {url: window.location.href};
   const goneReason = expect === 'product' ? takeoverUnavailableChoice(window.location.href) : null;
   if (goneReason) return {kind: 'product', url: window.location.href, documentId: takeoverDocumentId, goneReason};
-  let product = capturePageProduct();
+  let product = capturePageProduct(config);
   let productSeen = captureProductSeen(config, product);
   // A product URL from a fixed queue may still be hydrating at tab "complete"; give it time
   // before reading the page as a listing (which the runner treats as a structure mismatch).
   for (const deadline = Date.now() + 8000; expect === 'product' && !productSeen && Date.now() < deadline;) {
     await new Promise(resolve => setTimeout(resolve, 250));
-    product = capturePageProduct();
+    product = capturePageProduct(config);
     productSeen = captureProductSeen(config, product);
   }
   if (productSeen) {
@@ -3021,12 +3004,12 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null, chal
       return {...card, url: url.href};
     });
   }
-  if (config.domain === 'store.wacoal.jp')
-    listingCards = listingCards.map(card => ({...card, url:globalThis.PageImageSaverHelpers.wacoalJpUrl(card.url)}));
+  const normalizeUrl = globalThis.PageImageSaverHelpers.siteHooks?.[config.listing?.urlNormalizer]?.listingUrl;
+  if (normalizeUrl) listingCards = listingCards.map(card => ({...card, url:normalizeUrl(card.url)}));
   let products = listingCards.map(card => card.url);
   let next = document.querySelector(nextSelector)?.href || null;
-  if (config.domain === 'store.wacoal.jp')
-    next = globalThis.PageImageSaverHelpers.wacoalJpNext(document.querySelector(nextSelector)?.getAttribute('onclick'), window.location.href);
+  const resolveNext = globalThis.PageImageSaverHelpers.siteHooks?.[config.listing?.nextResolver]?.next;
+  if (resolveNext) next = resolveNext(document.querySelector(nextSelector)?.getAttribute('onclick'), window.location.href);
   if (config.domain === 'www.barenecessities.com') {
     const current = Number(document.querySelector('.br-collection .br-pagination__item--current')?.textContent.trim());
     const page = Number(new URL(window.location.href).searchParams.get('page') || 1);
@@ -3063,8 +3046,7 @@ async function inspectTakeoverPage(config, mode = 'capture', expect = null, chal
     if (match) end = {type: 'page-count', current: Number(match[1]), total: Number(match[2])};
   }
   if (check?.type === 'result-total') {
-    const text = config.domain === 'store.wacoal.jp' ? (node?.textContent.match(/対象商品数\s*([\d,]+)\s*件/)?.[1] || '') + '件' : node?.textContent || '';
-    const total = globalThis.PageImageSaverHelpers.listingResultTotal(text);
+    const total = globalThis.PageImageSaverHelpers.listingResultTotal(node?.textContent || '', check.countPattern);
     if (total !== null) end = {type: 'result-total', total};
   }
   if (check?.type === 'result-total' && check.source === 'bravissimo') {
@@ -3095,7 +3077,7 @@ setTimeout(async () => {
     try {
       if (!(await takeoverRequest('autoCaptureAllowed')).allowed) return;
       const ready = await globalThis.PageImageSaverHelpers.waitForAutoCaptureReady(() => {
-        const product = capturePageProduct();
+        const product = capturePageProduct(config);
         let gallery = [], galleryError = null;
         try { gallery = captureGallery(config, 'site'); } catch (error) {
           if (config.product?.renditionResolver === 'shirohato') galleryError = error.message;
